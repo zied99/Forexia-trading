@@ -84,6 +84,7 @@
       exposurePct: Number($('exposure').value), spreadPips: Number($('spread').value) || 0,
       period: periodValue(), dateFrom: $('dateFrom').value, dateTo: $('dateTo').value, source: sourceValue(),
       estimateWicks: $('estimateWicks').checked,
+      withdraw: { on: $('withdrawOn').checked, pct: $('withdrawPct').value, share: $('withdrawShare').value },
       broker: { symbol: $('brokerSymbol').value, tf: $('brokerTf').value, sizing: $('brokerSizing').value, lots: $('brokerLots').value,
         risk: $('brokerRisk').value, maxLots: $('brokerMaxLots').value, maxSpread: $('brokerMaxSpread').value, intrabar: $('brokerIntrabar').checked },
     };
@@ -102,6 +103,10 @@
     const src = c.source !== 'csv' && document.querySelector('input[name=source][value="' + c.source + '"]');
     if (src) { src.checked = true; $('csvField').hidden = true; }
     if (c.estimateWicks !== undefined) $('estimateWicks').checked = c.estimateWicks;
+    if (c.withdraw) {
+      $('withdrawOn').checked = !!c.withdraw.on; $('withdrawPct').value = c.withdraw.pct; $('withdrawShare').value = c.withdraw.share;
+      updateWithdrawUI();
+    }
     if (c.broker) {
       const b = c.broker;
       $('brokerSymbol').value = b.symbol; $('brokerTf').value = b.tf; $('brokerSizing').value = b.sizing; $('brokerLots').value = b.lots;
@@ -111,6 +116,15 @@
     }
     updateWicksField();
   }
+  function updateWithdrawUI() {
+    const on = $('withdrawOn').checked;
+    $('withdrawFields').hidden = $('withdrawHint').hidden = !on;
+    const cap = Number($('capital').value) || 0, pct = Number($('withdrawPct').value) || 0, share = Number($('withdrawShare').value) || 100;
+    $('withdrawHint').textContent = on ? 'Exemple : avec ' + money.format(cap) + ', dès que le compte atteint ' + money.format(cap * (1 + pct / 100)) + ', ' +
+      (share >= 100 ? 'tout le gain est retiré et le compte revient à ' + money.format(cap) : share + ' % du gain est retiré') + ' (à la clôture d\'un trade).' : '';
+  }
+  ['withdrawOn', 'withdrawPct', 'withdrawShare', 'capital'].forEach((id) => { $(id).addEventListener('input', updateWithdrawUI); $(id).addEventListener('change', updateWithdrawUI); });
+  updateWithdrawUI();
   function describeConfig(c) {
     if (!c) return '';
     const per = c.period === 'custom' ? 'du ' + frDate(c.dateFrom) + ' au ' + frDate(c.dateTo) : PERIOD_LABEL[c.period];
@@ -537,6 +551,10 @@
           ' au ' + frDate(all[all.length - 1].date.slice(0, 10)) + '.');
       }
       const settings = { capital, leverage, exposurePct: exposure, spreadPips: spread, pair, startIndex };
+      if ($('withdrawOn').checked) {
+        settings.withdrawPct = Number($('withdrawPct').value) || 0;
+        settings.withdrawShare = Number($('withdrawShare').value) || 100;
+      }
       if (loaded.broker) {
         Object.assign(settings, {
           broker: loaded.broker, symbol: loaded.symbol, sizing: $('brokerSizing').value, fixedLots: Number($('brokerLots').value) || 0.01,
@@ -605,7 +623,10 @@
 
     const kpi = (label, value, sub, c) => '<div class="panel kpi"><div class="label">' + label + '</div><div class="value ' + (c || '') + '">' + value + '</div><div class="sub">' + (sub || '&nbsp;') + '</div></div>';
     html += '<div class="kpis">' +
-      kpi('Capital final', money.format(s.finalEquity), 'départ ' + money.format(s.initialCapital)) +
+      (s.withdrawals
+        ? kpi('Capital + retraits', money.format(s.finalEquity), 'compte ' + money.format(s.finalAccount) + ' · retiré ' + money.format(s.totalWithdrawn)) +
+          kpi('Retraits fictifs', String(s.withdrawals), 'total ' + money.format(s.totalWithdrawn), 'pos')
+        : kpi('Capital final', money.format(s.finalEquity), 'départ ' + money.format(s.initialCapital))) +
       kpi('Profit net', signed(s.netProfit, money), signed(s.returnPct, num2) + ' %', cls(s.netProfit)) +
       kpi('Trades', String(s.trades), num1.format(s.winRate) + ' % gagnants') +
       kpi('Profit factor', Number.isFinite(s.profitFactor) ? num2.format(s.profitFactor) : '∞', 'gains / pertes', s.profitFactor >= 1 ? 'pos' : s.trades ? 'neg' : '') +
@@ -614,9 +635,11 @@
       '</div>';
 
     // Capital moyen sur la période : moyenne de la courbe, et le gain moyen qu'elle représente.
-    const avg = averageGain(result.equity, settings.capital);
+    const hasW = result.withdrawals && result.withdrawals.length;
+    const avg = averageGain(result.wealth || result.equity, settings.capital);
     html += '<div class="panel card"><div class="card-head"><h3>Évolution du capital</h3>' +
-      '<div class="legend"><span><i style="background:var(--s1)"></i>Capital</span><span><i style="background:var(--s2)"></i>Moyenne : ' +
+      '<div class="legend"><span><i style="background:var(--s1)"></i>' + (hasW ? 'Compte de trading' : 'Capital') + '</span>' +
+      (hasW ? '<span><i style="background:var(--up)"></i>Compte + retraits</span><span><i class="dot" style="background:var(--up)"></i>Retrait</span>' : '') + '<span><i style="background:var(--s2)"></i>Moyenne : ' +
       money.format(avg.mean) + ' (<span class="' + cls(avg.pct) + '">' + signed(avg.pct, num1) + ' %</span>)</span>' +
       '<span><i style="background:var(--muted)"></i>Capital initial</span></div></div><div id="equityChart"></div></div>';
 
@@ -637,6 +660,7 @@
       row('Meilleur trade', signed(s.bestTrade, money), cls(s.bestTrade)) +
       row('Pire trade', signed(s.worstTrade, money), cls(s.worstTrade)) +
       row('Frais de spread payés', money.format(s.totalCosts)) +
+      (settings.withdrawPct ? row('Retraits fictifs (seuil +' + settings.withdrawPct + ' %)', s.withdrawals + ' · ' + money.format(s.totalWithdrawn), s.totalWithdrawn > 0 ? 'pos' : '') : '') +
       '</dl></div></div>';
 
     html += '<div class="panel card"><div class="card-head"><h3>Historique des trades (' + result.trades.length + ')</h3>' +
@@ -659,7 +683,10 @@
       labels: dates, formatLabel: shortDate, ariaLabel: 'Évolution du capital',
       panels: [{
         height: 220, format: (v, full) => (full ? money.format(v) : compact(v)),
-        series: [{ name: 'Capital', values: result.equity, color: 'var(--s1)', width: 2, fill: true }],
+        series: [{ name: hasW ? 'Compte' : 'Capital', values: result.equity, color: 'var(--s1)', width: 2, fill: true }]
+          .concat(hasW ? [{ name: 'Compte + retraits', values: result.wealth, color: 'var(--up)', width: 1.8, dash: '5 3' }] : []),
+        markers: (result.withdrawals || []).map((w) => ({ i: w.index - result.startIndex, value: w.accountAfter, shape: 'dot', color: 'var(--up)',
+          title: 'Retrait du ' + frDate(w.date) + ' : ' + money.format(w.amount) + ' (total ' + money.format(w.total) + ')' })),
         refLines: [{ value: settings.capital, color: 'var(--muted)' },
           { value: avg.mean, color: 'var(--s2)', strong: true, label: 'Moyenne ' + signed(avg.pct, num1) + ' %' }],
       }],
@@ -1417,12 +1444,12 @@
   }
   function recordEvaluation(c) {
     const s = c.result.stats, st = c.result.startIndex;
-    const avg = averageGain(c.result.equity, c.settings.capital);
+    const avg = averageGain(c.result.wealth || c.result.equity, c.settings.capital);
     const entry = {
       at: new Date().toISOString(), name: c.strat.name, pair: c.settings.pair, style: c.strat.style || 'none',
       from: c.bars[st].date.slice(0, 10), to: c.bars[c.bars.length - 1].date.slice(0, 10), period: PERIOD_LABEL[c.periodKey],
       data: dataLabel(c.loaded, c.settings), leverage: c.settings.leverage, capital: c.settings.capital,
-      returnPct: s.returnPct, avgGainPct: avg.pct, trades: s.trades, winRate: s.winRate, maxDrawdownPct: s.maxDrawdownPct,
+      returnPct: s.returnPct, avgGainPct: avg.pct, withdrawn: s.totalWithdrawn || 0, trades: s.trades, winRate: s.winRate, maxDrawdownPct: s.maxDrawdownPct,
       profitFactor: Number.isFinite(s.profitFactor) ? s.profitFactor : null,
       rules: [c.strat.longEntry, c.strat.longExit, c.strat.shortEntry, c.strat.shortExit, c.strat.stopLossPips, c.strat.takeProfitPips].join('|'),
       strategy: c.strat, config: c.config,
@@ -1478,17 +1505,17 @@
       '<td class="name" title="' + esc(e.name) + '">' + esc(e.name) + '</td><td class="l">' + esc(e.pair) + '</td>' +
       '<td class="l">' + frDate(e.from) + ' → ' + frDate(e.to) + '</td><td class="l">' + esc(e.data) + '</td>' +
       '<td>1:' + e.leverage + '</td><td>' + money.format(e.capital) + '</td>' +
-      '<td>' + p(e.returnPct) + '</td><td class="avg-col">' + p(e.avgGainPct) + '</td>' +
+      '<td>' + p(e.returnPct) + '</td><td class="avg-col">' + p(e.avgGainPct) + '</td><td>' + (e.withdrawn ? money.format(e.withdrawn) : '—') + '</td>' +
       '<td>' + e.trades + '</td><td>' + num1.format(e.winRate) + ' %</td><td>−' + num1.format(e.maxDrawdownPct) + ' %</td>' +
       '<td>' + (e.strategy ? '<button type="button" class="reload" data-reload="' + i + '" title="Remettre cette stratégie et ses réglages dans le formulaire">Recharger</button>' : '') + '</td>' +
       '<td><button type="button" class="del" data-del="' + i + '" title="Retirer cette ligne" aria-label="Retirer la simulation ' + (i + 1) + '">✕</button></td></tr>').join('');
     const filtered = shown.length < all.length;
     const foot = '<tr><td colspan="8" class="l">Moyenne sur ' + list.length + ' simulation' + (list.length > 1 ? 's' : '') + (filtered ? ' (filtrées)' : '') + '</td>' +
-      '<td>' + p(mean(list.map((e) => e.returnPct))) + '</td><td class="avg-col" title="Moyenne des gains moyens">' + p(mean(list.map((e) => e.avgGainPct))) + '</td>' +
+      '<td>' + p(mean(list.map((e) => e.returnPct))) + '</td><td class="avg-col" title="Moyenne des gains moyens">' + p(mean(list.map((e) => e.avgGainPct))) + '</td><td>' + money.format(mean(list.map((e) => e.withdrawn || 0))) + '</td>' +
       '<td>' + num1.format(mean(list.map((e) => e.trades))) + '</td><td>' + num1.format(mean(list.map((e) => e.winRate))) + ' %</td>' +
       '<td>−' + num1.format(mean(list.map((e) => e.maxDrawdownPct))) + ' %</td><td></td><td></td></tr>';
     $('evalBody').innerHTML = (filtered ? '<p class="eval-count">' + shown.length + ' simulation(s) affichée(s) sur ' + all.length + '</p>' : '') + '<div class="table-wrap"><table class="eval"><thead><tr><th>#</th><th class="l">Date</th><th class="l">Stratégie</th><th class="l">Paire</th>' +
-      '<th class="l">Période testée</th><th class="l">Données</th><th>Levier</th><th>Capital</th><th>Résultat</th><th class="avg-col">Gain moyen</th>' +
+      '<th class="l">Période testée</th><th class="l">Données</th><th>Levier</th><th>Capital</th><th>Résultat</th><th class="avg-col">Gain moyen</th><th>Retiré</th>' +
       '<th>Trades</th><th>Gagnants</th><th>Drawdown</th><th></th><th></th></tr></thead><tbody>' + rows + '</tbody><tfoot>' + foot + '</tfoot></table></div>';
   }
   function openEvaluation() {
@@ -1534,11 +1561,11 @@
   });
   $('evalExport').addEventListener('click', () => {
     const list = evalFiltered(evalList()).map((x) => x.e); // export des lignes affichées (filtres appliqués)
-    const head = 'numero;date;strategie;paire;debut;fin;donnees;levier;capital;resultat_pct;gain_moyen_pct;trades;gagnants_pct;drawdown_pct';
+    const head = 'numero;date;strategie;paire;debut;fin;donnees;levier;capital;resultat_pct;gain_moyen_pct;retire;trades;gagnants_pct;drawdown_pct';
     const f2 = (v) => String(Math.round(v * 100) / 100).replace('.', ',');
     const rows = list.map((e, i) => [i + 1, e.at.slice(0, 16).replace('T', ' '), '"' + e.name.replace(/"/g, '""') + '"', e.pair, e.from, e.to, e.data, e.leverage,
-      f2(e.capital), f2(e.returnPct), f2(e.avgGainPct), e.trades, f2(e.winRate), f2(e.maxDrawdownPct)].join(';'));
-    rows.push(['moyenne', '', '', '', '', '', '', '', '', f2(mean(list.map((e) => e.returnPct))), f2(mean(list.map((e) => e.avgGainPct))),
+      f2(e.capital), f2(e.returnPct), f2(e.avgGainPct), f2(e.withdrawn || 0), e.trades, f2(e.winRate), f2(e.maxDrawdownPct)].join(';'));
+    rows.push(['moyenne', '', '', '', '', '', '', '', '', f2(mean(list.map((e) => e.returnPct))), f2(mean(list.map((e) => e.avgGainPct))), f2(mean(list.map((e) => e.withdrawn || 0))),
       f2(mean(list.map((e) => e.trades))), f2(mean(list.map((e) => e.winRate))), f2(mean(list.map((e) => e.maxDrawdownPct)))].join(';'));
     const blob = new Blob(['\ufeff' + [head].concat(rows).join('\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');

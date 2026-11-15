@@ -70,6 +70,11 @@ journal de toutes les actions (enregistrements, imports, améliorations, straté
 compilations, tests MT5 et comparaisons Forexia / MT5). Le navigateur garde une copie ; à chaque connexion, les deux
 sont fusionnés. La fenêtre affiche le journal (filtrable) et permet d'exporter toute la base en JSON.
 
+**Retrait fictif des gains** (section Marché et capital) : quand le compte atteint « capital × (1 + seuil %) », une part
+du gain (100 % par défaut) est retirée à la clôture d'un trade et mise à l'abri ; le compte repart plus petit, les positions
+suivantes aussi. Résultat, drawdown et gain moyen portent sur « compte + retraits » ; le graphique montre les deux courbes
+et chaque retrait. Disponible dans les deux moteurs (standard et courtier MT5).
+
 **Évaluation** (bouton en haut de page) : tableau de toutes les simulations lancées (stratégie, paire, période,
 données, levier, capital, résultat, gain moyen, trades, % gagnants, drawdown), **filtrable** par stratégie, recherche,
 paire, source de données et résultat, avec une ligne de moyenne calculée sur les lignes affichées

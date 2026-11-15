@@ -123,6 +123,31 @@ test('Stratégie sur données simulées : statistiques cohérentes', () => {
   }
 });
 
+test('Retrait fictif : gain retiré au seuil, compte remis au capital, total conservé', () => {
+  // +10 % par trade : 10 000 -> 11 000 -> 12 100 (≥ +20 % ? non : 21 %, oui) …
+  const closes = [1, 1, 1, 1.01, 1.01, 1.0201, 1.0201, 1.030301, 1.030301];
+  const bars = series(closes);
+  const strat = { longEntry: 'CLOSE == PREV(CLOSE, 1)', longExit: 'CLOSE > PREV(CLOSE, 1)' };
+  const set = Object.assign({}, base, { withdrawPct: 20, withdrawShare: 100 });
+  const r = B.runBacktest(bars, strat, set), plain = B.runBacktest(bars, strat, base);
+  eq(r.withdrawals.length, 1); near(r.withdrawals[0].amount, 2100, 1e-6); near(r.withdrawals[0].accountAfter, 10000, 1e-6);
+  near(r.stats.totalWithdrawn, 2100, 1e-6);
+  // après le retrait, le trade suivant est plus petit : +1 000 au lieu de +1 210
+  near(r.stats.finalAccount, 11000, 1e-6); near(r.stats.finalEquity, 13100, 1e-6);
+  near(plain.stats.finalEquity, 13310, 1e-6);
+  near(r.stats.finalEquity, base.capital + r.trades.reduce((a, t) => a + t.pnl, 0), 1e-6);
+  const half = B.runBacktest(bars, strat, Object.assign({}, set, { withdrawShare: 50 }));
+  near(half.withdrawals[0].amount, 1050, 1e-6);
+});
+test('Retrait fictif : aussi dans le moteur courtier', () => {
+  const bars = [1, 1, 1, 1.01, 1.01, 1.0201, 1.0201].map((c, i, a) => ({ date: '2024-01-0' + (i + 1), t: 1704067200 + i * 86400, open: i ? a[i - 1] : c, high: Math.max(c, i ? a[i - 1] : c), low: Math.min(c, i ? a[i - 1] : c), close: c, spread: 0 }));
+  const spec = { digits: 5, point: 0.00001, contract: 100000, volumeMin: 1e-9, volumeStep: 1e-9, volumeMax: 1e9, swapMode: 0 };
+  const r = BK.runBrokerBacktest(bars, { longEntry: 'CLOSE == PREV(CLOSE, 1)', longExit: 'CLOSE > PREV(CLOSE, 1)' },
+    { capital: 10000, leverage: 10, exposurePct: 100, sizing: 'backtest', maxLots: 1e9, maxSpreadPips: 0, startIndex: 1, withdrawPct: 15 }, { spec });
+  // limite de 90 % de la marge (comme l'EA) : +9 % par trade -> 10 000 -> 10 900 -> 11 881 ≥ 11 500 -> 1 881 retirés
+  eq(r.withdrawals.length, 1); near(r.stats.totalWithdrawn, 1881, 1e-3); near(r.stats.finalAccount, 10000, 1e-3);
+});
+
 console.log('Données');
 test('CSV MT4 avec en-tête', () => {
   const rows = ['<DATE>,<TIME>,<OPEN>,<HIGH>,<LOW>,<CLOSE>'];

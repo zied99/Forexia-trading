@@ -79,6 +79,7 @@
       });
       pos = null;
       if (cash <= 0) { cash = 0; ruined = true; }
+      wd.check(i, cash, (amount) => { cash -= amount; });
     }
 
     // Prix auquel les fonds propres atteignent le seuil de clôture forcée.
@@ -89,6 +90,7 @@
       return pos.entryPrice * (1 + (target - equityAtEntry) / (pos.notional * pos.dir));
     }
 
+    const wd = makeWithdrawals(settings, bars);
     let barsInMarket = 0;
     for (let i = start; i < n; i++) {
       const bar = bars[i];
@@ -131,11 +133,49 @@
       }
       equity.push(pos ? cash + pnlAt(bar.close) : cash);
       dates.push(bar.date);
+      wd.mark();
     }
 
+    return wd.finish({ trades: trades, equity: equity, dates: dates, startIndex: start, ruined: ruined }, barsInMarket);
+  }
+
+  /**
+   * Retraits fictifs : quand le compte atteint capital × (1 + seuil %), une part du gain est retirée
+   * (à la clôture d'un trade, sans position ouverte) et mise à l'abri ; le compte repart plus petit.
+   * Les statistiques portent alors sur « compte + retraits ».
+   */
+  function makeWithdrawals(settings, bars) {
+    const threshold = settings.withdrawPct > 0 ? settings.withdrawPct / 100 : 0;
+    const share = Math.min(100, Math.max(1, settings.withdrawShare == null ? 100 : settings.withdrawShare)) / 100;
+    const base = settings.capital;
+    let total = 0;
+    const list = [], wealth = [];
     return {
-      trades: trades, equity: equity, dates: dates, startIndex: start, ruined: ruined,
-      stats: computeStats(settings.capital, equity, trades, bars, start, barsInMarket),
+      check(i, account, take) {
+        if (!threshold || account < base * (1 + threshold)) return;
+        const amount = (account - base) * share;
+        if (amount <= 0) return;
+        take(amount);
+        total += amount;
+        list.push({ index: i, date: bars[i].date, amount: amount, accountAfter: account - amount, total: total });
+      },
+      mark() { wealth.push(NaN); }, // complété dans finish()
+      finish(res, barsInMarket) {
+        // compte + retraits cumulés, bougie par bougie
+        let k = 0, cum = 0;
+        for (let j = 0; j < res.equity.length; j++) {
+          const barIndex = res.startIndex + j;
+          while (k < list.length && list[k].index <= barIndex) cum = list[k++].total;
+          wealth[j] = res.equity[j] + cum;
+        }
+        res.wealth = wealth;
+        res.withdrawals = list;
+        res.stats = computeStats(base, wealth, res.trades, bars, res.startIndex, barsInMarket);
+        res.stats.finalAccount = res.equity[res.equity.length - 1];
+        res.stats.totalWithdrawn = total;
+        res.stats.withdrawals = list.length;
+        return res;
+      },
     };
   }
 
@@ -181,5 +221,5 @@
     };
   }
 
-  root.Forexia.backtest = { runBacktest, compileStrategy, pipSizeFor, computeStats };
+  root.Forexia.backtest = { runBacktest, compileStrategy, pipSizeFor, computeStats, makeWithdrawals };
 })(typeof window !== 'undefined' ? window : globalThis);

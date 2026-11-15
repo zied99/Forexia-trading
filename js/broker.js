@@ -66,6 +66,7 @@
 
     let balance = s.capital, pos = null, pending = null, ruined = false, barsInMarket = 0, subIdx = 0;
     const trades = [], equity = [], dates = [];
+    const wd = F.backtest.makeWithdrawals(s, bars);
 
     const sp = (b) => (b.spread || 0) * point;
     const conv = (t) => convFactor(broker.conv, t);
@@ -110,6 +111,7 @@
       });
       pos = null;
       if (balance <= 0) { balance = 0; ruined = true; }
+      wd.check(i, balance, (amount) => { balance -= amount; });
     }
     function chargeSwap(t) {
       if (!pos || t <= pos.lastT) return;
@@ -189,10 +191,11 @@
       }
       equity.push(pos ? balance + pnlAt(pos.dir > 0 ? bar.close : bar.close + sp(last), bar.t) : balance);
       dates.push(bar.date);
+      wd.mark();
     }
-    const stats = F.backtest.computeStats(s.capital, equity, trades, bars, start, barsInMarket);
-    stats.totalSwap = trades.reduce((a, t) => a + t.swap, 0);
-    return { trades: trades, equity: equity, dates: dates, startIndex: start, ruined: ruined, stats: stats, notes: [...notes], diag: diag };
+    const res = wd.finish({ trades: trades, equity: equity, dates: dates, startIndex: start, ruined: ruined, notes: [...notes], diag: diag }, barsInMarket);
+    res.stats.totalSwap = trades.reduce((a, t) => a + t.swap, 0);
+    return res;
   }
 
   F.broker = { runBrokerBacktest, convFactor, swapNights, pipOf };
