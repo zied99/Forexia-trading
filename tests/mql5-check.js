@@ -121,6 +121,7 @@ static long HistoryDealGetInteger(ulong t, int p) { if (p == DEAL_ENTRY) return 
 static double HistoryDealGetDouble(ulong, int p) { return p == DEAL_PRICE ? 1.27123 : -12.5; }
 static string TimeToString(datetime, int) { return "2025.01.02 00:00"; }
 static void PrintFormat(const char *, ...) {} static int GetLastError() { return 0; }
+static int g_cntSignals = 12, g_cntSpreadDelayed = 9, g_cntSpreadMissed = 3, g_cntLots = 0, g_cntFailed = 0;
 `;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fxrep-'));
   fs.writeFileSync(path.join(dir, 'r.cpp'), shim + body + '\nint main() { OnTester(); puts(OUT.c_str()); return 0; }\n');
@@ -129,7 +130,7 @@ static void PrintFormat(const char *, ...) {} static int GetLastError() { return
   const out = execFileSync(path.join(dir, 'r')).toString();
   fs.rmSync(dir, { recursive: true, force: true });
   const j = JSON.parse(out);
-  if (j.trades !== 25 || j.deals.length !== 4 || j.deals[1].entry !== 1 || j.deals[0].reason !== 4 || j.symbol !== 'GBPUSD') throw new Error('contenu inattendu : ' + out);
+  if (j.trades !== 25 || j.deals.length !== 4 || j.deals[1].entry !== 1 || j.diag.spreadMissed !== 3 || j.deals[0].reason !== 4 || j.symbol !== 'GBPUSD') throw new Error('contenu inattendu : ' + out);
 }
 
 let failed = 0;

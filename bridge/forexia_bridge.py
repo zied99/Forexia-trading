@@ -27,7 +27,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
-VERSION = "1.0"
+VERSION = "1.1"
 DEFAULT_PORT = 8787
 PAGE_ORIGIN = "https://zied99.github.io"
 FILE_RE = re.compile(r"^Forexia_[A-Za-z0-9_]{1,60}\.mq5$")
@@ -268,7 +268,7 @@ def run_test(args, term, body):
 
 
 # ---------------------------------------------------------------- données du courtier
-SUB_TF = {"D1": "H1", "H4": "M15", "H1": "M5", "M30": "M1", "M15": "M1"}
+SUB_TF = {"D1": "M15", "H4": "M5", "H1": "M5", "M30": "M1", "M15": "M1"}  # assez fin pour voir le pic de spread de minuit
 MAX_SUB_BARS = 250000
 
 

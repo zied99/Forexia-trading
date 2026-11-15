@@ -25,6 +25,7 @@
 
   let lastFocusedRule = $('longEntry');
   const BRIDGE_URL = 'http://127.0.0.1:8787';
+  const BRIDGE_MIN = '1.1'; // version minimale de la passerelle attendue par cette page
   let bridgeToken = '';
   try { bridgeToken = localStorage.getItem('forexia.bridgeToken') || ''; } catch (e) { /* ignoré */ }
   let csvBars = null, csvName = '';
@@ -373,7 +374,10 @@
       const st = await bridgeCall('GET', '/status');
       bridgeTerms = st.terminals || [];
       if (!bridgeTerms.length) throw new Error('MT5 introuvable');
-      $('brokerState').textContent = 'connectée'; $('brokerState').className = 'pill ok';
+      const old = !st.version || st.version < BRIDGE_MIN;
+      $('brokerState').textContent = old ? 'passerelle à mettre à jour (v' + (st.version || '?') + ')' : 'connectée (v' + st.version + ')';
+      $('brokerState').className = 'pill ' + (old ? 'ko' : 'ok');
+      if (old) { $('brokerConnectBox').hidden = false; }
     } catch (e) {
       $('brokerState').textContent = e.code === 401 ? 'à connecter' : e.message === 'MT5 introuvable' ? 'MT5 introuvable' : 'passerelle non détectée';
       $('brokerState').className = 'pill ko';
@@ -510,7 +514,7 @@
       for (const nt of result.notes || []) warnings.push({ info: true, html: esc(nt) });
       if (result.ruined) warnings.push('<b>Compte liquidé</b> : le capital a été entièrement perdu. Réduisez le levier ou l\'exposition.');
       const config = currentConfig();
-      lastRunCtx = { bars, strat, settings, config, timeframe: loaded.timeframe || 'D1', lastTrades: result.trades };
+      lastRunCtx = { bars, strat, settings, config, timeframe: loaded.timeframe || 'D1', lastTrades: result.trades, diag: result.diag };
       lastRun = { key: JSON.stringify([strat.longEntry, strat.longExit, strat.shortEntry, strat.shortExit, strat.stopLossPips, strat.takeProfitPips, config]), stats: result.stats };
       render({ bars, strat, settings, result, loaded, periodKey, warnings, config });
     } catch (err) {
@@ -889,7 +893,8 @@
       const terms = st.terminals || [];
       $('bridgeTerminal').innerHTML = terms.map((t) => '<option value="' + esc(t.id) + '">' + esc(t.name) + ' — ' + esc(t.dataDir) + '</option>').join('');
       if (!terms.length) { bridgeState('MT5 introuvable', 'ko'); $('bridgeSetup').hidden = false; return; }
-      bridgeState('connectée', 'ok');
+      bridgeState(st.version && st.version < BRIDGE_MIN ? 'passerelle à mettre à jour' : 'connectée', st.version && st.version < BRIDGE_MIN ? 'ko' : 'ok');
+      if (st.version && st.version < BRIDGE_MIN) { $('bridgeSetup').hidden = false; }
       $('bridgeReady').hidden = false;
     } catch (e) {
       bridgeState(e.code === 401 ? 'code incorrect' : 'erreur', 'ko');
@@ -913,11 +918,16 @@
     const m5 = count(r.deals || [], (d) => reasons[d.reason] || 'Autre');
     const row = (k, a, b) => '<tr><td>' + k + '</td><td>' + a + '</td><td>' + b + '</td></tr>';
     const exits = ['Signal', 'Stop-loss', 'Take-profit', 'Margin call'].filter((k) => fx[k] || m5[k]).map((k) => row('Sorties « ' + k + ' »', fx[k] || 0, m5[k] || 0)).join('');
+    // Diagnostic : signaux d'ouverture et ordres retardés / perdus (spread, taille), des deux côtés.
+    const fd = lastRunCtx.diag, md = r.diag;
+    const diagRows = md ? [['Signaux d\'ouverture', 'signals'], ['Ordres reportés (spread trop large)', 'spreadDelayed'], ['Ordres perdus (spread toute la bougie)', 'spreadMissed'],
+      ['Ordres annulés (taille trop petite)', 'lotsTooSmall'], ['Ordres refusés par le courtier', 'orderFailed']]
+      .filter(([, k]) => (fd && fd[k]) || md[k] || k === 'signals').map(([label, k]) => row(label, fd ? fd[k] : '—', md[k])).join('') : '';
     return '<div class="table-wrap"><table class="compare"><thead><tr><th></th><th>Forexia</th><th>MetaTrader 5</th></tr></thead><tbody>' +
       row('Profit net', '<span class="' + cls(f.returnPct) + '">' + pct(f.returnPct) + '</span>', '<span class="' + cls(mt.ret) + '">' + pct(mt.ret) + '</span>') +
       row('Trades', f.trades, mt.trades) + row('Trades gagnants', num1.format(f.winRate) + ' %', num1.format(mt.win) + ' %') +
       row('Profit factor', Number.isFinite(f.profitFactor) ? num2.format(f.profitFactor) : '∞', num2.format(mt.pf)) +
-      row('Drawdown max', '−' + num1.format(f.maxDrawdownPct) + ' %', '−' + num1.format(mt.dd) + ' %') + exits +
+      row('Drawdown max', '−' + num1.format(f.maxDrawdownPct) + ' %', '−' + num1.format(mt.dd) + ' %') + exits + diagRows +
       '</tbody></table></div><p class="hint">Résultats MT5 sur les bougies de votre courtier (' + esc(r.symbol) + ', ' + esc(String(r.period).replace('PERIOD_', '')) + ').' +
       (lastRunCtx.settings.broker ? '' : ' <b>Forexia n\'utilisait pas les données du courtier</b> : choisissez la source « Mon courtier (MetaTrader 5) » pour une comparaison à l\'identique.') + '</p>' +
       tradesCompareHtml(r);

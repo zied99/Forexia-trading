@@ -139,6 +139,10 @@ arrondis au pas du courtier, plafonnés et limités à 90 % de la marge libre, o
 le maximum, stops testés bougie fine par bougie fine, swaps (triples le mercredi), conversion en devise du
 compte, stop-out. Les réglages de taille (comme le backtest, lots fixes, % de risque) sont repris par l'EA.
 Après « Déployer dans MetaTrader 5 », un tableau **trade par trade** compare Forexia et le testeur MT5.
+L'EA et Forexia **reportent un ordre** quand le spread dépasse le maximum (pic de la bascule de minuit, annonces)
+et réessaient jusqu'à la fin de la bougie ; le détail intra-bougie est en M15 pour du D1. Le rapport de test MT5
+contient un diagnostic (signaux, ordres reportés ou perdus pour spread, tailles trop petites, refus du courtier)
+affiché à côté de celui de Forexia.
 
 ## Réalisme : se rapprocher de MetaTrader 5
 

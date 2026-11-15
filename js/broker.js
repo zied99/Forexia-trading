@@ -62,6 +62,7 @@
     const { signals: S } = F.backtest.compileStrategy(strategy, bars);
     const sub = broker.sub && broker.sub.length ? broker.sub : null;
     const notes = new Set();
+    const diag = { signals: 0, spreadDelayed: 0, spreadMissed: 0, lotsTooSmall: 0, orderFailed: 0 };
 
     let balance = s.capital, pos = null, pending = null, ruined = false, barsInMarket = 0, subIdx = 0;
     const trades = [], equity = [], dates = [];
@@ -88,10 +89,9 @@
     function pnlAt(price, t) { return (price - pos.entry) * pos.dir * C * pos.lots * conv(t) + pos.swap; }
 
     function open(dir, i, bid, spread, t) {
-      if (s.maxSpreadPips > 0 && spread / pip > s.maxSpreadPips) { notes.add('Ordres annulés : spread supérieur à ' + s.maxSpreadPips + ' pips.'); return; }
       const entry = roundTo(dir > 0 ? bid + spread : bid, spec.digits);
       const lots = lotsFor(entry, t, balance);
-      if (lots <= 0) { notes.add('Ordres annulés : taille inférieure au minimum du courtier (' + vmin + ' lot).'); return; }
+      if (lots <= 0) { diag.lotsTooSmall++; notes.add('Ordres annulés : taille inférieure au minimum du courtier (' + vmin + ' lot).'); return; }
       pos = {
         dir: dir, entry: entry, lots: lots, entryIndex: i, entryT: t, swap: 0, lastT: t,
         sl: slPips ? roundTo(entry - dir * slPips * pip, spec.digits) : null,
@@ -153,16 +153,25 @@
       if (!subs.length) subs.push(bar);
       chargeSwap(bar.t);
       const first = subs[0], spread0 = sp(first);
+      let fromK = 0;
       if (pending && !ruined) {
         if (pending.exit && pos) close(i, pos.dir > 0 ? first.open : roundTo(first.open + spread0, spec.digits), 'Signal', bar.t);
-        if (pending.enter && !pos && !ruined) open(pending.enter, i, first.open, spread0, bar.t);
+        if (pending.enter && !pos && !ruined) {
+          // Comme l'EA : si le spread est trop large, nouvel essai à la bougie fine suivante, jusqu'à la fin de la bougie.
+          diag.signals++;
+          let k = 0;
+          while (k < subs.length && s.maxSpreadPips > 0 && sp(subs[k]) / pip > s.maxSpreadPips) k++;
+          if (k > 0) diag.spreadDelayed++;
+          if (k < subs.length) { open(pending.enter, i, subs[k].open, sp(subs[k]), subs[k].t); fromK = k; }
+          else { diag.spreadMissed++; notes.add('Ordres non exécutés : spread supérieur à ' + s.maxSpreadPips + ' pips pendant toute la bougie.'); }
+        }
         pending = null;
       }
       if (pos) {
         barsInMarket++;
-        for (let k = 0; k < subs.length && pos; k++) {
-          if (k > 0) chargeSwap(subs[k].t);
-          checkStops(i, subs[k], k === 0);
+        for (let k = fromK; k < subs.length && pos; k++) {
+          if (k > fromK) chargeSwap(subs[k].t);
+          checkStops(i, subs[k], k === fromK);
         }
       }
       const last = subs[subs.length - 1];
@@ -183,7 +192,7 @@
     }
     const stats = F.backtest.computeStats(s.capital, equity, trades, bars, start, barsInMarket);
     stats.totalSwap = trades.reduce((a, t) => a + t.swap, 0);
-    return { trades: trades, equity: equity, dates: dates, startIndex: start, ruined: ruined, stats: stats, notes: [...notes] };
+    return { trades: trades, equity: equity, dates: dates, startIndex: start, ruined: ruined, stats: stats, notes: [...notes], diag: diag };
   }
 
   F.broker = { runBrokerBacktest, convFactor, swapNights, pipOf };

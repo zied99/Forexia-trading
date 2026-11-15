@@ -343,6 +343,17 @@ test('Courtier : bougies fines -> ordre stop / objectif selon le déroulé réel
   eq(BK.runBrokerBacktest(D1, strat, set, { spec, sub: H1 }).trades[0].reason, 'Take-profit');
 });
 
+test('Courtier : spread trop large à minuit -> ordre reporté (comme l\'EA), ou non exécuté', () => {
+  const D1 = [0, 1, 2].map((i) => ({ date: '2024-01-0' + (i + 1), t: Date.UTC(2024, 0, 1 + i) / 1000, open: 1.1, high: 1.1, low: 1.1, close: 1.1, spread: 10 }));
+  const sub = (spreads) => spreads.map((x, k) => ({ t: D1[2].t + k * 900, open: 1.1 + k * 0.0001, high: 1.1 + k * 0.0001, low: 1.1 + k * 0.0001, close: 1.1 + k * 0.0001, spread: x }));
+  const spec = Object.assign({}, idealSpec, { volumeMin: 0.01, volumeStep: 0.01 });
+  const set = { capital: 10000, leverage: 100, sizing: 'fixed', fixedLots: 1, maxLots: 5, maxSpreadPips: 5, startIndex: 1 };
+  const a = BK.runBrokerBacktest(D1, { longEntry: 'CLOSE > 0' }, set, { spec, sub: sub([250, 120, 12, 11]) });
+  eq(a.diag.spreadDelayed, 1); near(a.trades[0].entryPrice, 1.1002 + 0.00012, 1e-12); // 3e bougie M15 : prix 1,1002 + spread 1,2 pip
+  const b = BK.runBrokerBacktest(D1, { longEntry: 'CLOSE > 0' }, set, { spec, sub: sub([250, 120, 90, 80]) });
+  eq(b.trades.length, 0); eq(b.diag.spreadMissed, 1);
+});
+
 console.log('Expert Advisor MT5');
 test('EA généré pour chaque modèle : paramètres repris de la stratégie', () => {
   for (const p of P.list) {

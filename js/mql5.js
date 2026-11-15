@@ -444,6 +444,9 @@ void FxCross(const double &a[], const double &b[], const int dir, double &out[])
    js += ",\"maxDrawdownPct\":" + DoubleToString(TesterStatistics(STAT_EQUITY_DDREL_PERCENT), 2);
    js += ",\"sharpe\":" + DoubleToString(TesterStatistics(STAT_SHARPE_RATIO), 4);
    js += ",\"symbol\":\"" + _Symbol + "\",\"period\":\"" + EnumToString(InpTimeframe) + "\"";
+   js += ",\"diag\":{\"signals\":" + IntegerToString(g_cntSignals) + ",\"spreadDelayed\":" + IntegerToString(g_cntSpreadDelayed) +
+         ",\"spreadMissed\":" + IntegerToString(g_cntSpreadMissed) + ",\"lotsTooSmall\":" + IntegerToString(g_cntLots) +
+         ",\"orderFailed\":" + IntegerToString(g_cntFailed) + "}";
    js += ",\"deals\":[";
    bool first = true;
    if(HistorySelect(0, TimeCurrent()))
@@ -567,6 +570,9 @@ input bool InpAllowRealAccount = false; // Autoriser le trading sur un compte R�
 CTrade   g_trade;
 datetime g_lastBar = 0;
 string   g_last = "aucun calcul pour l'instant";
+int      g_pendDir = 0;          // ouverture en attente pendant la bougie en cours (1 achat, -1 vente)
+bool     g_pendDelayed = false;
+int      g_cntSignals = 0, g_cntSpreadDelayed = 0, g_cntSpreadMissed = 0, g_cntLots = 0, g_cntFailed = 0;
 
 //--- FX-CALC-BEGIN
 ${CALC_LIB}
@@ -643,23 +649,16 @@ double FxLots(const double price)
    return NormalizeDouble(lots, volDigits);
   }
 
-bool FxOpen(const int dir)
+// Ouvre au marché. Renvoie 1 si ouvert, 0 si taille trop petite, -1 si refusé par le courtier.
+int FxOpen(const int dir, const MqlTick &tk)
   {
-   MqlTick tk;
-   if(!SymbolInfoTick(_Symbol, tk)) return false;
    double pip = FxPip();
-   double spread = (tk.ask - tk.bid) / pip;
-   if(InpMaxSpreadPips > 0.0 && spread > InpMaxSpreadPips)
-     {
-      PrintFormat("Spread trop élevé (%.1f pips) : ordre annulé.", spread);
-      return false;
-     }
    double price = (dir > 0) ? tk.ask : tk.bid;
    double lots = FxLots(price);
    if(lots <= 0.0)
      {
       Print("Taille de position inférieure au minimum du courtier : ordre annulé.");
-      return false;
+      return 0;
      }
    int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
    double sl = (InpStopLossPips > 0.0) ? NormalizeDouble(price - dir * InpStopLossPips * pip, digits) : 0.0;
@@ -670,11 +669,36 @@ bool FxOpen(const int dir)
    if(!sent || (rc != TRADE_RETCODE_DONE && rc != TRADE_RETCODE_PLACED))
      {
       PrintFormat("Échec de l'ordre : %u %s", rc, g_trade.ResultRetcodeDescription());
-      return false;
+      return -1;
      }
    PrintFormat("%s %.2f lots %s à %s (SL %s, TP %s)", (dir > 0) ? "Achat" : "Vente", lots, _Symbol,
                DoubleToString(price, digits), DoubleToString(sl, digits), DoubleToString(tp, digits));
-   return true;
+   return 1;
+  }
+
+// Tente l'ouverture en attente. Si le spread est trop large (bascule de minuit, annonce...),
+// l'EA réessaie au prix suivant, jusqu'à la fin de la bougie.
+void FxTryOpen()
+  {
+   if(g_pendDir == 0) return;
+   if(FxPositionDir() != 0) { g_pendDir = 0; return; }
+   MqlTick tk;
+   if(!SymbolInfoTick(_Symbol, tk)) return;
+   double spread = (tk.ask - tk.bid) / FxPip();
+   if(InpMaxSpreadPips > 0.0 && spread > InpMaxSpreadPips)
+     {
+      if(!g_pendDelayed)
+        {
+         g_pendDelayed = true;
+         g_cntSpreadDelayed++;
+         PrintFormat("Spread trop élevé (%.1f pips) : ordre reporté au prix suivant.", spread);
+        }
+      return;
+     }
+   int res = FxOpen(g_pendDir, tk);
+   if(res == 0) g_cntLots++;
+   if(res < 0) g_cntFailed++;
+   g_pendDir = 0;
   }
 
 void FxStatus()
@@ -712,25 +736,39 @@ bool FxProcess()
       l[i] = r[i].low;
       c[i] = r[i].close;
      }
+   if(g_pendDir != 0)
+     {
+      g_cntSpreadMissed++;
+      Print("Ordre non exécuté : spread trop élevé pendant toute la bougie.");
+      g_pendDir = 0;
+     }
    bool le = false, lx = false, se = false, sx = false;
    FxSignals(o, h, l, c, n, le, lx, se, sx);
    bool wantLong = le && !se;
    bool wantShort = se && !le;
    int dir = FxPositionDir();
+   int toOpen = 0;
    if(dir > 0 && (lx || wantShort))
      {
       if(!FxCloseAll()) return true;
-      if(wantShort && InpAllowShort) FxOpen(-1);
+      if(wantShort && InpAllowShort) toOpen = -1;
      }
    else if(dir < 0 && (sx || wantLong))
      {
       if(!FxCloseAll()) return true;
-      if(wantLong && InpAllowLong) FxOpen(1);
+      if(wantLong && InpAllowLong) toOpen = 1;
      }
    else if(dir == 0)
      {
-      if(wantLong && InpAllowLong) FxOpen(1);
-      else if(wantShort && InpAllowShort) FxOpen(-1);
+      if(wantLong && InpAllowLong) toOpen = 1;
+      else if(wantShort && InpAllowShort) toOpen = -1;
+     }
+   if(toOpen != 0)
+     {
+      g_cntSignals++;
+      g_pendDir = toOpen;
+      g_pendDelayed = false;
+      FxTryOpen();
      }
    g_last = TimeToString(r[n - 1].time) + "  achat:" + (le ? "oui" : "non") + " sortie achat:" + (lx ? "oui" : "non") +
             " vente:" + (se ? "oui" : "non") + " sortie vente:" + (sx ? "oui" : "non");
@@ -778,8 +816,12 @@ ${ONTESTER}
 void OnTick()
   {
    datetime t = iTime(_Symbol, InpTimeframe, 0);
-   if(t == 0 || t == g_lastBar) return;
-   if(FxProcess()) g_lastBar = t;
+   if(t != 0 && t != g_lastBar)
+     {
+      if(FxProcess()) g_lastBar = t;
+      return;
+     }
+   if(g_pendDir != 0) FxTryOpen();
   }
 //+------------------------------------------------------------------+
 `;
