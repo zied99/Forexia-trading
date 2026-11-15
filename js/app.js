@@ -1565,6 +1565,19 @@
     cloudPush(() => C.putSimulations([full]));
     logEvent('simulation', 'Simulation : ' + entry.name + ' · ' + entry.pair + ' · ' + entry.data + ' → ' + signed(entry.returnPct, num2) + ' % (gain moyen ' + signed(entry.avgGainPct, num1) + ' %)', { key: entry.key });
   }
+  /** Durée lisible entre deux dates « AAAA-MM-JJ » : « 2 ans 1 mois », « 6 mois 12 j », « 45 jours ». */
+  function durationDays(from, to) { return Math.round((Date.parse(to.slice(0, 10)) - Date.parse(from.slice(0, 10))) / 864e5); }
+  // À partir de 2 mois : arrondi au mois le plus proche (une période « 1 an » qui commence après un week-end fait 361 jours).
+  function durationFromDays(days) {
+    days = Math.round(days);
+    if (days >= 60) {
+      const total = Math.round(days / 30.4375), y = Math.floor(total / 12), m = total % 12;
+      return y ? y + ' an' + (y > 1 ? 's' : '') + (m ? ' ' + m + ' mois' : '') : m + ' mois';
+    }
+    if (days >= 28) { const rest = days - 30; return rest > 2 ? '1 mois ' + rest + ' j' : '1 mois'; }
+    return days + ' jour' + (days > 1 ? 's' : '');
+  }
+  function durationLabel(from, to) { return durationFromDays(durationDays(from, to)); }
   const mean = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
   // Filtres : stratégie, recherche, paire, source de données, résultat. Les moyennes portent sur les lignes affichées.
   function fillFilter(id, values) {
@@ -1612,19 +1625,20 @@
     const rows = shown.map(({ e, i }) => '<tr>' +
       '<td>' + (i + 1) + '</td><td class="l">' + new Date(e.at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) + '</td>' +
       '<td class="name" title="' + esc(e.name) + '">' + esc(e.name) + '</td><td class="l">' + esc(e.pair) + '</td>' +
-      '<td class="l">' + frDate(e.from) + ' → ' + frDate(e.to) + '</td><td class="l">' + esc(e.data) + '</td>' +
+      '<td class="l">' + frDate(e.from) + ' → ' + frDate(e.to) + '</td><td class="l" title="' + durationDays(e.from, e.to) + ' jours">' + durationLabel(e.from, e.to) + '</td>' +
+      '<td class="l">' + esc(e.data) + '</td>' +
       '<td>1:' + e.leverage + '</td><td>' + money.format(e.capital) + '</td>' +
       '<td>' + p(e.returnPct) + '</td><td class="avg-col">' + p(e.avgGainPct) + '</td><td class="' + cls(e.monthlyGain || 0) + '">' + (e.monthlyGain == null ? '—' : signed(e.monthlyGain, money)) + '</td><td>' + (e.withdrawn ? money.format(e.withdrawn) : '—') + '</td>' +
       '<td>' + e.trades + '</td><td>' + num1.format(e.winRate) + ' %</td><td>−' + num1.format(e.maxDrawdownPct) + ' %</td>' +
       '<td>' + (e.strategy ? '<button type="button" class="reload" data-reload="' + i + '" title="Remettre cette stratégie et ses réglages dans le formulaire">Recharger</button>' : '') + '</td>' +
       '<td><button type="button" class="del" data-del="' + i + '" title="Retirer cette ligne" aria-label="Retirer la simulation ' + (i + 1) + '">✕</button></td></tr>').join('');
     const filtered = evalScope === 'all' && shown.length < all.length;
-    const foot = '<tr><td colspan="8" class="l">Moyenne sur ' + list.length + ' simulation' + (list.length > 1 ? 's' : '') + (filtered ? ' (filtrées)' : '') + '</td>' +
+    const foot = '<tr><td colspan="5" class="l">Moyenne sur ' + list.length + ' simulation' + (list.length > 1 ? 's' : '') + (filtered ? ' (filtrées)' : '') + '</td><td class="l">' + durationFromDays(mean(list.map((e) => durationDays(e.from, e.to)))) + '</td><td colspan="3"></td>' +
       '<td>' + p(mean(list.map((e) => e.returnPct))) + '</td><td class="avg-col" title="Moyenne des gains moyens">' + p(mean(list.map((e) => e.avgGainPct))) + '</td><td>' + signed(mean(list.filter((e) => e.monthlyGain != null).map((e) => e.monthlyGain)), money) + '</td><td>' + money.format(mean(list.map((e) => e.withdrawn || 0))) + '</td>' +
       '<td>' + num1.format(mean(list.map((e) => e.trades))) + '</td><td>' + num1.format(mean(list.map((e) => e.winRate))) + ' %</td>' +
       '<td>−' + num1.format(mean(list.map((e) => e.maxDrawdownPct))) + ' %</td><td></td><td></td></tr>';
     $('evalBody').innerHTML = (filtered ? '<p class="eval-count">' + shown.length + ' simulation(s) affichée(s) sur ' + all.length + '</p>' : '') + '<div class="table-wrap"><table class="eval"><thead><tr><th>#</th><th class="l">Date</th><th class="l">Stratégie</th><th class="l">Paire</th>' +
-      '<th class="l">Période testée</th><th class="l">Données</th><th>Levier</th><th>Capital</th><th>Résultat</th><th class="avg-col">Gain moyen</th><th>Par mois</th><th>Retiré</th>' +
+      '<th class="l">Période testée</th><th class="l">Durée</th><th class="l">Données</th><th>Levier</th><th>Capital</th><th>Résultat</th><th class="avg-col">Gain moyen</th><th>Par mois</th><th>Retiré</th>' +
       '<th>Trades</th><th>Gagnants</th><th>Drawdown</th><th></th><th></th></tr></thead><tbody>' + rows + '</tbody><tfoot>' + foot + '</tfoot></table></div>';
   }
   $('evalScopeCurrent').addEventListener('click', () => setEvalScope('current'));
@@ -1679,11 +1693,11 @@
   });
   $('evalExport').addEventListener('click', () => {
     const list = evalFiltered(evalList()).map((x) => x.e); // export des lignes affichées (filtres appliqués)
-    const head = 'numero;date;strategie;paire;debut;fin;donnees;levier;capital;resultat_pct;gain_moyen_pct;gain_par_mois;retire;trades;gagnants_pct;drawdown_pct';
+    const head = 'numero;date;strategie;paire;debut;fin;duree_jours;donnees;levier;capital;resultat_pct;gain_moyen_pct;gain_par_mois;retire;trades;gagnants_pct;drawdown_pct';
     const f2 = (v) => String(Math.round(v * 100) / 100).replace('.', ',');
-    const rows = list.map((e, i) => [i + 1, e.at.slice(0, 16).replace('T', ' '), '"' + e.name.replace(/"/g, '""') + '"', e.pair, e.from, e.to, e.data, e.leverage,
+    const rows = list.map((e, i) => [i + 1, e.at.slice(0, 16).replace('T', ' '), '"' + e.name.replace(/"/g, '""') + '"', e.pair, e.from, e.to, durationDays(e.from, e.to), e.data, e.leverage,
       f2(e.capital), f2(e.returnPct), f2(e.avgGainPct), e.monthlyGain == null ? '' : f2(e.monthlyGain), f2(e.withdrawn || 0), e.trades, f2(e.winRate), f2(e.maxDrawdownPct)].join(';'));
-    rows.push(['moyenne', '', '', '', '', '', '', '', '', f2(mean(list.map((e) => e.returnPct))), f2(mean(list.map((e) => e.avgGainPct))), f2(mean(list.filter((e) => e.monthlyGain != null).map((e) => e.monthlyGain))), f2(mean(list.map((e) => e.withdrawn || 0))),
+    rows.push(['moyenne', '', '', '', '', '', Math.round(mean(list.map((e) => durationDays(e.from, e.to)))), '', '', '', f2(mean(list.map((e) => e.returnPct))), f2(mean(list.map((e) => e.avgGainPct))), f2(mean(list.filter((e) => e.monthlyGain != null).map((e) => e.monthlyGain))), f2(mean(list.map((e) => e.withdrawn || 0))),
       f2(mean(list.map((e) => e.trades))), f2(mean(list.map((e) => e.winRate))), f2(mean(list.map((e) => e.maxDrawdownPct)))].join(';'));
     const blob = new Blob(['\ufeff' + [head].concat(rows).join('\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
