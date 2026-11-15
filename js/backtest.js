@@ -181,5 +181,5 @@
     };
   }
 
-  root.Forexia.backtest = { runBacktest, compileStrategy, pipSizeFor };
+  root.Forexia.backtest = { runBacktest, compileStrategy, pipSizeFor, computeStats };
 })(typeof window !== 'undefined' ? window : globalThis);

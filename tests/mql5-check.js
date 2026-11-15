@@ -129,7 +129,7 @@ static void PrintFormat(const char *, ...) {} static int GetLastError() { return
   const out = execFileSync(path.join(dir, 'r')).toString();
   fs.rmSync(dir, { recursive: true, force: true });
   const j = JSON.parse(out);
-  if (j.trades !== 25 || j.deals.length !== 2 || j.deals[0].reason !== 4 || j.symbol !== 'GBPUSD') throw new Error('contenu inattendu : ' + out);
+  if (j.trades !== 25 || j.deals.length !== 4 || j.deals[1].entry !== 1 || j.deals[0].reason !== 4 || j.symbol !== 'GBPUSD') throw new Error('contenu inattendu : ' + out);
 }
 
 let failed = 0;

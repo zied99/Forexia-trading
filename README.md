@@ -127,6 +127,19 @@ n'écrit que dans les dossiers Forexia du terminal et n'exécute que MetaEditor 
 de trader sur un compte réel tant que le paramètre « Autoriser le trading sur un compte RÉEL » est désactivé.
 Test (faux MT5) : `python3 tests/bridge-check.py`.
 
+## Données du courtier : simulation identique au testeur MT5
+
+Source **« Mon courtier (MetaTrader 5) »** (nécessite la passerelle et le module Python `MetaTrader5`, installé
+automatiquement par `demarrer-passerelle.bat`) : Forexia récupère dans MT5 les bougies du courtier (M15 à D1),
+leur spread, des bougies plus fines (H1 pour du D1…), les caractéristiques du symbole (contrat, lots, swap)
+et du compte (devise, stop-out), et le taux de conversion vers la devise du compte.
+
+Le moteur `js/broker.js` applique alors exactement les règles de l'EA : achat à l'ask / vente au bid, lots
+arrondis au pas du courtier, plafonnés et limités à 90 % de la marge libre, ordre annulé si le spread dépasse
+le maximum, stops testés bougie fine par bougie fine, swaps (triples le mercredi), conversion en devise du
+compte, stop-out. Les réglages de taille (comme le backtest, lots fixes, % de risque) sont repris par l'EA.
+Après « Déployer dans MetaTrader 5 », un tableau **trade par trade** compare Forexia et le testeur MT5.
+
 ## Réalisme : se rapprocher de MetaTrader 5
 
 Les cours BCE n'ont qu'**un prix par jour** (14 h 15), sans plus haut ni plus bas. Sans correction, un stop-loss
@@ -167,6 +180,7 @@ js/presets.js       modèles de stratégies
 js/french.js        stratégies en français + stratégie aléatoire
 js/enhancer.js      styles de trading et suggestions d'amélioration
 js/mql5.js          génération de l'Expert Advisor MetaTrader 5
+js/broker.js        backtest « courtier » identique à l'EA dans le testeur MT5
 js/chart.js         graphiques SVG
 js/app.js           contrôleur de l'interface
 tests/run-tests.js  tests du moteur : npm test

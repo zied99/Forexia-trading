@@ -1,8 +1,8 @@
 /* Tests du moteur : node tests/run-tests.js */
 'use strict';
 const path = require('path');
-for (const f of ['indicators', 'expr', 'backtest', 'data', 'presets', 'french', 'enhancer', 'mql5']) require(path.join(__dirname, '..', 'js', f + '.js'));
-const { indicators: I, rules: R, backtest: B, data: D, presets: P, french: FR, enhancer: E, mql5: MQ } = globalThis.Forexia;
+for (const f of ['indicators', 'expr', 'backtest', 'data', 'presets', 'french', 'enhancer', 'mql5', 'broker']) require(path.join(__dirname, '..', 'js', f + '.js'));
+const { indicators: I, rules: R, backtest: B, data: D, presets: P, french: FR, enhancer: E, mql5: MQ, broker: BK } = globalThis.Forexia;
 
 let failed = 0, passed = 0;
 function test(name, fn) {
@@ -286,6 +286,61 @@ test('Améliorer : contrôle sur la période précédente', () => {
   const r = E.suggest(bars, P.list[2], Object.assign({}, base, { leverage: 20, startIndex: D.indexFrom(bars, rg.start) }), 'none');
   if (!r.validation) throw new Error('pas de période de contrôle');
   for (const sg of r.suggestions) if (!sg.validation || typeof sg.validation.confirmed !== 'boolean') throw new Error('suggestion non contrôlée : ' + sg.title);
+});
+
+console.log('Backtest courtier (MT5)');
+function brokerFixture(pair) {
+  const rg = D.periodRange('1y', new Date('2025-06-30'));
+  const r5 = (v) => Math.round(v * 1e5) / 1e5; // prix à 5 décimales, comme chez un courtier
+  const bars = D.generateSynthetic(pair, rg.fetchStart, rg.end).map((b) => ({ date: b.date, t: Date.parse(b.date + 'T00:00:00Z') / 1000, open: r5(b.open), high: r5(b.high), low: r5(b.low), close: r5(b.close), spread: 0 }));
+  return { bars, start: D.indexFrom(bars, rg.start) };
+}
+const idealSpec = { digits: 5, point: 0.00001, contract: 100000, volumeMin: 1e-9, volumeStep: 1e-9, volumeMax: 1e9, swapMode: 0 };
+test('Courtier idéal (spread 0, sans swap, lots continus) = moteur standard', () => {
+  const { bars, start } = brokerFixture('EUR/USD');
+  for (const p of P.list) {
+    const set = { capital: 10000, leverage: 10, exposurePct: 50, spreadPips: 0, pair: 'EUR/USD', startIndex: start };
+    const a = B.runBacktest(bars, p, set);
+    const b = BK.runBrokerBacktest(bars, p, Object.assign({}, set, { sizing: 'backtest', maxLots: 1e9, maxSpreadPips: 0 }), { spec: idealSpec, account: { marginSoSo: 50 } });
+    eq(b.trades.length, a.trades.length, p.id + ' trades');
+    near(b.stats.finalEquity, a.stats.finalEquity, 1e-9 * a.stats.finalEquity, p.id + ' capital final');
+  }
+});
+test('Courtier : spread payé à l\'achat (ask) et à la vente (clôture à l\'ask)', () => {
+  const bars = [0, 1, 2, 3, 4].map((i) => ({ date: '2024-01-0' + (i + 1), t: 1704067200 + i * 86400, open: 1.1, high: 1.1, low: 1.1, close: 1.1, spread: 20 }));
+  const spec = Object.assign({}, idealSpec, { volumeMin: 0.01, volumeStep: 0.01 });
+  const set = { capital: 10000, leverage: 100, sizing: 'fixed', fixedLots: 1, maxLots: 10, maxSpreadPips: 0, startIndex: 1 };
+  const L = BK.runBrokerBacktest(bars, { longEntry: 'CLOSE > 0' }, set, { spec });
+  near(L.trades[0].entryPrice, 1.1002, 1e-12); near(L.stats.netProfit, -20, 1e-6); // 2 pips × 1 lot × 10 $/pip
+  const Sh = BK.runBrokerBacktest(bars, { shortEntry: 'CLOSE > 0' }, set, { spec });
+  near(Sh.trades[0].exitPrice, 1.1002, 1e-12); near(Sh.stats.netProfit, -20, 1e-6);
+});
+test('Courtier : lots arrondis, plafond et marge comme l\'EA', () => {
+  const bars = [0, 1, 2, 3].map((i) => ({ date: '2024-01-0' + (i + 1), t: 1704067200 + i * 86400, open: 1.25, high: 1.25, low: 1.25, close: 1.25, spread: 0 }));
+  const spec = Object.assign({}, idealSpec, { volumeMin: 0.01, volumeStep: 0.01 });
+  const run = (o) => BK.runBrokerBacktest(bars, { longEntry: 'CLOSE > 0' }, Object.assign({ capital: 100, leverage: 100, exposurePct: 100, sizing: 'backtest', maxLots: 1, maxSpreadPips: 0, startIndex: 1 }, o), { spec }).trades[0];
+  eq(run({}).lots, 0.07); // 100 × 100 / 125 000 = 0,08 lot, limité à 90 % de la marge -> 0,072 -> 0,07
+  eq(run({ capital: 1000000 }).lots, 1); // plafond
+  eq(run({ capital: 5 }), undefined); // sous le minimum : pas d'ordre
+});
+test('Courtier : swaps (triple le mercredi) et conversion de devise', () => {
+  eq(BK.swapNights(Date.UTC(2024, 0, 1) / 1000, Date.UTC(2024, 0, 8) / 1000, 3), 7); // lun -> lun : 4 × 1 + 3
+  near(BK.convFactor({ rates: [[0, 1.10], [100, 1.20]], divide: true }, 150), 1 / 1.2, 1e-12);
+  const bars = [0, 1, 2, 3, 4, 5].map((i) => ({ date: '2024-01-0' + (i + 1), t: Date.UTC(2024, 0, 1 + i) / 1000, open: 1.25, high: 1.25, low: 1.25, close: 1.25, spread: 0 }));
+  const spec = Object.assign({}, idealSpec, { volumeMin: 0.01, volumeStep: 0.01, swapMode: 1, swapLong: -10, swapShort: 2, swapRollover3days: 3 });
+  const r = BK.runBrokerBacktest(bars, { longEntry: 'CLOSE > 0' }, { capital: 10000, leverage: 100, sizing: 'fixed', fixedLots: 1, maxLots: 5, maxSpreadPips: 0, startIndex: 1 }, { spec, conv: { rates: [[0, 1.25]], divide: true } });
+  // signal le 2/1, entrée mer. 3/1, sortie sam. 6/1 : nuits mer (×3), jeu, ven = 5 ; -10 points × 0,00001 × 100 000 = -10 USD / nuit -> -50 USD = -40 EUR
+  eq(r.trades[0].entryDate, '2024-01-03'); near(r.trades[0].swap, -40, 1e-9);
+});
+test('Courtier : bougies fines -> ordre stop / objectif selon le déroulé réel', () => {
+  // Bougie D1 qui touche les deux niveaux : l'objectif d'abord (bougie H1 n°1), le stop ensuite.
+  const D1 = [0, 1, 2].map((i) => ({ date: '2024-01-0' + (i + 1), t: Date.UTC(2024, 0, 1 + i) / 1000, open: 1.1, high: i === 2 ? 1.103 : 1.1, low: i === 2 ? 1.097 : 1.1, close: 1.1, spread: 0 }));
+  const H1 = [{ t: D1[2].t, open: 1.1, high: 1.103, low: 1.1, close: 1.1025, spread: 0 }, { t: D1[2].t + 3600, open: 1.1025, high: 1.1025, low: 1.097, close: 1.1, spread: 0 }];
+  const spec = Object.assign({}, idealSpec, { volumeMin: 0.01, volumeStep: 0.01 });
+  const set = { capital: 10000, leverage: 100, sizing: 'fixed', fixedLots: 1, maxLots: 5, maxSpreadPips: 0, startIndex: 1 };
+  const strat = { longEntry: 'CLOSE > 0', stopLossPips: 20, takeProfitPips: 20 };
+  eq(BK.runBrokerBacktest(D1, strat, set, { spec }).trades[0].reason, 'Stop-loss'); // sans détail : prudent
+  eq(BK.runBrokerBacktest(D1, strat, set, { spec, sub: H1 }).trades[0].reason, 'Take-profit');
 });
 
 console.log('Expert Advisor MT5');

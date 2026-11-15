@@ -267,6 +267,98 @@ def run_test(args, term, body):
     return {"ok": True, "result": result, "seconds": round(time.time() - started)}
 
 
+# ---------------------------------------------------------------- données du courtier
+SUB_TF = {"D1": "H1", "H4": "M15", "H1": "M5", "M30": "M1", "M15": "M1"}
+MAX_SUB_BARS = 250000
+
+
+def _mt5_module(args):
+    if args.fake_mt5:  # tests : faux module MetaTrader5
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("MetaTrader5", args.fake_mt5)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    import MetaTrader5  # noqa: F401  (pip install MetaTrader5)
+    return MetaTrader5
+
+
+def _rates(mt5, symbol, tf_const, start, end):
+    """Bougies [t, open, high, low, close, spread] ; MT5 télécharge l'historique à la demande."""
+    rates = None
+    for _ in range(15):
+        rates = mt5.copy_rates_range(symbol, tf_const, start, end)
+        if rates is not None and len(rates) > 0:
+            break
+        time.sleep(1)
+    if rates is None:
+        return []
+    return [[int(r["time"]), float(r["open"]), float(r["high"]), float(r["low"]), float(r["close"]), int(r["spread"])] for r in rates]
+
+
+def broker_bars(args, term, body):
+    from datetime import datetime, timezone
+    symbol, tf = str(body.get("symbol", "")), str(body.get("timeframe", "D1"))
+    date_from, date_to = str(body.get("from", "")), str(body.get("to", ""))
+    if not SYMBOL_RE.match(symbol) or tf not in PERIODS or not DATE_RE.match(date_from) or not DATE_RE.match(date_to):
+        raise ValueError("Paramètres invalides.")
+    try:
+        mt5 = _mt5_module(args)
+    except ImportError:
+        return {"ok": False, "needPackage": True,
+                "message": "Module Python « MetaTrader5 » absent : relancez demarrer-passerelle.bat (il l'installe) "
+                           "ou tapez « py -m pip install MetaTrader5 »."}
+    if not mt5.initialize(path=term["terminal"]) if term["terminal"] else not mt5.initialize():
+        return {"ok": False, "message": "Connexion à MetaTrader 5 impossible (%s). MT5 est-il installé et connecté à votre compte ?" % (mt5.last_error(),)}
+    try:
+        if not mt5.symbol_select(symbol, True):
+            similar = [x.name for x in (mt5.symbols_get("*" + symbol[:6] + "*") or [])][:10]
+            return {"ok": False, "message": "Symbole « %s » introuvable chez votre courtier." % symbol
+                    + (" Symboles proches : " + ", ".join(similar) if similar else "")}
+        info, acc = mt5.symbol_info(symbol), mt5.account_info()
+        if info is None or acc is None:
+            return {"ok": False, "message": "Informations du symbole ou du compte indisponibles (MT5 connecté ?)."}
+        start = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        end = datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        tfc = lambda name: getattr(mt5, "TIMEFRAME_" + name)
+        bars = _rates(mt5, symbol, tfc(tf), start, end)
+        if len(bars) < 30:
+            return {"ok": False, "message": "MT5 n'a renvoyé que %d bougies %s %s : historique indisponible pour cette période "
+                                            "(ouvrez un graphique %s %s dans MT5 pour le télécharger, puis réessayez)." % (len(bars), symbol, tf, symbol, tf)}
+        sub, sub_tf = [], SUB_TF.get(tf) if body.get("intrabar", True) else None
+        if sub_tf:
+            first_test = datetime.strptime(str(body.get("testFrom", date_from)), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            sub = _rates(mt5, symbol, tfc(sub_tf), first_test, end)
+            if len(sub) > MAX_SUB_BARS:
+                sub, sub_tf = [], None
+        conv = None
+        if info.currency_profit != acc.currency:
+            for name, divide in ((acc.currency + info.currency_profit, True), (info.currency_profit + acc.currency, False)):
+                for cand in [name] + [x.name for x in (mt5.symbols_get("*" + name + "*") or [])][:3]:
+                    if mt5.symbol_select(cand, True):
+                        r = _rates(mt5, cand, mt5.TIMEFRAME_D1, start, end)
+                        if r:
+                            conv = {"symbol": cand, "divide": divide, "rates": [[x[0], x[4]] for x in r]}
+                            break
+                if conv:
+                    break
+        return {
+            "ok": True, "symbol": symbol, "timeframe": tf, "subTimeframe": sub_tf, "bars": bars, "sub": sub, "conv": conv,
+            "spec": {
+                "digits": info.digits, "point": info.point, "contract": info.trade_contract_size,
+                "volumeMin": info.volume_min, "volumeMax": info.volume_max, "volumeStep": info.volume_step,
+                "swapMode": info.swap_mode, "swapLong": info.swap_long, "swapShort": info.swap_short,
+                "swapRollover3days": info.swap_rollover3days, "currencyBase": info.currency_base,
+                "currencyProfit": info.currency_profit, "stopsLevel": info.trade_stops_level, "spread": info.spread,
+            },
+            "account": {"currency": acc.currency, "leverage": acc.leverage, "server": acc.server, "company": acc.company,
+                        "tradeMode": acc.trade_mode, "marginSoSo": acc.margin_so_so},
+            "conversionMissing": info.currency_profit != acc.currency and conv is None,
+        }
+    finally:
+        mt5.shutdown()
+
+
 def attach(args, term, body):
     name = str(body.get("fileName", ""))
     _check_ex5(term, name)
@@ -360,7 +452,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
-        actions = {"/deploy": deploy, "/test": run_test, "/attach": attach}
+        actions = {"/deploy": deploy, "/test": run_test, "/attach": attach, "/bars": broker_bars}
         if path not in actions:
             return self._send(404, {"ok": False, "message": "Inconnu."})
         if not self._authorized():
@@ -397,6 +489,7 @@ def main():
     ap.add_argument("--allow-origin", action="append", default=[], help="origine supplémentaire autorisée")
     ap.add_argument("--test-timeout", type=int, default=1800, help="durée maximale d'un test (secondes)")
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument("--fake-mt5", help=argparse.SUPPRESS)  # tests : faux module MetaTrader5
     args = ap.parse_args()
 
     cfg = load_config()
@@ -410,6 +503,11 @@ def main():
     for t in terms:
         print(" - MT5 « %s » : %s  [MetaEditor %s, terminal %s]" % (
             t["name"], t["dataDir"], "ok" if t["metaeditor"] else "absent", "ok" if t["terminal"] else "absent"))
+    try:
+        _mt5_module(args)
+        print("Module MetaTrader5 : ok (données du courtier disponibles)")
+    except ImportError:
+        print("Module MetaTrader5 absent : installez-le avec « py -m pip install MetaTrader5 » pour utiliser les données du courtier.")
     print("Laissez cette fenêtre ouverte pendant l'utilisation. Ctrl+C pour arrêter.")
     sys.stdout.flush()
     try:

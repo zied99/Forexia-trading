@@ -49,6 +49,28 @@ else:
 '''
 
 
+FAKE_MT5 = r'''
+from types import SimpleNamespace as NS
+TIMEFRAME_D1, TIMEFRAME_H1, TIMEFRAME_M15, TIMEFRAME_M5, TIMEFRAME_M1, TIMEFRAME_H4, TIMEFRAME_M30, TIMEFRAME_W1 = 1440, 60, 15, 5, 1, 240, 30, 10080
+STATE = {"init": 0}
+def initialize(path=None): STATE["init"] += 1; return True
+def shutdown(): STATE["init"] -= 1
+def last_error(): return (0, "ok")
+def symbol_select(s, on): return s in ("GBPUSD", "EURUSD")
+def symbols_get(pattern): return [NS(name="GBPUSD.m")]
+def symbol_info(s): return NS(digits=5, point=0.00001, trade_contract_size=100000, volume_min=0.01, volume_max=100, volume_step=0.01,
+    swap_mode=1, swap_long=-7.5, swap_short=1.2, swap_rollover3days=3, currency_base="GBP", currency_profit="USD", trade_stops_level=0, spread=12)
+def account_info(): return NS(currency="EUR", leverage=100, server="MetaQuotes-Demo", company="MetaQuotes", trade_mode=0, margin_so_so=50.0)
+def copy_rates_range(s, tf, a, b):
+    t0, t1, step = int(a.timestamp()), int(b.timestamp()), tf * 60
+    out, p = [], 1.25 if s == "GBPUSD" else 1.10
+    for t in range(t0, t1, step):
+        out.append({"time": t, "open": p, "high": p + 0.002, "low": p - 0.002, "close": p + 0.0005, "spread": 14})
+        p += 0.0005
+    return out
+'''
+
+
 def free_port():
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
@@ -74,7 +96,9 @@ def main():
 
     port = free_port()
     env = dict(os.environ, APPDATA=appdata, FAKE_COMMON=common)
-    proc = subprocess.Popen([sys.executable, BRIDGE, "--port", str(port)], env=env, stdout=subprocess.PIPE, text=True)
+    fake_mt5 = os.path.join(tmp, "fake_mt5.py")
+    open(fake_mt5, "w").write(FAKE_MT5)
+    proc = subprocess.Popen([sys.executable, BRIDGE, "--port", str(port), "--fake-mt5", fake_mt5], env=env, stdout=subprocess.PIPE, text=True)
     lines = []
     while len(lines) < 3:
         lines.append(proc.stdout.readline())
@@ -148,6 +172,15 @@ def main():
         time.sleep(0.1)
     vals = json.load(open(seen)) if os.path.exists(seen) else {}
     check("EA ouvert sur un graphique", js.get("ok") and vals.get("Expert") == "Forexia\\Forexia_Test" and vals.get("Symbol") == "GBPUSD", (js, vals))
+
+    st, js, _ = call("POST", "/bars", {"terminalId": tid, "symbol": "GBPUSD", "timeframe": "D1", "from": "2023-01-01", "to": "2024-12-31", "testFrom": "2024-01-01"})
+    check("bougies du courtier (D1) + bougies fines (H1)", js.get("ok") and len(js["bars"]) == 730 and js["subTimeframe"] == "H1"
+          and len(js["sub"]) == 365 * 24 and js["bars"][0][5] == 14, {k: (v if not isinstance(v, list) else len(v)) for k, v in js.items()})
+    check("caractéristiques du symbole et du compte", js.get("spec", {}).get("contract") == 100000 and js["spec"]["swapLong"] == -7.5
+          and js["account"]["currency"] == "EUR" and js["account"]["leverage"] == 100, js.get("spec"))
+    check("conversion USD -> EUR via EURUSD", (js.get("conv") or {}).get("symbol") == "EURUSD" and js["conv"]["divide"] is True and len(js["conv"]["rates"]) == 730, js.get("conv", {}).get("symbol"))
+    st, js, _ = call("POST", "/bars", {"terminalId": tid, "symbol": "XAUUSD", "timeframe": "D1", "from": "2023-01-01", "to": "2024-12-31"})
+    check("symbole absent : symboles proches proposés", js.get("ok") is False and "GBPUSD.m" in js.get("message", ""), js)
 
     proc.terminate()
     print("\n%d échec(s)" % failed)

@@ -77,8 +77,11 @@
   }
 
   // ---------- Suggestions ----------
+  // settings.broker présent : moteur « courtier » (identique au testeur MT5), sinon moteur standard.
   function run(bars, strat, settings) {
-    try { return B.runBacktest(bars, strat, settings).stats; } catch (e) { return null; }
+    try {
+      return settings.broker ? F.broker.runBrokerBacktest(bars, strat, settings, settings.broker).stats : B.runBacktest(bars, strat, settings).stats;
+    } catch (e) { return null; }
   }
   // Rendement ajusté du risque : on pénalise la moitié du drawdown maximal.
   // Moins de 3 trades : résultat dû au hasard, on ne le propose pas.

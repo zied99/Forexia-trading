@@ -454,9 +454,10 @@ void FxCross(const double &a[], const double &b[], const int dir, double &out[])
          ulong t = HistoryDealGetTicket(i);
          if(t == 0) continue;
          long entry = HistoryDealGetInteger(t, DEAL_ENTRY);
-         if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_INOUT) continue;
+         if(entry != DEAL_ENTRY_IN && entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_INOUT) continue;
          double pnl = HistoryDealGetDouble(t, DEAL_PROFIT) + HistoryDealGetDouble(t, DEAL_SWAP) + HistoryDealGetDouble(t, DEAL_COMMISSION);
          js += (first ? "" : ",") + "{\"time\":\"" + TimeToString((datetime)HistoryDealGetInteger(t, DEAL_TIME), TIME_DATE | TIME_MINUTES) + "\"";
+         js += ",\"entry\":" + IntegerToString(entry);
          js += ",\"type\":" + IntegerToString(HistoryDealGetInteger(t, DEAL_TYPE));
          js += ",\"volume\":" + DoubleToString(HistoryDealGetDouble(t, DEAL_VOLUME), 2);
          js += ",\"price\":" + DoubleToString(HistoryDealGetDouble(t, DEAL_PRICE), _Digits);

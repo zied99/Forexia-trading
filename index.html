@@ -175,6 +175,8 @@
         <h2>3. Données</h2>
         <fieldset class="field">
           <legend class="sr-only">Source des cours</legend>
+          <label class="radio"><input type="radio" name="source" value="broker">
+            <span><b>Mon courtier (MetaTrader 5)</b><br><small>Bougies, spreads et swaps de votre courtier via la passerelle : simulation identique au testeur MT5</small></span></label>
           <label class="radio"><input type="radio" name="source" value="online" checked>
             <span><b>Cours réels en ligne</b><br><small>Taux de référence BCE, journaliers (API Frankfurter)</small></span></label>
           <label class="radio"><input type="radio" name="source" value="csv">
@@ -182,6 +184,51 @@
           <label class="radio"><input type="radio" name="source" value="synthetic">
             <span><b>Données simulées</b><br><small>Marche aléatoire, pour tester hors ligne</small></span></label>
         </fieldset>
+        <div id="brokerField" class="broker-panel" hidden>
+          <div class="bridge-head"><b>Passerelle MT5</b><span class="pill" id="brokerState">…</span></div>
+          <div id="brokerConnectBox" hidden>
+            <p class="hint">Lancez la passerelle sur votre PC (fichiers dans <i>Déployer → Envoi direct</i>) puis collez son code d'appairage :</p>
+            <div class="row buttons">
+              <input id="brokerToken" type="text" placeholder="ABCD-EFGH" maxlength="9" autocomplete="off" spellcheck="false">
+              <button type="button" class="secondary" id="brokerConnect">Connecter</button>
+            </div>
+          </div>
+          <div class="row">
+            <label class="field">Symbole dans MT5
+              <input id="brokerSymbol" type="text" spellcheck="false" maxlength="30" value="EURUSD">
+            </label>
+            <label class="field">Unité de temps
+              <select id="brokerTf">
+                <option value="M15">M15</option><option value="M30">M30</option><option value="H1">H1</option>
+                <option value="H4">H4</option><option value="D1" selected>D1</option>
+              </select>
+            </label>
+          </div>
+          <div class="row">
+            <label class="field">Taille des positions
+              <select id="brokerSizing">
+                <option value="backtest">Capital × exposition × levier</option>
+                <option value="fixed">Lots fixes</option>
+                <option value="risk">% du capital risqué</option>
+              </select>
+            </label>
+            <label class="field" id="brokerLotsField" hidden>Lots
+              <input id="brokerLots" type="number" min="0.01" step="0.01" value="0.10">
+            </label>
+            <label class="field" id="brokerRiskField" hidden>Risque (%)
+              <input id="brokerRisk" type="number" min="0.1" max="10" step="0.1" value="1">
+            </label>
+            <label class="field">Plafond (lots)
+              <input id="brokerMaxLots" type="number" min="0.01" step="0.01" value="1">
+            </label>
+            <label class="field">Spread max (pips)
+              <input id="brokerMaxSpread" type="number" min="0" step="0.5" value="5">
+            </label>
+          </div>
+          <label class="check"><input type="checkbox" id="brokerIntrabar" checked>
+            <span>Déroulé à l'intérieur des bougies <small>(bougies plus fines, comme le mode « 1 minute OHLC » de MT5 : ordre réel des stop-loss et take-profit)</small></span></label>
+          <p class="hint">Ces réglages sont repris par l'EA au déploiement. MT5 doit être installé et connecté à votre compte ; il s'ouvre au besoin pour fournir les données.</p>
+        </div>
         <div id="csvField" hidden>
           <label class="field">Fichier CSV
             <input id="csvFile" type="file" accept=".csv,.txt,text/csv">
@@ -354,7 +401,7 @@
           <summary>Voir le code</summary>
           <pre class="code" id="depCode"></pre>
         </details>
-        <p class="modal-note">Le backtest Forexia utilise les cours de référence BCE (un cours par jour, sans plus haut ni plus bas). En réel, les prix, le spread, le swap et l'exécution de votre courtier changent les résultats : testez d'abord dans MT5 puis sur un compte démo.</p>
+        <p class="modal-note" id="depNote">Le backtest Forexia utilise les cours de référence BCE (un cours par jour, sans plus haut ni plus bas). En réel, les prix, le spread, le swap et l'exécution de votre courtier changent les résultats : testez d'abord dans MT5 puis sur un compte démo.</p>
       </div>
     </div>
   </div>
@@ -372,6 +419,7 @@
   <script src="js/french.js"></script>
   <script src="js/enhancer.js"></script>
   <script src="js/mql5.js"></script>
+  <script src="js/broker.js"></script>
   <script src="js/chart.js"></script>
   <script src="js/app.js"></script>
 </body>
