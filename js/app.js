@@ -622,26 +622,32 @@
       ' · levier 1:' + settings.leverage + ' · ' + esc(loaded.source) + ' · ' + view.length + ' bougies</span></div>';
 
     const kpi = (label, value, sub, c) => '<div class="panel kpi"><div class="label">' + label + '</div><div class="value ' + (c || '') + '">' + value + '</div><div class="sub">' + (sub || '&nbsp;') + '</div></div>';
+    // Rentabilité mensuelle (indicateur + fenêtre de détail)
+    const ms = monthlyStats(result, settings.capital);
+    const hasWd = ms.totalWithdrawn > 0, wdOn = !!settings.withdrawPct;
+    // Avec les retraits : le profit est ce qui a été retiré ; le résultat global (avec le capital restant) reste indiqué.
+    const perMonth = wdOn ? ms.avgWithdrawn : ms.avg;
     html += '<div class="kpis">' +
-      (s.withdrawals
-        ? kpi('Capital + retraits', money.format(s.finalEquity), 'compte ' + money.format(s.finalAccount) + ' · retiré ' + money.format(s.totalWithdrawn)) +
-          kpi('Retraits fictifs', String(s.withdrawals), 'total ' + money.format(s.totalWithdrawn), 'pos')
-        : kpi('Capital final', money.format(s.finalEquity), 'départ ' + money.format(s.initialCapital))) +
-      kpi('Profit net', signed(s.netProfit, money), signed(s.returnPct, num2) + ' %', cls(s.netProfit)) +
+      (wdOn
+        ? kpi('Capital restant', money.format(s.finalAccount), 'départ ' + money.format(s.initialCapital), cls(s.finalAccount - s.initialCapital)) +
+          kpi('Profit retiré', money.format(s.totalWithdrawn || 0), (s.withdrawals || 0) + ' retrait' + (s.withdrawals > 1 ? 's' : '') + ' · résultat global ' +
+            signed(s.netProfit, money) + ' (' + signed(s.returnPct, num1) + ' %)', s.totalWithdrawn > 0 ? 'pos' : '')
+        : kpi('Capital final', money.format(s.finalEquity), 'départ ' + money.format(s.initialCapital)) +
+          kpi('Profit net', signed(s.netProfit, money), signed(s.returnPct, num2) + ' %', cls(s.netProfit))) +
+      '<div class="panel kpi"><div class="label">Rentabilité mensuelle</div><div class="value ' + cls(perMonth) + '">' + (wdOn ? money.format(perMonth) : signed(perMonth, money)) +
+        '<small> /mois</small></div><div class="sub">' + (wdOn ? 'retiré en moyenne · ' : '') + signed((perMonth / settings.capital) * 100, num2) + ' % du capital · ' +
+        '<button type="button" class="link" id="monthlyBtn">Voir les détails</button></div></div>' +
       kpi('Trades', String(s.trades), num1.format(s.winRate) + ' % gagnants') +
       kpi('Profit factor', Number.isFinite(s.profitFactor) ? num2.format(s.profitFactor) : '∞', 'gains / pertes', s.profitFactor >= 1 ? 'pos' : s.trades ? 'neg' : '') +
       kpi('Drawdown max', '−' + num2.format(s.maxDrawdownPct) + ' %', '−' + money.format(s.maxDrawdownAmount), s.maxDrawdownPct > 0 ? 'neg' : '') +
       kpi('Ratio de Sharpe', signed(s.sharpe, num2), 'annualisé', cls(s.sharpe)) +
       '</div>';
 
-    // Rentabilité mensuelle
-    const ms = monthlyStats(result, settings.capital);
-    const hasWd = ms.totalWithdrawn > 0;
     const mk = (label, value, sub, c) => '<div><div class="label">' + label + '</div><div class="value ' + (c || '') + '">' + value + '</div><div class="sub">' + (sub || '&nbsp;') + '</div></div>';
-    html += '<div class="panel card"><div class="card-head"><h3>Rentabilité mensuelle</h3><div class="legend"><span><i style="background:var(--up)"></i>Mois gagnant</span>' +
+    const monthlyHtml = '<div class="card-head"><h3>Mois par mois</h3><div class="legend"><span><i style="background:var(--up)"></i>Mois gagnant</span>' +
       '<span><i style="background:var(--down)"></i>Mois perdant</span>' + (hasWd ? '<span><i class="star-ico"></i>Retrait</span>' : '') + '</div></div>' +
       '<div class="monthly-kpis">' +
-      mk('Rapporte en moyenne par mois', signed(ms.avg, money), signed(ms.avgPct, num2) + ' % du capital de départ, sur ' + num1.format(ms.nMonths) + ' mois', cls(ms.avg)) +
+      mk(hasWd ? 'Résultat global par mois (compte + retraits)' : 'Rapporte en moyenne par mois', signed(ms.avg, money), signed(ms.avgPct, num2) + ' % du capital de départ, sur ' + num1.format(ms.nMonths) + ' mois', cls(ms.avg)) +
       (hasWd ? mk('Retiré en moyenne par mois', money.format(ms.avgWithdrawn), 'total retiré ' + money.format(ms.totalWithdrawn), 'pos') : '') +
       mk('Mois gagnants', ms.positive + ' / ' + ms.months.length, num1.format((100 * ms.positive) / ms.months.length) + ' % des mois') +
       mk('Meilleur mois', signed(ms.best.gain, money), monthLong(ms.best.key), cls(ms.best.gain)) +
@@ -651,7 +657,7 @@
       (hasWd ? '<th>Retiré</th>' : '') + '<th>' + (hasWd ? 'Compte + retraits' : 'Capital') + ' en fin de mois</th></tr></thead><tbody>' +
       ms.months.map((m) => '<tr><td class="l">' + monthLong(m.key) + '</td><td class="' + cls(m.gain) + '">' + signed(m.gain, money) + '</td><td class="' + cls(m.pct) + '">' +
         signed(m.pct, num1) + ' %</td>' + (hasWd ? '<td>' + (m.withdrawn ? money.format(m.withdrawn) : '—') + '</td>' : '') + '<td>' + money.format(m.end) + '</td></tr>').join('') +
-      '</tbody></table></div></details></div>';
+      '</tbody></table></div></details>';
 
     // Capital moyen sur la période : moyenne de la courbe, et le gain moyen qu'elle représente.
     const hasW = result.withdrawals && result.withdrawals.length;
@@ -701,11 +707,12 @@
 
     $('results').innerHTML = html;
 
-    F.chart.mountBars($('monthlyChart'), {
+    monthlyView = { html: monthlyHtml, sub: strat.name + ' · ' + settings.pair + ' · du ' + frDate(dates[0]) + ' au ' + frDate(dates[dates.length - 1]), bars: {
       labels: ms.months.map((m) => monthLabel(m.key)), values: ms.months.map((m) => m.gain), ariaLabel: 'Gain de chaque mois',
       format: (v) => compact(v), stars: ms.months.map((m, i) => (m.withdrawn > 0 ? i : -1)).filter((i) => i >= 0),
       titles: ms.months.map((m) => monthLong(m.key) + ' : ' + signed(m.gain, money) + ' (' + signed(m.pct, num1) + ' %)' + (m.withdrawn ? ' · retiré ' + money.format(m.withdrawn) : '')),
-    });
+    } };
+    $('monthlyBtn').addEventListener('click', openMonthly);
 
     // Graphique du capital
     F.chart.mount($('equityChart'), {
@@ -811,6 +818,21 @@
   }
   const monthLabel = (key) => shortDate(key + '-01');
   const monthLong = (key) => { const d = new Date(key + '-01T00:00:00Z'); return d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric', timeZone: 'UTC' }); };
+
+  // Fenêtre « Rentabilité mensuelle » : contenu préparé au rendu, graphique dessiné à l'ouverture (largeur connue).
+  let monthlyView = null;
+  function openMonthly() {
+    if (!monthlyView) return;
+    $('monthlySub').textContent = monthlyView.sub;
+    $('monthlyBody').innerHTML = monthlyView.html;
+    $('monthlyModal').hidden = false;
+    document.body.style.overflow = 'hidden';
+    F.chart.mountBars($('monthlyChart'), monthlyView.bars);
+    $('monthlyModal').querySelector('.close').focus();
+  }
+  function closeMonthly() { $('monthlyModal').hidden = true; document.body.style.overflow = ''; }
+  $('monthlyModal').addEventListener('click', (e) => { if (e.target.closest('[data-close]')) closeMonthly(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('monthlyModal').hidden) closeMonthly(); });
 
   /** Capital moyen sur la période et gain moyen correspondant (en % du capital de départ). */
   function averageGain(equity, capital) {
