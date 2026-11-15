@@ -54,6 +54,16 @@ ou EA installé dans MT5 via la passerelle) et remet règles, texte, stop-loss, 
 taille des positions dans le formulaire. La dernière simulation est aussi gardée automatiquement (Modèle →
 *Récupération*), et chaque ligne du tableau d'évaluation peut être rechargée.
 
+## Compte en ligne (Supabase)
+
+Connexion par identifiant et mot de passe (« zied » devient `zied@forexia.app` pour Supabase) : stratégies, simulations
+(avec leurs trades), évaluation, journal et dernière simulation sont enregistrés en ligne et retrouvés sur tout appareil.
+Chaque compte ne voit que ses propres données (Row Level Security). « Continuer sans compte » garde les données dans le
+navigateur ; elles sont versées dans le compte à la première connexion. La déconnexion retire les données de l'appareil.
+
+Mise en place (une fois) : dans Supabase, *SQL Editor* → coller `supabase/schema.sql` → *Run* ; dans *Authentication →
+Sign In / Providers*, désactiver « Confirm email ». L'adresse du projet et la clé publique sont dans `js/cloud.js`.
+
 **Base de données** (bouton en haut de page) : avec la passerelle (1.4+), tout est enregistré dans une base SQLite
 sur votre PC (`%APPDATA%\Forexia\forexia.db`) : stratégies, simulations (avec la liste de leurs trades) et un
 journal de toutes les actions (enregistrements, imports, améliorations, stratégies aléatoires, EA téléchargés,
@@ -202,6 +212,8 @@ js/french.js        stratégies en français + stratégie aléatoire
 js/enhancer.js      styles de trading et suggestions d'amélioration
 js/mql5.js          génération de l'Expert Advisor MetaTrader 5
 js/broker.js        backtest « courtier » identique à l'EA dans le testeur MT5
+js/cloud.js         comptes et données en ligne (Supabase)
+supabase/schema.sql tables et règles de sécurité à créer dans Supabase
 js/chart.js         graphiques SVG
 js/app.js           contrôleur de l'interface
 tests/run-tests.js  tests du moteur : npm test

@@ -198,6 +198,7 @@
     if (idx >= 0) list[idx] = s; else list.push(s);
     if (!storage.set(list) && !dbOn) { $('formError').textContent = 'Impossible d\'enregistrer : le stockage du navigateur est bloqué (navigation privée ?).'; return null; }
     dbPush('strategies/put', { name: s.name, data: s, updatedAt: s.savedAt });
+    cloudPush(() => C.putStrategy(s));
     logEvent('strategy.saved', 'Stratégie enregistrée : ' + s.name + (s.config ? ' (' + describeConfig(s.config) + ')' : ''), { name: s.name });
     if ($('stratName').value.trim() === s.name || !$('stratName').value.trim()) {
       refreshPresetSelect('saved:' + (idx >= 0 ? idx : list.length - 1));
@@ -215,7 +216,7 @@
     const list = storage.get();
     const [removed] = list.splice(+v.slice(6), 1);
     storage.set(list);
-    if (removed) { dbPush('strategies/delete', { name: removed.name }); logEvent('strategy.deleted', 'Stratégie supprimée : ' + removed.name, { strategy: removed }); }
+    if (removed) { dbPush('strategies/delete', { name: removed.name }); cloudPush(() => C.deleteStrategy(removed.name)); logEvent('strategy.deleted', 'Stratégie supprimée : ' + removed.name, { strategy: removed }); }
     refreshPresetSelect('preset:' + F.presets.list[0].id);
     applyPresetSelection();
     $('presetDesc').textContent = '« ' + (removed && removed.name) + ' » supprimée.';
@@ -559,7 +560,9 @@
       render({ bars, strat, settings, result, loaded, periodKey, warnings, config });
       recordEvaluation({ bars, strat, settings, result, loaded, periodKey, config });
       // Filet de sécurité : la dernière stratégie simulée est gardée, même non enregistrée.
-      try { localStorage.setItem('forexia.lastRun', JSON.stringify({ at: new Date().toISOString(), strategy: strat, config: config })); } catch (e) { /* ignoré */ }
+      const lastRunRec = { at: new Date().toISOString(), strategy: strat, config: config };
+      try { localStorage.setItem('forexia.lastRun', JSON.stringify(lastRunRec)); } catch (e) { /* ignoré */ }
+      cloudPush(() => C.putSettings({ lastRun: lastRunRec }));
       refreshPresetSelect($('preset').value);
     } catch (err) {
       $('formError').textContent = err.message;
@@ -1087,6 +1090,125 @@
   $('bridgeCloseGo').addEventListener('click', () => { $('bridgeConfirm').hidden = true; bridgeDeploy(true); });
   $('bridgeCloseCancel').addEventListener('click', () => { $('bridgeConfirm').hidden = true; bridgeStep('ko', 'Annulé : MetaTrader 5 n\'a pas été fermé.'); });
 
+  // ---------- Compte en ligne (Supabase) : connexion et synchronisation ----------
+  const C = F.cloud;
+  const GUEST_KEY = 'forexia.guest';
+  function cloudOn() { return !!C.user; }
+  function setSync(state, msg) {
+    $('syncState').className = 'sync ' + state;
+    $('syncState').title = { ok: 'Données synchronisées', run: 'Synchronisation…', ko: 'Synchronisation impossible : ' + (msg || '') }[state];
+  }
+  function cloudFail(e) {
+    setSync('ko', e && e.message);
+    if (e && e.code === 'auth') { renderUser(); showGate(e.message); }
+  }
+  function cloudPush(fn) {
+    if (!cloudOn()) return;
+    setSync('run');
+    fn().then(() => setSync('ok')).catch(cloudFail);
+  }
+  // Fusion appareil <-> compte : union des deux côtés, la version la plus récente l'emporte.
+  async function cloudSync() {
+    if (!cloudOn()) return;
+    setSync('run');
+    const remote = await C.listStrategies(), local = storage.get();
+    const byName = new Map(local.map((s) => [s.name, s]));
+    for (const r of remote) { const l = byName.get(r.name); if (!l || (r.savedAt || '') > (l.savedAt || '')) byName.set(r.name, r); }
+    for (const l of local) {
+      const r = remote.find((x) => x.name === l.name);
+      if (!r || (l.savedAt || '') > (r.savedAt || '')) await C.putStrategy(Object.assign({}, l, { savedAt: l.savedAt || new Date().toISOString() }));
+    }
+    storage.set([...byName.values()]);
+    const cur = $('preset').value;
+    refreshPresetSelect(cur.startsWith('saved:') ? 'preset:' + F.presets.list[0].id : cur);
+    const rs = await C.listSimulations();
+    const ls = evalList().map((e) => (e.key ? e : Object.assign(e, { key: e.at + '|' + e.name })));
+    const keys = new Set(rs.map((e) => e.key));
+    const missing = ls.filter((e) => !keys.has(e.key));
+    if (missing.length) await C.putSimulations(missing);
+    const all = new Map(rs.map((e) => [e.key, e]));
+    for (const e of ls) if (!all.has(e.key)) all.set(e.key, e);
+    evalSave([...all.values()].map((e) => { const c = Object.assign({}, e); delete c.tradeList; return c; }).sort((a, b) => (a.at < b.at ? -1 : 1)));
+    // Dernière simulation (récupération sur un autre appareil)
+    const st = await C.getSettings();
+    let localLast = null;
+    try { localLast = JSON.parse(localStorage.getItem('forexia.lastRun')); } catch (e) { /* ignoré */ }
+    if (st.lastRun && (!localLast || st.lastRun.at > localLast.at)) {
+      try { localStorage.setItem('forexia.lastRun', JSON.stringify(st.lastRun)); } catch (e) { /* ignoré */ }
+      refreshPresetSelect($('preset').value);
+    } else if (localLast && (!st.lastRun || localLast.at > st.lastRun.at)) {
+      await C.putSettings(Object.assign({}, st, { lastRun: localLast }));
+    }
+    setSync('ok');
+  }
+  function renderUser() {
+    const u = C.user;
+    $('userChip').hidden = !u;
+    $('loginBtn').hidden = !!u;
+    if (u) { $('userName').textContent = u.name; $('userAvatar').textContent = u.name.slice(0, 1); }
+  }
+  let authMode = 'login';
+  function setAuthMode(mode) {
+    authMode = mode;
+    const signup = mode === 'signup';
+    $('authTitle').textContent = signup ? 'Créer mon compte' : 'Connexion';
+    $('authConfirmField').hidden = !signup;
+    $('authSubmit').textContent = signup ? 'Créer le compte' : 'Se connecter';
+    $('authSwitchText').textContent = signup ? 'Déjà un compte ?' : 'Pas encore de compte ?';
+    $('authSwitch').textContent = signup ? 'Se connecter' : 'Créer mon compte';
+    $('authPassword').autocomplete = signup ? 'new-password' : 'current-password';
+    $('authError').textContent = '';
+  }
+  function showGate(msg, info) {
+    $('authGate').hidden = false;
+    $('authError').textContent = msg || '';
+    $('authError').classList.toggle('info', !!info);
+    setTimeout(() => $('authLogin').focus(), 0);
+  }
+  $('authSwitch').addEventListener('click', () => setAuthMode(authMode === 'login' ? 'signup' : 'login'));
+  $('loginBtn').addEventListener('click', () => { setAuthMode('login'); showGate(); });
+  $('authGuest').addEventListener('click', () => {
+    try { sessionStorage.setItem(GUEST_KEY, '1'); } catch (e) { /* ignoré */ }
+    $('authGate').hidden = true;
+    renderUser();
+  });
+  $('authForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const login = $('authLogin').value, pw = $('authPassword').value;
+    $('authError').textContent = '';
+    $('authError').classList.remove('info');
+    if (pw.length < 6) { $('authError').textContent = 'Mot de passe : 6 caractères minimum.'; return; }
+    if (authMode === 'signup' && pw !== $('authConfirm').value) { $('authError').textContent = 'Les deux mots de passe ne correspondent pas.'; return; }
+    $('authSubmit').disabled = true;
+    try {
+      if (authMode === 'signup') await C.signUp(login, pw); else await C.signIn(login, pw);
+      try { sessionStorage.removeItem(GUEST_KEY); } catch (err) { /* ignoré */ }
+      $('authPassword').value = $('authConfirm').value = '';
+      $('authGate').hidden = true;
+      renderUser();
+      await cloudSync().catch(cloudFail);
+      logEvent('auth.login', (authMode === 'signup' ? 'Compte créé et connexion : ' : 'Connexion : ') + C.user.name + ' (' + navigator.platform + ')');
+    } catch (err) {
+      $('authError').textContent = err.message;
+    } finally {
+      $('authSubmit').disabled = false;
+    }
+  });
+  $('logoutBtn').addEventListener('click', async () => {
+    // On envoie ce qui reste, puis on retire de cet appareil les données du compte.
+    await cloudSync().catch(() => {});
+    logEvent('auth.logout', 'Déconnexion : ' + C.user.name);
+    await C.signOut();
+    for (const k of ['forexia.strategies', 'forexia.evaluations', 'forexia.lastRun']) { try { localStorage.removeItem(k); } catch (e) { /* ignoré */ } }
+    evalMemory = null;
+    $('evalCount').textContent = '0';
+    refreshPresetSelect('preset:' + F.presets.list[0].id);
+    applyPresetSelection();
+    renderUser();
+    setAuthMode('login');
+    showGate('Vous êtes déconnecté.', true);
+  });
+
   // ---------- Base de données (SQLite sur le PC, via la passerelle) ----------
   // Le navigateur garde une copie locale ; la base est mise à jour à chaque action et resynchronisée à la connexion.
   let dbOn = false, dbInfo = null;
@@ -1099,7 +1221,10 @@
     if (!dbOn) return;
     dbCall(path, body).catch(() => { dbOn = false; dbBadge(); });
   }
-  function logEvent(type, summary, data) { dbPush('events/put', { type: type, summary: summary, data: data }); }
+  function logEvent(type, summary, data) {
+    dbPush('events/put', { type: type, summary: summary, data: data });
+    cloudPush(() => C.addEvent(type, summary, data));
+  }
   function dbBadge() {
     $('dbDot').className = 'dot ' + (dbOn ? 'on' : 'off');
     $('dbBtn').title = dbOn ? 'Base de données connectée : ' + (dbInfo ? dbInfo.path : '') : 'Base de données non connectée (données dans ce navigateur seulement)';
@@ -1142,11 +1267,12 @@
     const all = new Map(rs.map((e) => [e.key, e]));
     for (const e of ls) all.set(e.key, e);
     evalSave([...all.values()].map((e) => { const c = Object.assign({}, e); delete c.tradeList; return c; }).sort((a, b) => (a.at < b.at ? -1 : 1)));
+    if (cloudOn()) cloudSync().catch(cloudFail);
   }
   const EVENT_LABEL = {
     'strategy.saved': 'Enregistrement', 'strategy.deleted': 'Suppression', 'strategy.random': 'Aléatoire', 'strategy.enhanced': 'Amélioration',
     'strategy.imported': 'Import EA', simulation: 'Simulation', 'simulation.cleared': 'Évaluation effacée', 'ea.downloaded': 'EA téléchargé',
-    'mt5.compile': 'Compilation MT5', 'mt5.test': 'Test MT5', 'mt5.attach': 'Graphique MT5', 'mt5.comparison': 'Forexia / MT5',
+    'auth.login': 'Connexion', 'auth.logout': 'Déconnexion', 'mt5.compile': 'Compilation MT5', 'mt5.test': 'Test MT5', 'mt5.attach': 'Graphique MT5', 'mt5.comparison': 'Forexia / MT5',
   };
   async function openDatabase() {
     $('dbModal').hidden = false;
@@ -1155,6 +1281,7 @@
     await renderDatabase();
   }
   async function renderDatabase() {
+    if (cloudOn()) return renderCloudDatabase();
     if (!dbOn) await dbConnect();
     if (!dbOn) {
       $('dbStatus').innerHTML = '<p><b>Base non connectée.</b> Vos stratégies et simulations sont pour l\'instant seulement dans ce navigateur.</p>' +
@@ -1168,8 +1295,27 @@
     $('dbStatus').innerHTML = '<p><b>Base connectée</b> : <code>' + esc(dbInfo.path) + '</code> (' + num1.format(dbInfo.size / 1024) + ' Ko)</p>' +
       '<div class="db-counts"><span><b>' + c.strategies + '</b> stratégies</span><span><b>' + c.simulations + '</b> simulations</span><span><b>' + c.events + '</b> actions au journal</span></div>';
     $('dbExport').disabled = false;
+    renderJournal((await dbCall('events/list', { limit: 1000 })).items);
+  }
+  async function renderCloudDatabase() {
+    const u = C.user;
+    let events = [];
+    try {
+      const c = await C.counts();
+      $('dbStatus').innerHTML = '<p><b>Compte en ligne « ' + esc(u.name) + ' »</b> : vos données sont enregistrées en ligne et retrouvées sur tous vos appareils.</p>' +
+        '<div class="db-counts"><span><b>' + c.strategies + '</b> stratégies</span><span><b>' + c.simulations + '</b> simulations</span><span><b>' + c.events + '</b> actions au journal</span></div>' +
+        (dbOn && dbInfo ? '<p class="hint">Copie également tenue à jour dans la base du PC (passerelle) : <code>' + esc(dbInfo.path) + '</code></p>' : '');
+      $('dbExport').disabled = false;
+      events = await C.listEvents(1000);
+    } catch (e) {
+      $('dbStatus').innerHTML = '<p class="err">' + esc(e.message) + '</p>';
+      $('dbExport').disabled = true;
+    }
+    renderJournal(events);
+  }
+  function renderJournal(items) {
     const type = $('dbFilter').value;
-    const ev = (await dbCall('events/list', { limit: 1000 })).items.filter((e) => !type || e.type.indexOf(type) === 0);
+    const ev = items.filter((e) => !type || e.type.indexOf(type) === 0);
     $('dbBody').innerHTML = ev.length ? '<div class="table-wrap"><table class="eval"><thead><tr><th class="l">Date</th><th class="l">Action</th><th class="l">Détail</th></tr></thead><tbody>' +
       ev.map((e) => '<tr><td class="l">' + new Date(e.at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'medium' }) + '</td><td class="l"><span class="badge ev">' +
         esc(EVENT_LABEL[e.type] || e.type) + '</span></td><td class="l wrap">' + esc(e.summary || '') + '</td></tr>').join('') + '</tbody></table></div>'
@@ -1178,12 +1324,18 @@
   function closeDatabase() { $('dbModal').hidden = true; document.body.style.overflow = ''; }
   $('dbBtn').addEventListener('click', openDatabase);
   $('dbFilter').addEventListener('change', renderDatabase);
-  $('dbRefresh').addEventListener('click', async () => { if (dbOn) { await dbSyncAll().catch(() => {}); dbInfo = await dbCall('info').catch(() => dbInfo); } renderDatabase(); });
+  $('dbRefresh').addEventListener('click', async () => {
+    if (dbOn) { await dbSyncAll().catch(() => {}); dbInfo = await dbCall('info').catch(() => dbInfo); }
+    if (cloudOn()) await cloudSync().catch(() => {});
+    renderDatabase();
+  });
   $('dbModal').addEventListener('click', (e) => { if (e.target.closest('[data-close]')) closeDatabase(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('dbModal').hidden) closeDatabase(); });
   $('dbExport').addEventListener('click', async () => {
     try {
-      const data = await dbCall('export');
+      const data = cloudOn()
+        ? { exportedAt: new Date().toISOString(), account: C.user.name, strategies: await C.listStrategies(), simulations: await C.listSimulations(), events: await C.listEvents(10000) }
+        : await dbCall('export');
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob); a.download = 'forexia-base-' + F.data.iso(new Date()) + '.json';
@@ -1284,8 +1436,10 @@
     list.push(entry);
     evalSave(list);
     // Dans la base : la simulation complète, avec la liste de ses trades.
-    dbPush('simulations/put', Object.assign({}, entry, { tradeList: c.result.trades.map((t) => ({
-      dir: t.dir, entryDate: t.entryDate, exitDate: t.exitDate, entryPrice: t.entryPrice, exitPrice: t.exitPrice, lots: t.lots, pips: t.pips, pnl: t.pnl, reason: t.reason })) }));
+    const full = Object.assign({}, entry, { tradeList: c.result.trades.map((t) => ({
+      dir: t.dir, entryDate: t.entryDate, exitDate: t.exitDate, entryPrice: t.entryPrice, exitPrice: t.exitPrice, lots: t.lots, pips: t.pips, pnl: t.pnl, reason: t.reason })) });
+    dbPush('simulations/put', full);
+    cloudPush(() => C.putSimulations([full]));
     logEvent('simulation', 'Simulation : ' + entry.name + ' · ' + entry.pair + ' · ' + entry.data + ' → ' + signed(entry.returnPct, num2) + ' % (gain moyen ' + signed(entry.avgGainPct, num1) + ' %)', { key: entry.key });
   }
   const mean = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
@@ -1362,7 +1516,7 @@
       const list = evalList();
       const [gone] = list.splice(+del.dataset.del, 1);
       evalSave(list);
-      if (gone && gone.key) dbPush('simulations/delete', { key: gone.key });
+      if (gone && gone.key) { dbPush('simulations/delete', { key: gone.key }); cloudPush(() => C.deleteSimulation(gone.key)); }
       renderEvaluation();
     }
   });
@@ -1373,6 +1527,7 @@
     const n = evalList().length;
     evalSave([]);
     dbPush('simulations/clear', {});
+    cloudPush(() => C.clearSimulations());
     logEvent('simulation.cleared', 'Tableau d\'évaluation effacé (' + n + ' simulations)');
     $('evalConfirm').hidden = true;
     renderEvaluation();
@@ -1393,6 +1548,12 @@
   });
   $('evalCount').textContent = evalList().length;
   dbBadge();
+  // Au chargement : compte en ligne (ou écran de connexion), puis base du PC si la passerelle tourne.
+  renderUser();
+  let guest = false;
+  try { guest = sessionStorage.getItem(GUEST_KEY) === '1'; } catch (e) { /* ignoré */ }
+  if (cloudOn()) cloudSync().catch(cloudFail);
+  else if (!guest) showGate();
   // Au chargement : connexion silencieuse à la base si la passerelle tourne déjà.
   if (bridgeToken) fetch(BRIDGE_URL + '/ping').then(() => dbConnect()).catch(() => {});
 
