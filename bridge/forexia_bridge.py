@@ -27,7 +27,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
-VERSION = "1.1"
+VERSION = "1.2"
 DEFAULT_PORT = 8787
 PAGE_ORIGIN = "https://zied99.github.io"
 FILE_RE = re.compile(r"^Forexia_[A-Za-z0-9_]{1,60}\.mq5$")
@@ -268,8 +268,9 @@ def run_test(args, term, body):
 
 
 # ---------------------------------------------------------------- données du courtier
-SUB_TF = {"D1": "M15", "H4": "M5", "H1": "M5", "M30": "M1", "M15": "M1"}  # assez fin pour voir le pic de spread de minuit
-MAX_SUB_BARS = 250000
+# Bougies fines : M1, comme le mode « 1 minute OHLC » du testeur MT5 (repli sur M5 / M15 si la période est très longue).
+SUB_TF = ["M1", "M5", "M15"]
+MAX_SUB_BARS = 1600000
 
 
 def _mt5_module(args):
@@ -325,12 +326,21 @@ def broker_bars(args, term, body):
         if len(bars) < 30:
             return {"ok": False, "message": "MT5 n'a renvoyé que %d bougies %s %s : historique indisponible pour cette période "
                                             "(ouvrez un graphique %s %s dans MT5 pour le télécharger, puis réessayez)." % (len(bars), symbol, tf, symbol, tf)}
-        sub, sub_tf = [], SUB_TF.get(tf) if body.get("intrabar", True) else None
-        if sub_tf:
+        sub, sub_tf = None, None
+        if body.get("intrabar", True):
             first_test = datetime.strptime(str(body.get("testFrom", date_from)), "%Y-%m-%d").replace(tzinfo=timezone.utc)
-            sub = _rates(mt5, symbol, tfc(sub_tf), first_test, end)
-            if len(sub) > MAX_SUB_BARS:
-                sub, sub_tf = [], None
+            minutes = {"M1": 1, "M5": 5, "M15": 15, "M30": 30, "H1": 60, "H4": 240, "D1": 1440}
+            for cand in SUB_TF:
+                if minutes[cand] >= minutes[tf]:
+                    break
+                if (end - first_test).total_seconds() / 60 / minutes[cand] * 5 / 7 > MAX_SUB_BARS:
+                    continue
+                rows = _rates(mt5, symbol, tfc(cand), first_test, end)
+                if rows:
+                    # En colonnes (bien plus compact que des objets) : t, open, high, low, close, spread
+                    sub = {k: [r[i] for r in rows] for i, k in enumerate(("t", "open", "high", "low", "close", "spread"))}
+                    sub_tf = cand
+                    break
         conv = None
         if info.currency_profit != acc.currency:
             for name, divide in ((acc.currency + info.currency_profit, True), (info.currency_profit + acc.currency, False)):
@@ -414,9 +424,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Max-Age", "600")
 
     def _send(self, code, obj):
-        data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        data = json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        gz = len(data) > 100000 and "gzip" in self.headers.get("Accept-Encoding", "")
+        if gz:
+            import gzip
+            data = gzip.compress(data, compresslevel=5)
         self.send_response(code)
         self._cors()
+        if gz:
+            self.send_header("Content-Encoding", "gzip")
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()

@@ -174,8 +174,8 @@ def main():
     check("EA ouvert sur un graphique", js.get("ok") and vals.get("Expert") == "Forexia\\Forexia_Test" and vals.get("Symbol") == "GBPUSD", (js, vals))
 
     st, js, _ = call("POST", "/bars", {"terminalId": tid, "symbol": "GBPUSD", "timeframe": "D1", "from": "2023-01-01", "to": "2024-12-31", "testFrom": "2024-01-01"})
-    check("bougies du courtier (D1) + bougies fines (M15)", js.get("ok") and len(js["bars"]) == 730 and js["subTimeframe"] == "M15"
-          and len(js["sub"]) == 365 * 96 and js["bars"][0][5] == 14, {k: (v if not isinstance(v, list) else len(v)) for k, v in js.items()})
+    check("bougies du courtier (D1) + bougies fines M1 en colonnes", js.get("ok") and len(js["bars"]) == 730 and js["subTimeframe"] == "M1"
+          and len(js["sub"]["t"]) == 365 * 1440 and len(js["sub"]["spread"]) == 365 * 1440 and js["bars"][0][5] == 14, {k: (v if not isinstance(v, list) else len(v)) for k, v in js.items()})
     check("caractéristiques du symbole et du compte", js.get("spec", {}).get("contract") == 100000 and js["spec"]["swapLong"] == -7.5
           and js["account"]["currency"] == "EUR" and js["account"]["leverage"] == 100, js.get("spec"))
     check("conversion USD -> EUR via EURUSD", (js.get("conv") or {}).get("symbol") == "EURUSD" and js["conv"]["divide"] is True and len(js["conv"]["rates"]) == 730, js.get("conv", {}).get("symbol"))

@@ -25,7 +25,7 @@
 
   let lastFocusedRule = $('longEntry');
   const BRIDGE_URL = 'http://127.0.0.1:8787';
-  const BRIDGE_MIN = '1.1'; // version minimale de la passerelle attendue par cette page
+  const BRIDGE_MIN = '1.2'; // version minimale de la passerelle attendue par cette page
   let bridgeToken = '';
   try { bridgeToken = localStorage.getItem('forexia.bridgeToken') || ''; } catch (e) { /* ignoré */ }
   let csvBars = null, csvName = '';
@@ -84,7 +84,7 @@
   }
   function applyConfig(c) {
     if (!c) return;
-    if (F.data.PAIRS.includes(c.pair)) $('pair').value = c.pair;
+    if (F.data.PAIRS.includes(c.pair)) { $('pair').value = c.pair; syncBrokerSymbol(false); }
     if (LEVERAGES.includes(c.leverage)) $('leverage').value = String(c.leverage);
     if (c.capital) $('capital').value = c.capital;
     if (c.exposurePct) $('exposure').value = c.exposurePct;
@@ -101,6 +101,7 @@
       $('brokerSymbol').value = b.symbol; $('brokerTf').value = b.tf; $('brokerSizing').value = b.sizing; $('brokerLots').value = b.lots;
       $('brokerRisk').value = b.risk; $('brokerMaxLots').value = b.maxLots; $('brokerMaxSpread').value = b.maxSpread; $('brokerIntrabar').checked = b.intrabar;
       $('brokerSizing').dispatchEvent(new Event('change'));
+      syncBrokerSymbol(false);
     }
     updateWicksField();
   }
@@ -357,8 +358,17 @@
   document.querySelectorAll('input[name=source]').forEach((r) => r.addEventListener('change', updateWicksField));
   $('pair').addEventListener('change', () => {
     if (!(sourceValue() === 'csv' && csvMeta && csvMeta.spreadPips)) $('spread').value = F.data.TYPICAL_SPREAD[$('pair').value] || 1.5;
-    $('brokerSymbol').value = $('pair').value.replace('/', '');
+    syncBrokerSymbol(true);
   });
+  // Le symbole MT5 suit la paire choisie ; un suffixe du courtier (GBPUSD.m, GBPUSDpro…) est conservé.
+  function syncBrokerSymbol(force) {
+    const code = $('pair').value.replace('/', ''), cur = $('brokerSymbol').value.trim();
+    if (force || !cur || cur.toUpperCase().indexOf(code) !== 0) {
+      const suffix = /^[A-Z]{6}(.*)$/i.exec(cur);
+      $('brokerSymbol').value = code + (suffix ? suffix[1] : '');
+    }
+  }
+  syncBrokerSymbol(false);
   $('brokerSizing').addEventListener('change', () => {
     $('brokerLotsField').hidden = $('brokerSizing').value !== 'fixed';
     $('brokerRiskField').hidden = $('brokerSizing').value !== 'risk';
@@ -395,9 +405,20 @@
     const iso = new Date(r[0] * 1000).toISOString();
     return { t: r[0], date: intraday ? iso.slice(0, 10) + ' ' + iso.slice(11, 16) : iso.slice(0, 10), open: r[1], high: r[2], low: r[3], close: r[4], spread: r[5] };
   }
+  // Bougies fines reçues en colonnes -> objets (une seule fois par chargement).
+  function subBars(sub) {
+    if (!sub) return [];
+    if (Array.isArray(sub)) return sub.map((x) => toBar(x, true));
+    const out = new Array(sub.t.length);
+    for (let i = 0; i < sub.t.length; i++) out[i] = { t: sub.t[i], open: sub.open[i], high: sub.high[i], low: sub.low[i], close: sub.close[i], spread: sub.spread[i] };
+    return out;
+  }
   async function loadBrokerBars(range) {
     if (!bridgeToken) throw new Error('Connectez la passerelle MT5 (section Données) pour utiliser les données de votre courtier.');
-    const tf = $('brokerTf').value, symbol = $('brokerSymbol').value.trim();
+    const tf = $('brokerTf').value, symbol = $('brokerSymbol').value.trim(), code = $('pair').value.replace('/', '');
+    if (symbol.toUpperCase().indexOf(code) !== 0) {
+      throw new Error('Le symbole MT5 « ' + symbol + ' » ne correspond pas à la paire ' + $('pair').value + ' : corrigez « Symbole dans MT5 » (section Données).');
+    }
     // Historique de préchauffage : 800 jours en D1, environ 1 300 bougies en intraday (l'EA en utilise 1 000).
     const warmDays = tf === 'D1' ? 800 : Math.ceil((1300 * TF_MINUTES[tf]) / 1440 * 7 / 5) + 4;
     const from = new Date(range.start); from.setUTCDate(from.getUTCDate() - warmDays);
@@ -416,7 +437,7 @@
     const r = brokerCache.get(key), intraday = tf !== 'D1';
     return {
       bars: r.bars.map((x) => toBar(x, intraday)), range: range, timeframe: tf, symbol: r.symbol,
-      broker: { spec: r.spec, account: r.account, conv: r.conv, sub: (r.sub || []).map((x) => toBar(x, true)) },
+      broker: { spec: r.spec, account: r.account, conv: r.conv, sub: subBars(r.sub) },
       source: 'Courtier MT5 ' + r.account.server + ' · ' + r.symbol + ' ' + tf + (r.subTimeframe ? ' (détail ' + r.subTimeframe + ')' : '') + ' · montants en ' + r.account.currency,
       info: 'Simulation avec les bougies, spreads et swaps de votre courtier, et les mêmes règles que l\'EA (lots arrondis, plafond, marge). ' +
         (r.conversionMissing ? '<b>Conversion vers ' + esc(r.account.currency) + ' introuvable : montants en ' + esc(r.spec.currencyProfit) + '.</b> ' : '') +
@@ -836,7 +857,7 @@
       ? 'Forexia a simulé avec les données de votre courtier et les règles de cet EA : le testeur MT5 doit donner le même résultat (le tableau « trade par trade » montre les éventuelles différences). Passez ensuite sur un compte démo avant le réel.'
       : 'Ce backtest Forexia n\'utilise pas les données de votre courtier : les résultats MT5 seront différents. Pour une simulation identique, choisissez la source « Mon courtier (MetaTrader 5) ». Testez toujours sur un compte démo avant le réel.';
     refreshDeploy();
-    $('bridgeSymbol').value = settings.symbol || settings.pair.replace('/', '');
+    $('bridgeSymbol').value = settings.symbol || $('brokerSymbol').value || settings.pair.replace('/', '');
     $('bridgeLog').innerHTML = '';
     $('bridgeConfirm').hidden = true;
     checkBridge();
