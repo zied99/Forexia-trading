@@ -196,7 +196,9 @@
     const idx = list.findIndex((x) => x.name === s.name);
     delete s.description;
     if (idx >= 0) list[idx] = s; else list.push(s);
-    if (!storage.set(list)) { $('formError').textContent = 'Impossible d\'enregistrer : le stockage du navigateur est bloqué (navigation privée ?).'; return null; }
+    if (!storage.set(list) && !dbOn) { $('formError').textContent = 'Impossible d\'enregistrer : le stockage du navigateur est bloqué (navigation privée ?).'; return null; }
+    dbPush('strategies/put', { name: s.name, data: s, updatedAt: s.savedAt });
+    logEvent('strategy.saved', 'Stratégie enregistrée : ' + s.name + (s.config ? ' (' + describeConfig(s.config) + ')' : ''), { name: s.name });
     if ($('stratName').value.trim() === s.name || !$('stratName').value.trim()) {
       refreshPresetSelect('saved:' + (idx >= 0 ? idx : list.length - 1));
       $('deleteStrat').hidden = false;
@@ -213,6 +215,7 @@
     const list = storage.get();
     const [removed] = list.splice(+v.slice(6), 1);
     storage.set(list);
+    if (removed) { dbPush('strategies/delete', { name: removed.name }); logEvent('strategy.deleted', 'Stratégie supprimée : ' + removed.name, { strategy: removed }); }
     refreshPresetSelect('preset:' + F.presets.list[0].id);
     applyPresetSelection();
     $('presetDesc').textContent = '« ' + (removed && removed.name) + ' » supprimée.';
@@ -278,6 +281,7 @@
     $('preset').value = 'mine';
     $('deleteStrat').hidden = true;
     $('presetDesc').textContent = s.description;
+    logEvent('strategy.random', 'Stratégie aléatoire : ' + s.name, { strategy: s });
     $('form').requestSubmit();
   });
 
@@ -399,6 +403,7 @@
       bridgeTerms = st.terminals || [];
       if (!bridgeTerms.length) throw new Error('MT5 introuvable');
       const old = !st.version || st.version < BRIDGE_MIN;
+      if (!dbOn) dbConnect();
       $('brokerState').textContent = old ? 'passerelle à mettre à jour (v' + (st.version || '?') + ')' : 'connectée (v' + st.version + ')';
       $('brokerState').className = 'pill ' + (old ? 'ko' : 'ok');
       if (old) { $('brokerConnectBox').hidden = false; }
@@ -827,6 +832,7 @@
     $('presetDesc').textContent = 'Améliorations appliquées : ' + sel.map((x) => x.title).join(' ; ') + '.' +
       (s.frenchText ? '' : ' Le texte français ne peut pas décrire ces réglages : voir « Règles techniques ».');
     if (!s.frenchText) $('rulesDetails').open = true;
+    logEvent('strategy.enhanced', 'Améliorations appliquées à ' + strat.name + ' : ' + sel.map((x) => x.title).join(' ; '), { before: strat, after: s, leverage: c.settings.leverage });
     updateStyleHint();
     closeEnhancer();
     $('form').requestSubmit();
@@ -908,6 +914,7 @@
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     $('depNotice').textContent = 'Fichier « ' + deployed.fileName + ' » téléchargé. Suivez les étapes ci-dessous pour l\'installer.';
+    logEvent('ea.downloaded', 'EA téléchargé : ' + deployed.fileName, { fileName: deployed.fileName, strategy: lastRunCtx.strat });
   });
   $('depCopy').addEventListener('click', async () => {
     if (!deployed) return;
@@ -944,6 +951,7 @@
       $('bridgeTerminal').innerHTML = terms.map((t) => '<option value="' + esc(t.id) + '">' + esc(t.name) + ' — ' + esc(t.dataDir) + '</option>').join('');
       if (!terms.length) { bridgeState('MT5 introuvable', 'ko'); $('bridgeSetup').hidden = false; return; }
       bridgeState(st.version && st.version < BRIDGE_MIN ? 'passerelle à mettre à jour' : 'connectée', st.version && st.version < BRIDGE_MIN ? 'ko' : 'ok');
+      if (!dbOn) dbConnect();
       if (st.version && st.version < BRIDGE_MIN) { $('bridgeSetup').hidden = false; }
       $('bridgeReady').hidden = false;
     } catch (e) {
@@ -1056,6 +1064,10 @@
         if (r.needClose) { s.remove(); $('bridgeConfirm').hidden = false; return; }
         if (!r.ok) { s.set('ko', esc(r.message)); return; }
         s.set('ok tested', 'Test MT5 terminé en ' + r.seconds + ' s.' + compareHtml(r.result));
+        const f = lastRun.stats, m = r.result, same = (/(\d+) identiques sur (\d+)/.exec($('bridgeLog').textContent) || []);
+        logEvent('mt5.comparison', 'Forexia ' + signed(f.returnPct, num2) + ' % / MT5 ' + signed(m.deposit ? (100 * m.profit) / m.deposit : 0, num2) + ' % · ' +
+          f.trades + ' / ' + m.trades + ' trades' + (same[1] ? ' · ' + same[1] + ' identiques sur ' + same[2] : '') + ' — ' + lastRunCtx.strat.name,
+          { strategy: lastRunCtx.strat.name, fileName: deployed.fileName, forexia: f, mt5: Object.assign({}, m, { deals: undefined }) });
         mayClose = true;
       }
       if ($('bridgeAttach').checked) {
@@ -1075,6 +1087,111 @@
   $('bridgeCloseGo').addEventListener('click', () => { $('bridgeConfirm').hidden = true; bridgeDeploy(true); });
   $('bridgeCloseCancel').addEventListener('click', () => { $('bridgeConfirm').hidden = true; bridgeStep('ko', 'Annulé : MetaTrader 5 n\'a pas été fermé.'); });
 
+  // ---------- Base de données (SQLite sur le PC, via la passerelle) ----------
+  // Le navigateur garde une copie locale ; la base est mise à jour à chaque action et resynchronisée à la connexion.
+  let dbOn = false, dbInfo = null;
+  async function dbCall(path, body) {
+    const r = await bridgeCall('POST', '/db/' + path, body || {});
+    if (!r || r.ok === false) throw new Error((r && r.message) || 'Erreur de base de données');
+    return r;
+  }
+  function dbPush(path, body) {
+    if (!dbOn) return;
+    dbCall(path, body).catch(() => { dbOn = false; dbBadge(); });
+  }
+  function logEvent(type, summary, data) { dbPush('events/put', { type: type, summary: summary, data: data }); }
+  function dbBadge() {
+    $('dbDot').className = 'dot ' + (dbOn ? 'on' : 'off');
+    $('dbBtn').title = dbOn ? 'Base de données connectée : ' + (dbInfo ? dbInfo.path : '') : 'Base de données non connectée (données dans ce navigateur seulement)';
+  }
+  async function dbConnect() {
+    if (!bridgeToken) { dbOn = false; dbBadge(); return; }
+    try {
+      dbInfo = await dbCall('info');
+      dbOn = true;
+      await dbSyncAll();
+      dbInfo = await dbCall('info');
+    } catch (e) { dbOn = false; }
+    dbBadge();
+  }
+  async function dbSyncAll() {
+    // Stratégies : union des deux côtés, la plus récente l'emporte pour un même nom.
+    const remote = (await dbCall('strategies/list')).items;
+    const local = storage.get();
+    const byName = new Map(local.map((s) => [s.name, s]));
+    for (const r of remote) {
+      const l = byName.get(r.name);
+      if (!l || (r.data.savedAt || '') > (l.savedAt || '')) byName.set(r.name, r.data);
+    }
+    for (const l of local) {
+      const r = remote.find((x) => x.name === l.name);
+      if (!r || (l.savedAt || '') > (r.data.savedAt || '')) await dbCall('strategies/put', { name: l.name, data: l, updatedAt: l.savedAt });
+    }
+    const merged = [...byName.values()];
+    storage.set(merged);
+    const cur = $('preset').value;
+    refreshPresetSelect(cur.startsWith('saved:') ? 'preset:' + F.presets.list[0].id : cur);
+    // Simulations : union par identifiant (date + nom), ordre chronologique.
+    // (anciennes entrées : liste des trades rangée dans « trades » -> « tradeList », « trades » = nombre)
+    const rs = (await dbCall('simulations/list', { limit: 5000 })).items.map((e) =>
+      (Array.isArray(e.trades) ? Object.assign({}, e, { tradeList: e.trades, trades: e.trades.length }) : e));
+    const ls = evalList().map((e) => (e.key ? e : Object.assign(e, { key: e.at + '|' + e.name })));
+    const keys = new Set(rs.map((e) => e.key));
+    const missing = ls.filter((e) => !keys.has(e.key));
+    if (missing.length) await dbCall('simulations/put', { items: missing });
+    const all = new Map(rs.map((e) => [e.key, e]));
+    for (const e of ls) all.set(e.key, e);
+    evalSave([...all.values()].map((e) => { const c = Object.assign({}, e); delete c.tradeList; return c; }).sort((a, b) => (a.at < b.at ? -1 : 1)));
+  }
+  const EVENT_LABEL = {
+    'strategy.saved': 'Enregistrement', 'strategy.deleted': 'Suppression', 'strategy.random': 'Aléatoire', 'strategy.enhanced': 'Amélioration',
+    'strategy.imported': 'Import EA', simulation: 'Simulation', 'simulation.cleared': 'Évaluation effacée', 'ea.downloaded': 'EA téléchargé',
+    'mt5.compile': 'Compilation MT5', 'mt5.test': 'Test MT5', 'mt5.attach': 'Graphique MT5', 'mt5.comparison': 'Forexia / MT5',
+  };
+  async function openDatabase() {
+    $('dbModal').hidden = false;
+    document.body.style.overflow = 'hidden';
+    $('dbModal').querySelector('.close').focus();
+    await renderDatabase();
+  }
+  async function renderDatabase() {
+    if (!dbOn) await dbConnect();
+    if (!dbOn) {
+      $('dbStatus').innerHTML = '<p><b>Base non connectée.</b> Vos stratégies et simulations sont pour l\'instant seulement dans ce navigateur.</p>' +
+        '<p class="hint">Lancez la passerelle (version 1.4 ou plus, fichiers dans <i>Déployer → Envoi direct</i>) et connectez-la : tout sera enregistré dans une base SQLite sur votre PC ' +
+        '(<code>%APPDATA%\\Forexia\\forexia.db</code>), y compris ce qui est déjà dans ce navigateur.</p>';
+      $('dbBody').innerHTML = ''; $('dbExport').disabled = true;
+      return;
+    }
+    try { dbInfo = await dbCall('info'); } catch (e) { /* on garde les derniers chiffres */ }
+    const c = dbInfo.counts;
+    $('dbStatus').innerHTML = '<p><b>Base connectée</b> : <code>' + esc(dbInfo.path) + '</code> (' + num1.format(dbInfo.size / 1024) + ' Ko)</p>' +
+      '<div class="db-counts"><span><b>' + c.strategies + '</b> stratégies</span><span><b>' + c.simulations + '</b> simulations</span><span><b>' + c.events + '</b> actions au journal</span></div>';
+    $('dbExport').disabled = false;
+    const type = $('dbFilter').value;
+    const ev = (await dbCall('events/list', { limit: 1000 })).items.filter((e) => !type || e.type.indexOf(type) === 0);
+    $('dbBody').innerHTML = ev.length ? '<div class="table-wrap"><table class="eval"><thead><tr><th class="l">Date</th><th class="l">Action</th><th class="l">Détail</th></tr></thead><tbody>' +
+      ev.map((e) => '<tr><td class="l">' + new Date(e.at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'medium' }) + '</td><td class="l"><span class="badge ev">' +
+        esc(EVENT_LABEL[e.type] || e.type) + '</span></td><td class="l wrap">' + esc(e.summary || '') + '</td></tr>').join('') + '</tbody></table></div>'
+      : '<p class="eval-empty">Aucune action enregistrée pour l\'instant.</p>';
+  }
+  function closeDatabase() { $('dbModal').hidden = true; document.body.style.overflow = ''; }
+  $('dbBtn').addEventListener('click', openDatabase);
+  $('dbFilter').addEventListener('change', renderDatabase);
+  $('dbRefresh').addEventListener('click', async () => { if (dbOn) { await dbSyncAll().catch(() => {}); dbInfo = await dbCall('info').catch(() => dbInfo); } renderDatabase(); });
+  $('dbModal').addEventListener('click', (e) => { if (e.target.closest('[data-close]')) closeDatabase(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('dbModal').hidden) closeDatabase(); });
+  $('dbExport').addEventListener('click', async () => {
+    try {
+      const data = await dbCall('export');
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = 'forexia-base-' + F.data.iso(new Date()) + '.json';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    } catch (e) { $('dbStatus').insertAdjacentHTML('beforeend', '<p class="err">' + esc(e.message) + '</p>'); }
+  });
+
   // ---------- Import d'un EA Forexia ----------
   function importEA(parsed, fileName) {
     const { strategy, config } = parsed;
@@ -1092,6 +1209,7 @@
     $('presetDesc').textContent = 'Importée depuis « ' + fileName + ' »' + (config.resultPct != null ? ' (résultat au déploiement : ' + signed(config.resultPct, num2) + ' %)' : '') +
       '. Pensez à « Enregistrer la stratégie ».';
     $('importNotice').textContent = '« ' + s.name + ' » importée : vérifiez la source des données puis lancez le backtest.';
+    logEvent('strategy.imported', 'EA importé : ' + fileName + ' → ' + s.name, { fileName: fileName, strategy: s, config: config });
     updateStyleHint();
     $('stratName').scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
@@ -1157,6 +1275,7 @@
       rules: [c.strat.longEntry, c.strat.longExit, c.strat.shortEntry, c.strat.shortExit, c.strat.stopLossPips, c.strat.takeProfitPips].join('|'),
       strategy: c.strat, config: c.config,
     };
+    entry.key = entry.at + '|' + entry.name;
     const list = evalList();
     const last = list[list.length - 1];
     // Même stratégie, mêmes réglages, même résultat : on ne compte pas deux fois la même simulation.
@@ -1164,14 +1283,43 @@
     if (same(last, entry)) return;
     list.push(entry);
     evalSave(list);
+    // Dans la base : la simulation complète, avec la liste de ses trades.
+    dbPush('simulations/put', Object.assign({}, entry, { tradeList: c.result.trades.map((t) => ({
+      dir: t.dir, entryDate: t.entryDate, exitDate: t.exitDate, entryPrice: t.entryPrice, exitPrice: t.exitPrice, lots: t.lots, pips: t.pips, pnl: t.pnl, reason: t.reason })) }));
+    logEvent('simulation', 'Simulation : ' + entry.name + ' · ' + entry.pair + ' · ' + entry.data + ' → ' + signed(entry.returnPct, num2) + ' % (gain moyen ' + signed(entry.avgGainPct, num1) + ' %)', { key: entry.key });
   }
   const mean = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
+  // Filtres : stratégie, recherche, paire, source de données, résultat. Les moyennes portent sur les lignes affichées.
+  function fillFilter(id, values) {
+    const sel = $(id), cur = sel.value, first = sel.options[0].outerHTML;
+    sel.innerHTML = first + values.map((v) => '<option value="' + esc(v) + '">' + esc(v) + '</option>').join('');
+    sel.value = values.includes(cur) ? cur : '';
+  }
+  function evalFiltered(list) {
+    const fs = $('evalFStrat').value, q = $('evalFSearch').value.trim().toLowerCase(), fp = $('evalFPair').value, fd = $('evalFData').value, fr = $('evalFResult').value;
+    return list.map((e, i) => ({ e: e, i: i })).filter(({ e }) => (!fs || e.name === fs) && (!q || e.name.toLowerCase().includes(q)) &&
+      (!fp || e.pair === fp) && (!fd || e.data === fd) && (!fr || (fr === 'win' ? e.returnPct > 0 : e.returnPct <= 0)));
+  }
+  ['evalFStrat', 'evalFPair', 'evalFData', 'evalFResult'].forEach((id) => $(id).addEventListener('change', () => renderEvaluation()));
+  $('evalFSearch').addEventListener('input', () => renderEvaluation());
+  $('evalFReset').addEventListener('click', () => {
+    ['evalFStrat', 'evalFPair', 'evalFData', 'evalFResult'].forEach((id) => { $(id).value = ''; });
+    $('evalFSearch').value = '';
+    renderEvaluation();
+  });
   function renderEvaluation() {
-    const list = evalList();
-    $('evalClear').disabled = $('evalExport').disabled = !list.length;
-    if (!list.length) { $('evalBody').innerHTML = '<p class="eval-empty">Aucune simulation pour l\'instant : lancez un backtest, il s\'ajoutera ici.</p>'; return; }
+    const all = evalList();
+    const uniq = (f) => [...new Set(all.map(f))].sort((a, b) => a.localeCompare(b, 'fr'));
+    fillFilter('evalFStrat', uniq((e) => e.name)); fillFilter('evalFPair', uniq((e) => e.pair)); fillFilter('evalFData', uniq((e) => e.data));
+    $('evalFilters').hidden = !all.length;
+    $('evalClear').disabled = !all.length;
+    if (!all.length) { $('evalExport').disabled = true; $('evalBody').innerHTML = '<p class="eval-empty">Aucune simulation pour l\'instant : lancez un backtest, il s\'ajoutera ici.</p>'; return; }
+    const shown = evalFiltered(all);
+    $('evalExport').disabled = !shown.length;
+    if (!shown.length) { $('evalBody').innerHTML = '<p class="eval-empty">Aucune simulation ne correspond à ces filtres.</p>'; return; }
+    const list = shown.map((x) => x.e);
     const p = (v) => '<span class="' + cls(v) + '">' + signed(v, num2) + ' %</span>';
-    const rows = list.map((e, i) => '<tr>' +
+    const rows = shown.map(({ e, i }) => '<tr>' +
       '<td>' + (i + 1) + '</td><td class="l">' + new Date(e.at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) + '</td>' +
       '<td class="name" title="' + esc(e.name) + '">' + esc(e.name) + '</td><td class="l">' + esc(e.pair) + '</td>' +
       '<td class="l">' + frDate(e.from) + ' → ' + frDate(e.to) + '</td><td class="l">' + esc(e.data) + '</td>' +
@@ -1180,11 +1328,12 @@
       '<td>' + e.trades + '</td><td>' + num1.format(e.winRate) + ' %</td><td>−' + num1.format(e.maxDrawdownPct) + ' %</td>' +
       '<td>' + (e.strategy ? '<button type="button" class="reload" data-reload="' + i + '" title="Remettre cette stratégie et ses réglages dans le formulaire">Recharger</button>' : '') + '</td>' +
       '<td><button type="button" class="del" data-del="' + i + '" title="Retirer cette ligne" aria-label="Retirer la simulation ' + (i + 1) + '">✕</button></td></tr>').join('');
-    const foot = '<tr><td colspan="8" class="l">Moyenne sur ' + list.length + ' simulation' + (list.length > 1 ? 's' : '') + '</td>' +
+    const filtered = shown.length < all.length;
+    const foot = '<tr><td colspan="8" class="l">Moyenne sur ' + list.length + ' simulation' + (list.length > 1 ? 's' : '') + (filtered ? ' (filtrées)' : '') + '</td>' +
       '<td>' + p(mean(list.map((e) => e.returnPct))) + '</td><td class="avg-col" title="Moyenne des gains moyens">' + p(mean(list.map((e) => e.avgGainPct))) + '</td>' +
       '<td>' + num1.format(mean(list.map((e) => e.trades))) + '</td><td>' + num1.format(mean(list.map((e) => e.winRate))) + ' %</td>' +
       '<td>−' + num1.format(mean(list.map((e) => e.maxDrawdownPct))) + ' %</td><td></td><td></td></tr>';
-    $('evalBody').innerHTML = '<div class="table-wrap"><table class="eval"><thead><tr><th>#</th><th class="l">Date</th><th class="l">Stratégie</th><th class="l">Paire</th>' +
+    $('evalBody').innerHTML = (filtered ? '<p class="eval-count">' + shown.length + ' simulation(s) affichée(s) sur ' + all.length + '</p>' : '') + '<div class="table-wrap"><table class="eval"><thead><tr><th>#</th><th class="l">Date</th><th class="l">Stratégie</th><th class="l">Paire</th>' +
       '<th class="l">Période testée</th><th class="l">Données</th><th>Levier</th><th>Capital</th><th>Résultat</th><th class="avg-col">Gain moyen</th>' +
       '<th>Trades</th><th>Gagnants</th><th>Drawdown</th><th></th><th></th></tr></thead><tbody>' + rows + '</tbody><tfoot>' + foot + '</tfoot></table></div>';
   }
@@ -1209,14 +1358,27 @@
       return closeEvaluation();
     }
     const del = e.target.closest('[data-del]');
-    if (del) { const list = evalList(); list.splice(+del.dataset.del, 1); evalSave(list); renderEvaluation(); }
+    if (del) {
+      const list = evalList();
+      const [gone] = list.splice(+del.dataset.del, 1);
+      evalSave(list);
+      if (gone && gone.key) dbPush('simulations/delete', { key: gone.key });
+      renderEvaluation();
+    }
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('evalModal').hidden) closeEvaluation(); });
   $('evalClear').addEventListener('click', () => { $('evalConfirmN').textContent = evalList().length; $('evalConfirm').hidden = false; });
   $('evalClearCancel').addEventListener('click', () => { $('evalConfirm').hidden = true; });
-  $('evalClearGo').addEventListener('click', () => { evalSave([]); $('evalConfirm').hidden = true; renderEvaluation(); });
+  $('evalClearGo').addEventListener('click', () => {
+    const n = evalList().length;
+    evalSave([]);
+    dbPush('simulations/clear', {});
+    logEvent('simulation.cleared', 'Tableau d\'évaluation effacé (' + n + ' simulations)');
+    $('evalConfirm').hidden = true;
+    renderEvaluation();
+  });
   $('evalExport').addEventListener('click', () => {
-    const list = evalList();
+    const list = evalFiltered(evalList()).map((x) => x.e); // export des lignes affichées (filtres appliqués)
     const head = 'numero;date;strategie;paire;debut;fin;donnees;levier;capital;resultat_pct;gain_moyen_pct;trades;gagnants_pct;drawdown_pct';
     const f2 = (v) => String(Math.round(v * 100) / 100).replace('.', ',');
     const rows = list.map((e, i) => [i + 1, e.at.slice(0, 16).replace('T', ' '), '"' + e.name.replace(/"/g, '""') + '"', e.pair, e.from, e.to, e.data, e.leverage,
@@ -1230,6 +1392,9 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   });
   $('evalCount').textContent = evalList().length;
+  dbBadge();
+  // Au chargement : connexion silencieuse à la base si la passerelle tourne déjà.
+  if (bridgeToken) fetch(BRIDGE_URL + '/ping').then(() => dbConnect()).catch(() => {});
 
   // ---------- Thème ----------
   $('themeToggle').addEventListener('click', () => {

@@ -54,8 +54,15 @@ ou EA installé dans MT5 via la passerelle) et remet règles, texte, stop-loss, 
 taille des positions dans le formulaire. La dernière simulation est aussi gardée automatiquement (Modèle →
 *Récupération*), et chaque ligne du tableau d'évaluation peut être rechargée.
 
+**Base de données** (bouton en haut de page) : avec la passerelle (1.4+), tout est enregistré dans une base SQLite
+sur votre PC (`%APPDATA%\Forexia\forexia.db`) : stratégies, simulations (avec la liste de leurs trades) et un
+journal de toutes les actions (enregistrements, imports, améliorations, stratégies aléatoires, EA téléchargés,
+compilations, tests MT5 et comparaisons Forexia / MT5). Le navigateur garde une copie ; à chaque connexion, les deux
+sont fusionnés. La fenêtre affiche le journal (filtrable) et permet d'exporter toute la base en JSON.
+
 **Évaluation** (bouton en haut de page) : tableau de toutes les simulations lancées (stratégie, paire, période,
-données, levier, capital, résultat, gain moyen, trades, % gagnants, drawdown), avec une ligne de moyenne
+données, levier, capital, résultat, gain moyen, trades, % gagnants, drawdown), **filtrable** par stratégie, recherche,
+paire, source de données et résultat, avec une ligne de moyenne calculée sur les lignes affichées
 (dont la **moyenne des gains moyens**) ; lignes supprimables, export CSV. Le **gain moyen** est l'écart entre le
 capital moyen sur la période (ligne pointillée orange du graphique du capital) et le capital de départ.
 

@@ -189,6 +189,37 @@ def main():
     one = [x for x in js.get("experts", []) if x["fileName"] == "Forexia_Test.mq5"]
     check("lecture du code d'un EA installé", one and "void OnTick()" in one[0].get("code", ""), js)
 
+    # --- base de données
+    st, js, _ = call("POST", "/db/info", {}, token_="XXXX-XXXX")
+    check("base : code requis", st == 401, st)
+    st, js, _ = call("POST", "/db/info", {})
+    check("base créée dans %APPDATA%\\Forexia", js.get("ok") and js["path"].endswith(os.path.join("Forexia", "forexia.db")) and os.path.exists(js["path"]), js)
+    check("journal automatique des opérations MT5", js["counts"]["events"] >= 4, js.get("counts"))
+    strat = {"name": "Zied3 EURUSD", "longEntry": "RSI(14) < 30", "stopLossPips": 50}
+    call("POST", "/db/strategies/put", {"name": "Zied3 EURUSD", "data": strat})
+    call("POST", "/db/strategies/put", {"name": "Zied3 EURUSD", "data": dict(strat, stopLossPips=60)})
+    st, js, _ = call("POST", "/db/strategies/list", {})
+    check("stratégie enregistrée puis mise à jour (une seule ligne)", len(js["items"]) == 1 and js["items"][0]["data"]["stopLossPips"] == 60, js)
+    sims = [{"key": "2026-11-15T10:00:00Z|A", "at": "2026-11-15T10:00:00Z", "name": "A", "pair": "EUR/USD", "returnPct": 5.5, "trades": 1, "tradeList": [{"pnl": 1}]},
+            {"key": "2026-11-15T11:00:00Z|B", "at": "2026-11-15T11:00:00Z", "name": "B", "pair": "GBP/USD", "returnPct": -2}]
+    call("POST", "/db/simulations/put", {"items": sims})
+    call("POST", "/db/simulations/put", sims[0])  # doublon : remplacé, pas ajouté
+    st, js, _ = call("POST", "/db/simulations/list", {})
+    check("simulations : ajout par lot, sans doublon, ordre chronologique", [x["name"] for x in js["items"]] == ["A", "B"] and js["items"][0]["tradeList"][0]["pnl"] == 1, js)
+    call("POST", "/db/simulations/delete", {"key": sims[1]["key"]})
+    call("POST", "/db/events/put", {"type": "strategy.saved", "summary": "Stratégie enregistrée : Zied3 EURUSD", "data": {"name": "Zied3 EURUSD"}})
+    st, js, _ = call("POST", "/db/events/list", {"limit": 50})
+    types = [x["type"] for x in js["items"]]
+    check("journal : événements de la page et de la passerelle", types[0] == "strategy.saved" and "mt5.compile" in types and "mt5.test" in types and "mt5.attach" in types, types)
+    st, js, _ = call("POST", "/db/export", {})
+    check("export complet", js.get("ok") and len(js["strategies"]) == 1 and len(js["simulations"]) == 1 and len(js["events"]) >= 5, {k: len(v) if isinstance(v, list) else v for k, v in js.items()})
+    st, js, _ = call("POST", "/db/strategies/put", {"name": "", "data": {}})
+    check("nom vide refusé", js.get("ok") is False, js)
+    call("POST", "/db/strategies/delete", {"name": "Zied3 EURUSD"})
+    st, js, _ = call("POST", "/db/simulations/clear", {})
+    st, js, _ = call("POST", "/db/info", {})
+    check("suppression et effacement", js["counts"]["strategies"] == 0 and js["counts"]["simulations"] == 0, js["counts"])
+
     proc.terminate()
     print("\n%d échec(s)" % failed)
     sys.exit(1 if failed else 0)

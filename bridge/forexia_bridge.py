@@ -20,6 +20,7 @@ import json
 import os
 import re
 import secrets
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -27,7 +28,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
-VERSION = "1.3"
+VERSION = "1.4"
 DEFAULT_PORT = 8787
 PAGE_ORIGIN = "https://zied99.github.io"
 FILE_RE = re.compile(r"^Forexia_[A-Za-z0-9_]{1,60}\.mq5$")
@@ -413,6 +414,118 @@ def attach(args, term, body):
     return {"ok": True, "message": "MetaTrader 5 redémarre avec l'EA sur un graphique %s %s." % (symbol, period)}
 
 
+# ---------------------------------------------------------------- base de données (SQLite)
+DB_LOCK = threading.Lock()
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS strategies (name TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS simulations (key TEXT PRIMARY KEY, at TEXT NOT NULL, name TEXT, pair TEXT, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, type TEXT NOT NULL, summary TEXT, data TEXT);
+CREATE INDEX IF NOT EXISTS simulations_at ON simulations (at);
+CREATE INDEX IF NOT EXISTS events_at ON events (at);
+"""
+
+
+def db_path(args):
+    return args.db or os.path.join(appdata(), "Forexia", "forexia.db")
+
+
+def db_connect(args):
+    path = db_path(args)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    conn = sqlite3.connect(path, timeout=10)
+    conn.row_factory = sqlite3.Row
+    conn.executescript(SCHEMA)
+    return conn
+
+
+def now_iso():
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + "Z"
+
+
+def db_event(args, kind, summary, data=None):
+    """Journal d'activité ; une erreur de base ne doit jamais bloquer une opération MT5."""
+    try:
+        with DB_LOCK:
+            conn = db_connect(args)
+            with conn:
+                conn.execute("INSERT INTO events (at, type, summary, data) VALUES (?, ?, ?, ?)",
+                             (now_iso(), kind[:60], str(summary)[:500], json.dumps(data, ensure_ascii=False) if data is not None else None))
+            conn.close()
+    except (sqlite3.Error, OSError, TypeError, ValueError):
+        pass
+
+
+def _text(v, limit):
+    s = json.dumps(v, ensure_ascii=False)
+    if len(s) > limit:
+        raise ValueError("Donnée trop volumineuse.")
+    return s
+
+
+def db_action(args, path, body):
+    with DB_LOCK:
+        conn = db_connect(args)
+        try:
+            with conn:
+                if path == "info":
+                    counts = {t: conn.execute("SELECT COUNT(*) FROM " + t).fetchone()[0] for t in ("strategies", "simulations", "events")}
+                    return {"ok": True, "path": db_path(args), "size": os.path.getsize(db_path(args)), "counts": counts}
+                if path == "strategies/list":
+                    rows = conn.execute("SELECT name, data, updated_at FROM strategies ORDER BY name").fetchall()
+                    return {"ok": True, "items": [dict(name=r["name"], data=json.loads(r["data"]), updatedAt=r["updated_at"]) for r in rows]}
+                if path == "strategies/put":
+                    name = str(body.get("name", "")).strip()
+                    if not name or len(name) > 120:
+                        raise ValueError("Nom de stratégie invalide.")
+                    conn.execute("INSERT INTO strategies (name, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(name) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at",
+                                 (name, _text(body.get("data"), 200000), str(body.get("updatedAt") or now_iso())))
+                    return {"ok": True}
+                if path == "strategies/delete":
+                    conn.execute("DELETE FROM strategies WHERE name = ?", (str(body.get("name", "")),))
+                    return {"ok": True}
+                if path == "simulations/list":
+                    limit = max(1, min(int(body.get("limit", 2000)), 10000))
+                    rows = conn.execute("SELECT data FROM (SELECT data, at FROM simulations ORDER BY at DESC LIMIT ?) ORDER BY at", (limit,)).fetchall()
+                    return {"ok": True, "items": [json.loads(r["data"]) for r in rows]}
+                if path == "simulations/put":
+                    items = body.get("items") if isinstance(body.get("items"), list) else [body]
+                    for it in items[:2000]:
+                        key, at = str(it.get("key", "")), str(it.get("at", ""))
+                        if not key or not at:
+                            raise ValueError("Simulation sans identifiant.")
+                        conn.execute("INSERT OR REPLACE INTO simulations (key, at, name, pair, data) VALUES (?, ?, ?, ?, ?)",
+                                     (key[:300], at[:40], str(it.get("name", ""))[:120], str(it.get("pair", ""))[:10], _text(it, 2000000)))
+                    return {"ok": True, "count": len(items)}
+                if path == "simulations/delete":
+                    conn.execute("DELETE FROM simulations WHERE key = ?", (str(body.get("key", "")),))
+                    return {"ok": True}
+                if path == "simulations/clear":
+                    n = conn.execute("DELETE FROM simulations").rowcount
+                    return {"ok": True, "deleted": n}
+                if path == "events/put":
+                    kind = str(body.get("type", "")).strip()
+                    if not kind:
+                        raise ValueError("Type d'événement manquant.")
+                    conn.execute("INSERT INTO events (at, type, summary, data) VALUES (?, ?, ?, ?)",
+                                 (now_iso(), kind[:60], str(body.get("summary", ""))[:500], _text(body.get("data"), 500000) if body.get("data") is not None else None))
+                    return {"ok": True}
+                if path == "events/list":
+                    limit = max(1, min(int(body.get("limit", 300)), 5000))
+                    rows = conn.execute("SELECT id, at, type, summary, data FROM events ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+                    return {"ok": True, "items": [dict(id=r["id"], at=r["at"], type=r["type"], summary=r["summary"],
+                                                       data=json.loads(r["data"]) if r["data"] else None) for r in rows]}
+                if path == "export":
+                    out = {"exportedAt": now_iso(), "path": db_path(args)}
+                    out["strategies"] = [dict(name=r["name"], data=json.loads(r["data"]), updatedAt=r["updated_at"]) for r in conn.execute("SELECT * FROM strategies")]
+                    out["simulations"] = [json.loads(r["data"]) for r in conn.execute("SELECT data FROM simulations ORDER BY at")]
+                    out["events"] = [dict(at=r["at"], type=r["type"], summary=r["summary"], data=json.loads(r["data"]) if r["data"] else None)
+                                     for r in conn.execute("SELECT * FROM events ORDER BY id")]
+                    return dict(out, ok=True)
+                raise ValueError("Inconnu.")
+        finally:
+            conn.close()
+
+
 # ---------------------------------------------------------------- serveur HTTP
 def origin_allowed(origin, extra):
     if not origin or origin == "null":
@@ -485,6 +598,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if path.startswith("/db/"):
+            if not self._authorized():
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0") or 0)
+                if length > MAX_BODY * 4:
+                    raise ValueError("Requête trop volumineuse.")
+                body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+                return self._send(200, db_action(self.server.args, path[4:], body))
+            except (ValueError, sqlite3.Error, OSError) as e:
+                return self._send(200, {"ok": False, "message": str(e)})
         actions = {"/deploy": deploy, "/test": run_test, "/attach": attach, "/bars": broker_bars, "/experts": list_experts}
         if path not in actions:
             return self._send(404, {"ok": False, "message": "Inconnu."})
@@ -505,6 +629,15 @@ class Handler(BaseHTTPRequestHandler):
                 result = actions[path](self.server.args, term, body)
             finally:
                 JOB_LOCK.release()
+            log = {"/deploy": ("mt5.compile", lambda r: ("Compilé : " if r.get("compiled") else "Échec de compilation : ") + str(body.get("fileName"))),
+                   "/test": ("mt5.test", lambda r: "Test MT5 %s %s %s → %s" % (body.get("fileName"), body.get("symbol"), body.get("period"),
+                             "%.2f %%" % (100.0 * r["result"]["profit"] / r["result"]["deposit"]) if r.get("ok") and r["result"].get("deposit") else (r.get("message") or "en attente"))),
+                   "/attach": ("mt5.attach", lambda r: "EA ouvert sur un graphique : %s %s %s" % (body.get("fileName"), body.get("symbol"), body.get("period")))}.get(path)
+            if log and not result.get("needClose"):
+                light = {k: v for k, v in result.items() if k != "result"} if path == "/test" else result
+                if path == "/test" and result.get("result"):
+                    light["result"] = {k: v for k, v in result["result"].items() if k != "deals"}
+                db_event(self.server.args, log[0], log[1](result), dict(request={k: v for k, v in body.items() if k != "code"}, response=light))
             self._send(200, result)
         except subprocess.TimeoutExpired:
             self._send(200, {"ok": False, "message": "MetaTrader 5 n'a pas répondu à temps."})
@@ -523,6 +656,7 @@ def main():
     ap.add_argument("--test-timeout", type=int, default=1800, help="durée maximale d'un test (secondes)")
     ap.add_argument("--verbose", action="store_true")
     ap.add_argument("--fake-mt5", help=argparse.SUPPRESS)  # tests : faux module MetaTrader5
+    ap.add_argument("--db", help="chemin de la base SQLite (par défaut %%APPDATA%%\\Forexia\\forexia.db)")
     args = ap.parse_args()
 
     cfg = load_config()
@@ -541,6 +675,11 @@ def main():
         print("Module MetaTrader5 : ok (données du courtier disponibles)")
     except ImportError:
         print("Module MetaTrader5 absent : installez-le avec « py -m pip install MetaTrader5 » pour utiliser les données du courtier.")
+    try:
+        db_connect(args).close()
+        print("Base de données : " + db_path(args))
+    except (sqlite3.Error, OSError) as e:
+        print("Base de données indisponible : %s" % e)
     print("Laissez cette fenêtre ouverte pendant l'utilisation. Ctrl+C pour arrêter.")
     sys.stdout.flush()
     try:
