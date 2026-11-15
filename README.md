@@ -75,6 +75,11 @@ du gain (100 % par défaut) est retirée à la clôture d'un trade et mise à l'
 suivantes aussi. Résultat, drawdown et gain moyen portent sur « compte + retraits » ; le graphique montre les deux courbes
 et chaque retrait. Disponible dans les deux moteurs (standard et courtier MT5).
 
+**Rentabilité mensuelle** (carte sous les indicateurs) : ce que la stratégie rapporte en moyenne par mois (en € et en % du
+capital, rapporté à la durée réelle de la période), le montant retiré en moyenne par mois, les mois gagnants, le meilleur
+et le pire mois, un graphique en barres mois par mois (étoile jaune les mois avec retrait) et le détail par mois. Le gain
+d'un mois est la variation de « compte + retraits » sur ce mois. L'évaluation a une colonne « Par mois ».
+
 **Évaluation** (bouton en haut de page) : tableau de toutes les simulations lancées (stratégie, paire, période,
 données, levier, capital, résultat, gain moyen, trades, % gagnants, drawdown), **filtrable** par stratégie, recherche,
 paire, source de données et résultat, avec une ligne de moyenne calculée sur les lignes affichées

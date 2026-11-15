@@ -354,3 +354,13 @@ button.link { background: none; border: 0; padding: 0; color: var(--accent); fon
 
 .chart .marker.star { stroke: var(--star-edge); stroke-width: 1; stroke-linejoin: round; }
 .legend .star-ico { width: 12px; height: 12px; background: var(--star) !important; clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%); border-radius: 0; }
+
+/* Rentabilité mensuelle */
+.chart .bar.up { fill: var(--up); } .chart .bar.down { fill: var(--down); }
+.chart .bar { opacity: .85; } .chart .bar:hover { opacity: 1; }
+.chart .zero { stroke: var(--muted); stroke-width: 1; }
+.monthly-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 10px 16px; margin: 4px 0 12px; }
+.monthly-kpis .label { color: var(--muted); font-size: 12px; font-weight: 500; }
+.monthly-kpis .value { font-size: 20px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.monthly-kpis .sub { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+table.months { width: auto; min-width: 320px; }

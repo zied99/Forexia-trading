@@ -174,5 +174,64 @@
     container._ro.observe(container);
   }
 
-  root.Forexia.chart = { render, mount };
+  /**
+   * Barres (une par mois) : opts = { labels, values, format(v), stars: [indices], titles: [texte au survol] }.
+   * Vert si positif, rouge si négatif ; étoile jaune au-dessus des barres marquées.
+   */
+  function renderBars(container, opts) {
+    container.innerHTML = '';
+    container.classList.add('chart');
+    const W = Math.max(280, container.clientWidth), H = opts.height || 190;
+    const m = { l: 10, r: 62, t: 18, b: 26 };
+    const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, role: 'img' }, container);
+    if (opts.ariaLabel) svg.setAttribute('aria-label', opts.ariaLabel);
+    const n = opts.values.length, innerW = W - m.l - m.r, innerH = H - m.t - m.b;
+    let lo = Math.min(0, ...opts.values), hi = Math.max(0, ...opts.values);
+    if (hi === lo) { hi += 1; lo -= 1; }
+    const pad = (hi - lo) * 0.08; hi += pad; lo -= lo < 0 ? pad : 0;
+    const y = (v) => m.t + innerH - ((v - lo) / (hi - lo)) * innerH;
+    const fmt = opts.format || ((v) => String(v));
+    for (const t of niceTicks(lo, hi, 4).ticks) {
+      if (t < lo || t > hi) continue;
+      el('line', { x1: m.l, x2: m.l + innerW, y1: y(t), y2: y(t), class: t === 0 ? 'zero' : 'grid' }, svg);
+      const tx = el('text', { x: m.l + innerW + 6, y: y(t) + 4, class: 'axis' }, svg);
+      tx.textContent = fmt(t);
+    }
+    const slot = innerW / Math.max(1, n), bw = Math.max(2, Math.min(38, slot * 0.68));
+    const stars = new Set(opts.stars || []);
+    const every = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(innerW / 64))));
+    for (let i = 0; i < n; i++) {
+      const v = opts.values[i], cx = m.l + slot * (i + 0.5);
+      const top = y(Math.max(0, v)), bottom = y(Math.min(0, v));
+      const r = el('rect', { x: cx - bw / 2, y: top, width: bw, height: Math.max(1, bottom - top), rx: 2, class: 'bar ' + (v >= 0 ? 'up' : 'down') }, svg);
+      if (opts.titles) { const ti = el('title', {}, r); ti.textContent = opts.titles[i]; }
+      if (stars.has(i)) {
+        const sy = top - 9;
+        let d = '';
+        for (let k = 0; k < 10; k++) {
+          const rr = k % 2 ? 2.8 : 6.5, a = -Math.PI / 2 + (k * Math.PI) / 5;
+          d += (k ? 'L' : 'M') + (cx + rr * Math.cos(a)).toFixed(1) + ' ' + (sy + rr * Math.sin(a)).toFixed(1);
+        }
+        const st = el('path', { d: d + 'Z', class: 'marker star', style: 'fill:var(--star)' }, svg);
+        if (opts.titles) { const ti = el('title', {}, st); ti.textContent = opts.titles[i]; }
+      }
+      if (i % every === 0) {
+        const tx = el('text', { x: cx, y: H - 8, class: 'axis', 'text-anchor': 'middle' }, svg);
+        tx.textContent = opts.labels[i];
+      }
+    }
+  }
+  function mountBars(container, opts) {
+    renderBars(container, opts);
+    if (container._ro) container._ro.disconnect();
+    let lastW = container.clientWidth;
+    container._ro = new ResizeObserver(() => {
+      if (Math.abs(container.clientWidth - lastW) < 2) return;
+      lastW = container.clientWidth;
+      renderBars(container, opts);
+    });
+    container._ro.observe(container);
+  }
+
+  root.Forexia.chart = { render, mount, renderBars, mountBars };
 })(window);

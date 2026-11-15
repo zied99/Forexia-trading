@@ -634,6 +634,25 @@
       kpi('Ratio de Sharpe', signed(s.sharpe, num2), 'annualisé', cls(s.sharpe)) +
       '</div>';
 
+    // Rentabilité mensuelle
+    const ms = monthlyStats(result, settings.capital);
+    const hasWd = ms.totalWithdrawn > 0;
+    const mk = (label, value, sub, c) => '<div><div class="label">' + label + '</div><div class="value ' + (c || '') + '">' + value + '</div><div class="sub">' + (sub || '&nbsp;') + '</div></div>';
+    html += '<div class="panel card"><div class="card-head"><h3>Rentabilité mensuelle</h3><div class="legend"><span><i style="background:var(--up)"></i>Mois gagnant</span>' +
+      '<span><i style="background:var(--down)"></i>Mois perdant</span>' + (hasWd ? '<span><i class="star-ico"></i>Retrait</span>' : '') + '</div></div>' +
+      '<div class="monthly-kpis">' +
+      mk('Rapporte en moyenne par mois', signed(ms.avg, money), signed(ms.avgPct, num2) + ' % du capital de départ, sur ' + num1.format(ms.nMonths) + ' mois', cls(ms.avg)) +
+      (hasWd ? mk('Retiré en moyenne par mois', money.format(ms.avgWithdrawn), 'total retiré ' + money.format(ms.totalWithdrawn), 'pos') : '') +
+      mk('Mois gagnants', ms.positive + ' / ' + ms.months.length, num1.format((100 * ms.positive) / ms.months.length) + ' % des mois') +
+      mk('Meilleur mois', signed(ms.best.gain, money), monthLong(ms.best.key), cls(ms.best.gain)) +
+      mk('Pire mois', signed(ms.worst.gain, money), monthLong(ms.worst.key), cls(ms.worst.gain)) +
+      '</div><div id="monthlyChart"></div>' +
+      '<details class="help"><summary>Détail par mois</summary><div class="table-wrap"><table class="months"><thead><tr><th class="l">Mois</th><th>Gain</th><th>Variation</th>' +
+      (hasWd ? '<th>Retiré</th>' : '') + '<th>' + (hasWd ? 'Compte + retraits' : 'Capital') + ' en fin de mois</th></tr></thead><tbody>' +
+      ms.months.map((m) => '<tr><td class="l">' + monthLong(m.key) + '</td><td class="' + cls(m.gain) + '">' + signed(m.gain, money) + '</td><td class="' + cls(m.pct) + '">' +
+        signed(m.pct, num1) + ' %</td>' + (hasWd ? '<td>' + (m.withdrawn ? money.format(m.withdrawn) : '—') + '</td>' : '') + '<td>' + money.format(m.end) + '</td></tr>').join('') +
+      '</tbody></table></div></details></div>';
+
     // Capital moyen sur la période : moyenne de la courbe, et le gain moyen qu'elle représente.
     const hasW = result.withdrawals && result.withdrawals.length;
     const avg = averageGain(result.wealth || result.equity, settings.capital);
@@ -681,6 +700,12 @@
     html += '</div>';
 
     $('results').innerHTML = html;
+
+    F.chart.mountBars($('monthlyChart'), {
+      labels: ms.months.map((m) => monthLabel(m.key)), values: ms.months.map((m) => m.gain), ariaLabel: 'Gain de chaque mois',
+      format: (v) => compact(v), stars: ms.months.map((m, i) => (m.withdrawn > 0 ? i : -1)).filter((i) => i >= 0),
+      titles: ms.months.map((m) => monthLong(m.key) + ' : ' + signed(m.gain, money) + ' (' + signed(m.pct, num1) + ' %)' + (m.withdrawn ? ' · retiré ' + money.format(m.withdrawn) : '')),
+    });
 
     // Graphique du capital
     F.chart.mount($('equityChart'), {
@@ -760,6 +785,32 @@
     if (exp) exp.addEventListener('click', () => exportTrades(result.trades, strat, settings));
     if (window.matchMedia('(max-width: 900px)').matches) $('results').scrollIntoView({ behavior: 'smooth' });
   }
+
+  /**
+   * Rentabilité mensuelle : gain de chaque mois = variation de « compte + retraits » sur le mois,
+   * montants retirés par mois, et moyennes rapportées à la durée réelle de la période.
+   */
+  function monthlyStats(result, capital) {
+    const w = result.wealth || result.equity, dates = result.dates, months = [];
+    let cur = null;
+    for (let j = 0; j < dates.length; j++) {
+      const k = dates[j].slice(0, 7);
+      if (!cur || cur.key !== k) { cur = { key: k, end: w[j], withdrawn: 0 }; months.push(cur); } else cur.end = w[j];
+    }
+    let prev = capital;
+    for (const mo of months) { mo.gain = mo.end - prev; mo.pct = prev ? (mo.gain / prev) * 100 : 0; prev = mo.end; }
+    for (const x of result.withdrawals || []) { const mo = months.find((m) => m.key === x.date.slice(0, 7)); if (mo) mo.withdrawn += x.amount; }
+    const days = (Date.parse(dates[dates.length - 1].slice(0, 10)) - Date.parse(dates[0].slice(0, 10))) / 864e5;
+    const nMonths = Math.max(1, days / 30.4375);
+    const total = w[w.length - 1] - capital, totalW = months.reduce((a, m) => a + m.withdrawn, 0);
+    const sorted = months.slice().sort((a, b) => a.gain - b.gain);
+    return {
+      months: months, nMonths: nMonths, avg: total / nMonths, avgPct: (total / nMonths / capital) * 100, avgWithdrawn: totalW / nMonths, totalWithdrawn: totalW,
+      positive: months.filter((m) => m.gain > 0).length, best: sorted[sorted.length - 1], worst: sorted[0],
+    };
+  }
+  const monthLabel = (key) => shortDate(key + '-01');
+  const monthLong = (key) => { const d = new Date(key + '-01T00:00:00Z'); return d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric', timeZone: 'UTC' }); };
 
   /** Capital moyen sur la période et gain moyen correspondant (en % du capital de départ). */
   function averageGain(equity, capital) {
@@ -1454,7 +1505,7 @@
       at: new Date().toISOString(), name: c.strat.name, pair: c.settings.pair, style: c.strat.style || 'none',
       from: c.bars[st].date.slice(0, 10), to: c.bars[c.bars.length - 1].date.slice(0, 10), period: PERIOD_LABEL[c.periodKey],
       data: dataLabel(c.loaded, c.settings), leverage: c.settings.leverage, capital: c.settings.capital,
-      returnPct: s.returnPct, avgGainPct: avg.pct, withdrawn: s.totalWithdrawn || 0, trades: s.trades, winRate: s.winRate, maxDrawdownPct: s.maxDrawdownPct,
+      returnPct: s.returnPct, avgGainPct: avg.pct, withdrawn: s.totalWithdrawn || 0, monthlyGain: monthlyStats(c.result, c.settings.capital).avg, trades: s.trades, winRate: s.winRate, maxDrawdownPct: s.maxDrawdownPct,
       profitFactor: Number.isFinite(s.profitFactor) ? s.profitFactor : null,
       rules: [c.strat.longEntry, c.strat.longExit, c.strat.shortEntry, c.strat.shortExit, c.strat.stopLossPips, c.strat.takeProfitPips].join('|'),
       strategy: c.strat, config: c.config,
@@ -1510,17 +1561,17 @@
       '<td class="name" title="' + esc(e.name) + '">' + esc(e.name) + '</td><td class="l">' + esc(e.pair) + '</td>' +
       '<td class="l">' + frDate(e.from) + ' → ' + frDate(e.to) + '</td><td class="l">' + esc(e.data) + '</td>' +
       '<td>1:' + e.leverage + '</td><td>' + money.format(e.capital) + '</td>' +
-      '<td>' + p(e.returnPct) + '</td><td class="avg-col">' + p(e.avgGainPct) + '</td><td>' + (e.withdrawn ? money.format(e.withdrawn) : '—') + '</td>' +
+      '<td>' + p(e.returnPct) + '</td><td class="avg-col">' + p(e.avgGainPct) + '</td><td class="' + cls(e.monthlyGain || 0) + '">' + (e.monthlyGain == null ? '—' : signed(e.monthlyGain, money)) + '</td><td>' + (e.withdrawn ? money.format(e.withdrawn) : '—') + '</td>' +
       '<td>' + e.trades + '</td><td>' + num1.format(e.winRate) + ' %</td><td>−' + num1.format(e.maxDrawdownPct) + ' %</td>' +
       '<td>' + (e.strategy ? '<button type="button" class="reload" data-reload="' + i + '" title="Remettre cette stratégie et ses réglages dans le formulaire">Recharger</button>' : '') + '</td>' +
       '<td><button type="button" class="del" data-del="' + i + '" title="Retirer cette ligne" aria-label="Retirer la simulation ' + (i + 1) + '">✕</button></td></tr>').join('');
     const filtered = shown.length < all.length;
     const foot = '<tr><td colspan="8" class="l">Moyenne sur ' + list.length + ' simulation' + (list.length > 1 ? 's' : '') + (filtered ? ' (filtrées)' : '') + '</td>' +
-      '<td>' + p(mean(list.map((e) => e.returnPct))) + '</td><td class="avg-col" title="Moyenne des gains moyens">' + p(mean(list.map((e) => e.avgGainPct))) + '</td><td>' + money.format(mean(list.map((e) => e.withdrawn || 0))) + '</td>' +
+      '<td>' + p(mean(list.map((e) => e.returnPct))) + '</td><td class="avg-col" title="Moyenne des gains moyens">' + p(mean(list.map((e) => e.avgGainPct))) + '</td><td>' + signed(mean(list.filter((e) => e.monthlyGain != null).map((e) => e.monthlyGain)), money) + '</td><td>' + money.format(mean(list.map((e) => e.withdrawn || 0))) + '</td>' +
       '<td>' + num1.format(mean(list.map((e) => e.trades))) + '</td><td>' + num1.format(mean(list.map((e) => e.winRate))) + ' %</td>' +
       '<td>−' + num1.format(mean(list.map((e) => e.maxDrawdownPct))) + ' %</td><td></td><td></td></tr>';
     $('evalBody').innerHTML = (filtered ? '<p class="eval-count">' + shown.length + ' simulation(s) affichée(s) sur ' + all.length + '</p>' : '') + '<div class="table-wrap"><table class="eval"><thead><tr><th>#</th><th class="l">Date</th><th class="l">Stratégie</th><th class="l">Paire</th>' +
-      '<th class="l">Période testée</th><th class="l">Données</th><th>Levier</th><th>Capital</th><th>Résultat</th><th class="avg-col">Gain moyen</th><th>Retiré</th>' +
+      '<th class="l">Période testée</th><th class="l">Données</th><th>Levier</th><th>Capital</th><th>Résultat</th><th class="avg-col">Gain moyen</th><th>Par mois</th><th>Retiré</th>' +
       '<th>Trades</th><th>Gagnants</th><th>Drawdown</th><th></th><th></th></tr></thead><tbody>' + rows + '</tbody><tfoot>' + foot + '</tfoot></table></div>';
   }
   function openEvaluation() {
@@ -1566,11 +1617,11 @@
   });
   $('evalExport').addEventListener('click', () => {
     const list = evalFiltered(evalList()).map((x) => x.e); // export des lignes affichées (filtres appliqués)
-    const head = 'numero;date;strategie;paire;debut;fin;donnees;levier;capital;resultat_pct;gain_moyen_pct;retire;trades;gagnants_pct;drawdown_pct';
+    const head = 'numero;date;strategie;paire;debut;fin;donnees;levier;capital;resultat_pct;gain_moyen_pct;gain_par_mois;retire;trades;gagnants_pct;drawdown_pct';
     const f2 = (v) => String(Math.round(v * 100) / 100).replace('.', ',');
     const rows = list.map((e, i) => [i + 1, e.at.slice(0, 16).replace('T', ' '), '"' + e.name.replace(/"/g, '""') + '"', e.pair, e.from, e.to, e.data, e.leverage,
-      f2(e.capital), f2(e.returnPct), f2(e.avgGainPct), f2(e.withdrawn || 0), e.trades, f2(e.winRate), f2(e.maxDrawdownPct)].join(';'));
-    rows.push(['moyenne', '', '', '', '', '', '', '', '', f2(mean(list.map((e) => e.returnPct))), f2(mean(list.map((e) => e.avgGainPct))), f2(mean(list.map((e) => e.withdrawn || 0))),
+      f2(e.capital), f2(e.returnPct), f2(e.avgGainPct), e.monthlyGain == null ? '' : f2(e.monthlyGain), f2(e.withdrawn || 0), e.trades, f2(e.winRate), f2(e.maxDrawdownPct)].join(';'));
+    rows.push(['moyenne', '', '', '', '', '', '', '', '', f2(mean(list.map((e) => e.returnPct))), f2(mean(list.map((e) => e.avgGainPct))), f2(mean(list.filter((e) => e.monthlyGain != null).map((e) => e.monthlyGain))), f2(mean(list.map((e) => e.withdrawn || 0))),
       f2(mean(list.map((e) => e.trades))), f2(mean(list.map((e) => e.winRate))), f2(mean(list.map((e) => e.maxDrawdownPct)))].join(';'));
     const blob = new Blob(['\ufeff' + [head].concat(rows).join('\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
