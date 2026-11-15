@@ -1,12 +1,12 @@
 <!doctype html>
-<html lang="fr" data-version="2026.11.15-22">
+<html lang="fr" data-version="2026.11.15-23">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Forexia Backtest</title>
   <meta name="description" content="Backtesting de stratégies de trading Forex basées sur RSI, MACD, stochastique, moyennes mobiles…">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%232563eb'/><path d='M6 22l6-7 5 4 9-11' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
-  <link rel="stylesheet" href="css/style.css?v=2026.11.15-22">
+  <link rel="stylesheet" href="css/style.css?v=2026.11.15-23">
 </head>
 <body>
   <div class="auth-gate" id="authGate" hidden>
@@ -46,6 +46,23 @@
     <button type="button" class="ghost theme" id="themeToggle" aria-label="Basculer thème clair / sombre" title="Thème clair / sombre"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z"/></svg></button>
     </div>
   </header>
+
+  <div class="cloud-banner" id="cloudBanner" role="alert" hidden>
+    <div>
+      <b>Votre compte en ligne n'est pas encore prêt : rien n'est enregistré en ligne pour l'instant.</b>
+      <ol>
+        <li>Copiez le script SQL de Forexia.</li>
+        <li>Ouvrez l'éditeur SQL de votre projet Supabase, collez le script, puis cliquez sur <b>Run</b>.</li>
+        <li>Revenez ici et cliquez sur « J'ai exécuté le script ». Ce qui est en attente sur cet appareil sera envoyé.</li>
+      </ol>
+      <p class="err" id="cloudBannerMsg"></p>
+    </div>
+    <div class="cloud-actions">
+      <button type="button" class="secondary" id="copySql">1. Copier le script SQL</button>
+      <a class="secondary btn-link" id="openSql" target="_blank" rel="noopener">2. Ouvrir l'éditeur SQL de Supabase</a>
+      <button type="button" class="primary" id="retryCloud">3. J'ai exécuté le script : réessayer</button>
+    </div>
+  </div>
 
   <main class="layout">
     <form id="form" class="panel form" novalidate>
@@ -378,7 +395,7 @@
       <header class="modal-head">
         <div>
           <h2 id="dbTitle">Base de données</h2>
-          <p class="hint">Stratégies, simulations (avec leurs trades) et journal de toutes vos actions, enregistrés sur votre PC par la passerelle.</p>
+          <p class="hint">Stratégies, simulations (avec leurs trades) et journal de toutes vos actions : dans votre compte en ligne, et sur votre PC si la passerelle est lancée.</p>
         </div>
         <button type="button" class="ghost close" data-close aria-label="Fermer">✕</button>
       </header>
@@ -507,7 +524,7 @@
             <p class="hint">La passerelle est un petit programme qui tourne sur votre PC : elle dépose l'EA dans MT5, le compile, lance le testeur et peut l'ouvrir sur un graphique. Installation unique :</p>
             <ol class="steps">
               <li>Installez <a href="https://www.python.org/downloads/" target="_blank" rel="noopener">Python</a> (cochez « Add python.exe to PATH »).</li>
-              <li>Téléchargez <a href="bridge/forexia_bridge.py?v=2026.11.15-22" download="forexia_bridge.py">forexia_bridge.py</a> et <a href="bridge/demarrer-passerelle.bat?v=2026.11.15-22" download="demarrer-passerelle.bat">demarrer-passerelle.bat</a> dans un même dossier.</li>
+              <li>Téléchargez <a href="bridge/forexia_bridge.py?v=2026.11.15-23" download="forexia_bridge.py">forexia_bridge.py</a> et <a href="bridge/demarrer-passerelle.bat?v=2026.11.15-23" download="demarrer-passerelle.bat">demarrer-passerelle.bat</a> dans un même dossier.</li>
               <li>Double-cliquez sur <code>demarrer-passerelle.bat</code> et laissez la fenêtre ouverte. Si le navigateur demande l'accès au « réseau local », acceptez.</li>
               <li>Collez le code d'appairage affiché dans cette fenêtre :</li>
             </ol>
@@ -579,20 +596,20 @@
   <footer class="foot">
     Simulation à but éducatif : les performances passées ne préjugent pas des performances futures.
     Les données BCE sont des taux journaliers de référence (pas de haut/bas intra-journalier).
-    <br>Version <span id="appVersion">2026.11.15-22</span>
+    <br>Version <span id="appVersion">2026.11.15-23</span>
   </footer>
 
-  <script src="js/cloud.js?v=2026.11.15-22"></script>
-  <script src="js/indicators.js?v=2026.11.15-22"></script>
-  <script src="js/expr.js?v=2026.11.15-22"></script>
-  <script src="js/backtest.js?v=2026.11.15-22"></script>
-  <script src="js/data.js?v=2026.11.15-22"></script>
-  <script src="js/presets.js?v=2026.11.15-22"></script>
-  <script src="js/french.js?v=2026.11.15-22"></script>
-  <script src="js/enhancer.js?v=2026.11.15-22"></script>
-  <script src="js/mql5.js?v=2026.11.15-22"></script>
-  <script src="js/broker.js?v=2026.11.15-22"></script>
-  <script src="js/chart.js?v=2026.11.15-22"></script>
-  <script src="js/app.js?v=2026.11.15-22"></script>
+  <script src="js/cloud.js?v=2026.11.15-23"></script>
+  <script src="js/indicators.js?v=2026.11.15-23"></script>
+  <script src="js/expr.js?v=2026.11.15-23"></script>
+  <script src="js/backtest.js?v=2026.11.15-23"></script>
+  <script src="js/data.js?v=2026.11.15-23"></script>
+  <script src="js/presets.js?v=2026.11.15-23"></script>
+  <script src="js/french.js?v=2026.11.15-23"></script>
+  <script src="js/enhancer.js?v=2026.11.15-23"></script>
+  <script src="js/mql5.js?v=2026.11.15-23"></script>
+  <script src="js/broker.js?v=2026.11.15-23"></script>
+  <script src="js/chart.js?v=2026.11.15-23"></script>
+  <script src="js/app.js?v=2026.11.15-23"></script>
 </body>
 </html>

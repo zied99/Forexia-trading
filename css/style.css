@@ -387,3 +387,14 @@ table.months { width: auto; min-width: 320px; }
 .sugg.mine { border-color: var(--accent); }
 .sugg.mine .grp { color: var(--accent); }
 #suggList { display: grid; gap: 10px; }
+
+/* Compte en ligne pas prêt */
+.cloud-banner { max-width: 1500px; margin: 16px auto 0; padding: 14px 18px; border-radius: 12px; background: var(--warn-soft); border: 1px solid var(--warn);
+  display: flex; gap: 16px 24px; flex-wrap: wrap; justify-content: space-between; align-items: center; font-size: 13.5px; }
+.cloud-banner ol { margin: 6px 0 0; padding-left: 20px; display: grid; gap: 2px; }
+.cloud-banner .err { margin: 6px 0 0; }
+.cloud-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.cloud-actions button.primary { width: auto; margin: 0; padding: 9px 14px; font-size: 13.5px; }
+a.btn-link { display: inline-flex; align-items: center; border-radius: 9px; padding: 9px 14px; font-weight: 500; color: var(--text); text-decoration: none; background: var(--panel-2); border: 1px solid var(--border); }
+a.btn-link:hover { border-color: var(--accent); color: var(--accent); }
+@media (max-width: 900px) { .cloud-banner { margin: 12px 16px 0; } }

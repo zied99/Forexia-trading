@@ -1257,6 +1257,7 @@
   }
   function cloudFail(e) {
     setSync('ko', e && e.message);
+    if (e && e.code === 'schema') showCloudBanner();
     if (e && e.code === 'auth') { renderUser(); showGate(e.message); }
   }
   function cloudPush(fn) {
@@ -1298,6 +1299,33 @@
     }
     setSync('ok');
   }
+  // Tables absentes dans Supabase : bandeau avec le script à copier et le lien vers l'éditeur SQL du projet.
+  function showCloudBanner(msg) {
+    $('cloudBanner').hidden = false;
+    $('cloudBannerMsg').textContent = msg || '';
+  }
+  $('openSql').href = 'https://supabase.com/dashboard/project/' + /https:\/\/([a-z0-9]+)\./.exec(C.CONFIG.url)[1] + '/sql/new';
+  $('copySql').addEventListener('click', async () => {
+    try {
+      const sql = await (await fetch('supabase/schema.sql?v=' + document.documentElement.dataset.version)).text();
+      await navigator.clipboard.writeText(sql);
+      $('copySql').textContent = '1. Script copié ✓';
+    } catch (e) {
+      $('cloudBannerMsg').textContent = 'Copie impossible : ouvrez le fichier supabase/schema.sql du dépôt GitHub et copiez son contenu.';
+    }
+  });
+  $('retryCloud').addEventListener('click', async () => {
+    $('retryCloud').disabled = true;
+    $('cloudBannerMsg').textContent = '';
+    try {
+      await cloudSync();
+      $('cloudBanner').hidden = true;
+      toast('Compte en ligne prêt : vos données sont synchronisées.');
+    } catch (e) {
+      $('cloudBannerMsg').textContent = e.code === 'schema' ? 'Les tables sont toujours introuvables : vérifiez que le script s\'est exécuté sans erreur (« Success. No rows returned »), puis réessayez.' : e.message;
+    } finally { $('retryCloud').disabled = false; }
+  });
+
   function renderUser() {
     const u = C.user;
     $('userChip').hidden = !u;
@@ -1465,7 +1493,9 @@
       $('dbExport').disabled = false;
       events = await C.listEvents(1000);
     } catch (e) {
-      $('dbStatus').innerHTML = '<p class="err">' + esc(e.message) + '</p>';
+      $('dbStatus').innerHTML = '<p class="err">' + esc(e.message) + '</p>' +
+        (e.code === 'schema' ? '<p>Suivez les 3 étapes du bandeau jaune en haut de la page (script à copier, éditeur SQL de Supabase, réessayer).</p>' : '');
+      if (e.code === 'schema') showCloudBanner();
       $('dbExport').disabled = true;
     }
     renderJournal(events);

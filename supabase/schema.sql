@@ -57,3 +57,6 @@ create policy "Forexia : mes réglages"    on public.settings    for all to auth
 -- Aucun accès sans être connecté.
 revoke all on public.strategies, public.simulations, public.events, public.settings from anon;
 grant select, insert, update, delete on public.strategies, public.simulations, public.events, public.settings to authenticated;
+
+-- Demande à l'API de Supabase de prendre en compte les nouvelles tables tout de suite.
+notify pgrst, 'reload schema';
