@@ -62,30 +62,75 @@
     renderTranslation(s.frenchText ? F.french.parse(s.frenchText) : null);
     validateAll();
   }
+  // ---------- Configuration (paire, levier, capital…) enregistrée avec la stratégie ----------
+  function currentConfig() {
+    return {
+      pair: $('pair').value, leverage: Number($('leverage').value), capital: Number($('capital').value),
+      exposurePct: Number($('exposure').value), spreadPips: Number($('spread').value) || 0,
+      period: periodValue(), dateFrom: $('dateFrom').value, dateTo: $('dateTo').value, source: sourceValue(),
+    };
+  }
+  function applyConfig(c) {
+    if (!c) return;
+    if (F.data.PAIRS.includes(c.pair)) $('pair').value = c.pair;
+    if (LEVERAGES.includes(c.leverage)) $('leverage').value = String(c.leverage);
+    if (c.capital) $('capital').value = c.capital;
+    if (c.exposurePct) $('exposure').value = c.exposurePct;
+    if (c.spreadPips !== undefined) $('spread').value = c.spreadPips;
+    const per = document.querySelector('input[name=period][value="' + c.period + '"]');
+    if (per) { per.checked = true; syncPeriodUI(); }
+    if (c.period === 'custom' && c.dateFrom && c.dateTo) { $('dateFrom').value = c.dateFrom; $('dateTo').value = c.dateTo; }
+    // Le fichier CSV n'est pas conservé par le navigateur : on ne restaure que les autres sources.
+    const src = c.source !== 'csv' && document.querySelector('input[name=source][value="' + c.source + '"]');
+    if (src) { src.checked = true; $('csvField').hidden = true; }
+  }
+  function describeConfig(c) {
+    if (!c) return '';
+    const per = c.period === 'custom' ? 'du ' + frDate(c.dateFrom) + ' au ' + frDate(c.dateTo) : PERIOD_LABEL[c.period];
+    return c.pair + ' · levier 1:' + c.leverage + ' · capital ' + money.format(c.capital) +
+      (c.exposurePct !== 100 ? ' · exposition ' + c.exposurePct + ' %' : '') + ' · ' + per;
+  }
+  function describeSaved(s) {
+    let d = 'Enregistrée le ' + (s.savedAt ? new Date(s.savedAt).toLocaleDateString('fr-FR') : '?');
+    if (s.config) d += ' · ' + describeConfig(s.config);
+    if (s.lastResult) d += ' · résultat : ' + signed(s.lastResult.returnPct, num2) + ' % (' + s.lastResult.trades + ' trades, drawdown max −' + num2.format(s.lastResult.maxDrawdownPct) + ' %)';
+    return d + '.';
+  }
+  let lastRun = null; // { key, stats } du dernier backtest, pour joindre son résultat à l'enregistrement
+
   function applyPresetSelection() {
     const v = $('preset').value;
     $('deleteStrat').hidden = !v.startsWith('saved:');
     if (v === 'custom') { loadStrategy({ name: '' }); $('longEntry').focus(); return; }
     if (v.startsWith('preset:')) loadStrategy(F.presets.list.find((p) => 'preset:' + p.id === v));
-    if (v.startsWith('saved:')) loadStrategy(storage.get()[+v.slice(6)]);
+    if (v.startsWith('saved:')) {
+      const saved = storage.get()[+v.slice(6)];
+      loadStrategy(saved);
+      applyConfig(saved.config);
+      $('presetDesc').textContent = describeSaved(saved);
+    }
   }
   $('preset').addEventListener('change', applyPresetSelection);
 
   // Enregistre la stratégie du formulaire (ou celle du dernier backtest) dans le navigateur.
-  function saveStrategy(strat) {
+  function saveStrategy(strat, config, stats) {
     const s = Object.assign({}, strat || currentStrategy());
     if (!strat && frenchDirty && s.frenchText) { translateFrench(); Object.assign(s, currentStrategy()); }
+    s.config = config || currentConfig();
+    if (!stats && lastRun && lastRun.key === JSON.stringify([s.longEntry, s.longExit, s.shortEntry, s.shortExit, s.stopLossPips, s.takeProfitPips, s.config])) stats = lastRun.stats;
+    s.lastResult = stats ? { returnPct: stats.returnPct, trades: stats.trades, winRate: stats.winRate, maxDrawdownPct: stats.maxDrawdownPct, finalEquity: stats.finalEquity } : null;
+    s.savedAt = new Date().toISOString();
     if (!strat && !validateAll()) { $('formError').textContent = 'Corrigez les règles en rouge avant d\'enregistrer.'; return null; }
     if (!s.longEntry && !s.shortEntry) { $('formError').textContent = 'Rien à enregistrer : aucune règle d\'entrée.'; return null; }
     const list = storage.get();
     const idx = list.findIndex((x) => x.name === s.name);
-    s.description = 'Stratégie enregistrée le ' + new Date().toLocaleDateString('fr-FR') + '.';
+    delete s.description;
     if (idx >= 0) list[idx] = s; else list.push(s);
     if (!storage.set(list)) { $('formError').textContent = 'Impossible d\'enregistrer : le stockage du navigateur est bloqué (navigation privée ?).'; return null; }
     if ($('stratName').value.trim() === s.name || !$('stratName').value.trim()) {
       refreshPresetSelect('saved:' + (idx >= 0 ? idx : list.length - 1));
       $('deleteStrat').hidden = false;
-      $('presetDesc').textContent = '« ' + s.name + ' » est enregistrée. Retrouvez-la dans Modèle → Mes stratégies.';
+      $('presetDesc').textContent = '« ' + s.name + ' » est enregistrée avec sa configuration (' + describeConfig(s.config) + '). Retrouvez-la dans Modèle → Mes stratégies.';
     } else {
       refreshPresetSelect($('preset').value);
     }
@@ -294,7 +339,9 @@
       if (loaded.warning) warnings.push(loaded.warning);
       if (startIndex < 200) warnings.push('Historique antérieur limité (' + startIndex + ' bougies) : les indicateurs à longue période (ex. EMA 200) peuvent être indisponibles en début de test.');
       if (result.ruined) warnings.push('<b>Compte liquidé</b> : le capital a été entièrement perdu. Réduisez le levier ou l\'exposition.');
-      render({ bars, strat, settings, result, loaded, periodKey, warnings });
+      const config = currentConfig();
+      lastRun = { key: JSON.stringify([strat.longEntry, strat.longExit, strat.shortEntry, strat.shortExit, strat.stopLossPips, strat.takeProfitPips, config]), stats: result.stats };
+      render({ bars, strat, settings, result, loaded, periodKey, warnings, config });
     } catch (err) {
       $('formError').textContent = err.message;
     } finally {
@@ -315,7 +362,7 @@
   }
 
   function render(ctx) {
-    const { bars, strat, settings, result, loaded, periodKey, warnings } = ctx;
+    const { bars, strat, settings, result, loaded, periodKey, warnings, config } = ctx;
     const s = result.stats, st = result.startIndex;
     const view = bars.slice(st);
     const dates = view.map((b) => b.date);
@@ -324,8 +371,9 @@
 
     let html = '';
     for (const w of warnings) html += '<div class="banner warn">' + w + '</div>';
-    html += '<div class="panel card save-card"><div><b>Cette stratégie vous plaît ?</b><div class="hint">' + esc(strat.frenchText || strat.longEntry || strat.shortEntry).replace(/\n/g, '<br>') + '</div></div>' +
-      '<button type="button" class="primary inline-save" id="saveFromResults">Enregistrer</button></div>';
+    html += '<div class="panel card save-card"><div><b>Cette stratégie vous plaît ?</b><div class="hint">' + esc(strat.frenchText || strat.longEntry || strat.shortEntry).replace(/\n/g, '<br>') + '</div>' +
+      '<div class="hint save-config">Configuration enregistrée avec : ' + esc(describeConfig(config)) + '</div>' +
+      '</div><button type="button" class="primary inline-save" id="saveFromResults">Enregistrer</button></div>';
     html += '<div class="summary-head"><h2>' + esc(strat.name) + ' · ' + esc(settings.pair) + '</h2>' +
       '<span class="meta">' + PERIOD_LABEL[periodKey] + ' · du ' + frDate(dates[0]) + ' au ' + frDate(dates[dates.length - 1]) +
       ' · levier 1:' + settings.leverage + ' · ' + esc(loaded.source) + ' · ' + view.length + ' bougies</span></div>';
@@ -441,7 +489,7 @@
       '<span><i class="tri-up"></i>Achat</span><span><i class="tri-dn"></i>Vente</span><span><i class="dot" style="background:var(--muted)"></i>Sortie</span>';
 
     $('saveFromResults').addEventListener('click', () => {
-      const saved = saveStrategy(strat);
+      const saved = saveStrategy(strat, config, s);
       if (saved) { $('saveFromResults').textContent = 'Enregistrée ✓'; $('saveFromResults').disabled = true; }
     });
     const exp = $('exportCsv');

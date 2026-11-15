@@ -19,6 +19,8 @@ pas d'installation.
    - ou cliquer sur **« Stratégie aléatoire »** : une stratégie est tirée au hasard et testée aussitôt.
      Si elle vous plaît, cliquez sur **« Enregistrer »** (en haut des résultats).
    Les stratégies enregistrées sont dans Modèle → *Mes stratégies* (stockées dans ce navigateur).
+   L'enregistrement garde aussi la configuration (paire, levier, capital, exposition, spread, période ou dates,
+   source des données) et le résultat du dernier backtest ; recharger la stratégie remet tout en place.
 2. **Marché et capital** : paire de devises, levier (1:1 à 1:500), capital, exposition, spread,
    période : **6 mois, 1 an, 2 ans**, ou **Dates** pour choisir librement le début et la fin du test
    (raccourcis 3 / 5 / 10 ans, année dernière, depuis janvier). Les cours BCE remontent à janvier 1999.
