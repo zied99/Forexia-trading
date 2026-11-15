@@ -420,7 +420,7 @@
       }
       if (result.ruined) warnings.push('<b>Compte liquidé</b> : le capital a été entièrement perdu. Réduisez le levier ou l\'exposition.');
       const config = currentConfig();
-      lastRunCtx = { bars, strat, settings, config, timeframe: loaded.timeframe || 'D1' };
+      lastRunCtx = { bars, strat, settings, config, timeframe: loaded.timeframe || 'D1', lastTrades: result.trades };
       lastRun = { key: JSON.stringify([strat.longEntry, strat.longExit, strat.shortEntry, strat.shortExit, strat.stopLossPips, strat.takeProfitPips, config]), stats: result.stats };
       render({ bars, strat, settings, result, loaded, periodKey, warnings, config });
     } catch (err) {
@@ -731,6 +731,10 @@
     $('depTimeframe').value = 'PERIOD_' + (lastRunCtx.timeframe || 'D1');
     $('depNotice').textContent = '';
     refreshDeploy();
+    $('bridgeSymbol').value = settings.pair.replace('/', '');
+    $('bridgeLog').innerHTML = '';
+    $('bridgeConfirm').hidden = true;
+    checkBridge();
     $('deployModal').hidden = false;
     document.body.style.overflow = 'hidden';
     $('deployModal').querySelector('.close').focus();
@@ -762,6 +766,116 @@
       $('depNotice').textContent = 'Copie automatique impossible : le code est sélectionné, copiez-le avec Ctrl+C.';
     }
   });
+
+  // ---------- Passerelle MetaTrader 5 (programme local, voir bridge/) ----------
+  const BRIDGE_URL = 'http://127.0.0.1:8787';
+  let bridgeToken = '';
+  try { bridgeToken = localStorage.getItem('forexia.bridgeToken') || ''; } catch (e) { /* ignoré */ }
+  async function bridgeCall(method, path, body) {
+    const headers = { 'X-Forexia-Token': bridgeToken };
+    if (body) headers['Content-Type'] = 'application/json';
+    const res = await fetch(BRIDGE_URL + path, { method: method, headers: headers, body: body ? JSON.stringify(body) : undefined });
+    if (res.status === 401) { const e = new Error('code'); e.code = 401; throw e; }
+    return res.json();
+  }
+  function bridgeState(text, cls) { $('bridgeState').textContent = text; $('bridgeState').className = 'pill ' + (cls || ''); }
+  async function checkBridge() {
+    $('bridgeSetup').hidden = $('bridgeReady').hidden = true;
+    bridgeState('recherche…');
+    try { await fetch(BRIDGE_URL + '/ping'); } catch (e) {
+      bridgeState('passerelle non détectée', 'ko'); $('bridgeSetup').hidden = false; return;
+    }
+    if (!bridgeToken) { bridgeState('à connecter', 'ko'); $('bridgeSetup').hidden = false; return; }
+    try {
+      const st = await bridgeCall('GET', '/status');
+      const terms = st.terminals || [];
+      $('bridgeTerminal').innerHTML = terms.map((t) => '<option value="' + esc(t.id) + '">' + esc(t.name) + ' — ' + esc(t.dataDir) + '</option>').join('');
+      if (!terms.length) { bridgeState('MT5 introuvable', 'ko'); $('bridgeSetup').hidden = false; return; }
+      bridgeState('connectée', 'ok');
+      $('bridgeReady').hidden = false;
+    } catch (e) {
+      bridgeState(e.code === 401 ? 'code incorrect' : 'erreur', 'ko');
+      $('bridgeSetup').hidden = false;
+    }
+  }
+  $('bridgeConnect').addEventListener('click', () => {
+    bridgeToken = $('bridgeToken').value.trim().toUpperCase();
+    try { localStorage.setItem('forexia.bridgeToken', bridgeToken); } catch (e) { /* ignoré */ }
+    checkBridge();
+  });
+  $('bridgeTest').addEventListener('change', () => { $('bridgeTestOpts').hidden = !$('bridgeTest').checked; });
+
+  function nextDay(iso) { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); return F.data.iso(d); }
+  function compareHtml(r) {
+    const f = lastRun.stats;
+    const mt = { ret: r.deposit ? (100 * r.profit) / r.deposit : 0, trades: r.trades, win: r.trades ? (100 * r.profitTrades) / r.trades : 0, pf: r.profitFactor, dd: r.maxDrawdownPct };
+    const reasons = { 3: 'Signal', 4: 'Stop-loss', 5: 'Take-profit', 6: 'Margin call' };
+    const count = (list, key) => list.reduce((m, x) => { const k = key(x); m[k] = (m[k] || 0) + 1; return m; }, {});
+    const fx = count(lastRunCtx.lastTrades || [], (t) => (t.reason === 'Fin de période' ? 'Signal' : t.reason));
+    const m5 = count(r.deals || [], (d) => reasons[d.reason] || 'Autre');
+    const row = (k, a, b) => '<tr><td>' + k + '</td><td>' + a + '</td><td>' + b + '</td></tr>';
+    const exits = ['Signal', 'Stop-loss', 'Take-profit', 'Margin call'].filter((k) => fx[k] || m5[k]).map((k) => row('Sorties « ' + k + ' »', fx[k] || 0, m5[k] || 0)).join('');
+    return '<div class="table-wrap"><table class="compare"><thead><tr><th></th><th>Forexia</th><th>MetaTrader 5</th></tr></thead><tbody>' +
+      row('Profit net', '<span class="' + cls(f.returnPct) + '">' + pct(f.returnPct) + '</span>', '<span class="' + cls(mt.ret) + '">' + pct(mt.ret) + '</span>') +
+      row('Trades', f.trades, mt.trades) + row('Trades gagnants', num1.format(f.winRate) + ' %', num1.format(mt.win) + ' %') +
+      row('Profit factor', Number.isFinite(f.profitFactor) ? num2.format(f.profitFactor) : '∞', num2.format(mt.pf)) +
+      row('Drawdown max', '−' + num1.format(f.maxDrawdownPct) + ' %', '−' + num1.format(mt.dd) + ' %') + exits +
+      '</tbody></table></div><p class="hint">Résultats MT5 sur les bougies de votre courtier (' + esc(r.symbol) + ', ' + esc(String(r.period).replace('PERIOD_', '')) + ').</p>';
+  }
+  function bridgeStep(cls, html) {
+    const d = document.createElement('div');
+    d.className = 'step-line ' + cls;
+    d.innerHTML = '<div>' + html + '</div>';
+    $('bridgeLog').appendChild(d);
+    return { set(c, h) { d.className = 'step-line ' + c; d.innerHTML = '<div>' + h + '</div>'; }, remove() { d.remove(); } };
+  }
+  // resume = true : reprise après « Fermer MT5 et continuer » (l'EA est déjà compilé).
+  async function bridgeDeploy(resume) {
+    if (!deployed || !lastRunCtx) return;
+    const termId = $('bridgeTerminal').value, symbol = $('bridgeSymbol').value.trim(), period = $('depTimeframe').value.replace('PERIOD_', '');
+    const { bars, settings } = lastRunCtx;
+    $('bridgeDeploy').disabled = true;
+    let mayClose = !!resume;
+    try {
+      if (!resume) {
+        $('bridgeLog').innerHTML = '';
+        const s = bridgeStep('run', 'Compilation dans MetaEditor…');
+        const r = await bridgeCall('POST', '/deploy', { terminalId: termId, fileName: deployed.fileName, code: deployed.code });
+        if (!r.ok || !r.compiled) {
+          s.set('ko', esc(r.message || 'Compilation échouée. ' + (r.summary || '')) + (r.errors && r.errors.length ? '<pre>' + esc(r.errors.join('\n')) + '</pre>' : ''));
+          return;
+        }
+        s.set('ok', 'EA compilé et installé dans <code>MQL5\\Experts\\Forexia</code>' + (r.warnings.length ? ' (' + r.warnings.length + ' avertissement(s) sans gravité)' : '') + '.');
+      }
+      if ($('bridgeTest').checked && !$('bridgeLog').querySelector('.tested')) {
+        const s = bridgeStep('run', 'Test dans MetaTrader 5 en cours… (la première fois, MT5 télécharge l\'historique : quelques minutes)');
+        const r = await bridgeCall('POST', '/test', {
+          terminalId: termId, fileName: deployed.fileName, symbol: symbol, period: period,
+          from: bars[settings.startIndex].date.slice(0, 10), to: nextDay(bars[bars.length - 1].date.slice(0, 10)),
+          deposit: settings.capital, currency: $('bridgeCurrency').value, leverage: settings.leverage,
+          model: Number($('bridgeModel').value), closeTerminal: mayClose,
+        });
+        if (r.needClose) { s.remove(); $('bridgeConfirm').hidden = false; return; }
+        if (!r.ok) { s.set('ko', esc(r.message)); return; }
+        s.set('ok tested', 'Test MT5 terminé en ' + r.seconds + ' s.' + compareHtml(r.result));
+        mayClose = true;
+      }
+      if ($('bridgeAttach').checked) {
+        const s = bridgeStep('run', 'Ouverture de l\'EA sur un graphique…');
+        const r = await bridgeCall('POST', '/attach', { terminalId: termId, fileName: deployed.fileName, symbol: symbol, period: period, closeTerminal: mayClose });
+        if (r.needClose) { s.remove(); $('bridgeConfirm').hidden = false; return; }
+        s.set(r.ok ? 'ok' : 'ko', esc(r.message) + (r.ok ? ' Vérifiez que le bouton « Algo Trading » est vert et que l\'EA affiche son état en haut à gauche du graphique.' : ''));
+      }
+    } catch (e) {
+      bridgeStep('ko', e.code === 401 ? 'Code d\'appairage refusé : reconnectez la passerelle.' : 'Passerelle injoignable : la fenêtre de la passerelle est-elle toujours ouverte ?');
+      if (e.code === 401) checkBridge();
+    } finally {
+      $('bridgeDeploy').disabled = false;
+    }
+  }
+  $('bridgeDeploy').addEventListener('click', () => bridgeDeploy(false));
+  $('bridgeCloseGo').addEventListener('click', () => { $('bridgeConfirm').hidden = true; bridgeDeploy(true); });
+  $('bridgeCloseCancel').addEventListener('click', () => { $('bridgeConfirm').hidden = true; bridgeStep('ko', 'Annulé : MetaTrader 5 n\'a pas été fermé.'); });
 
   // ---------- Thème ----------
   $('themeToggle').addEventListener('click', () => {

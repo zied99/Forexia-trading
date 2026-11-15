@@ -107,6 +107,26 @@ CLOSE < BB_LOWER(20, 2) OR RSI(14) < 25
 - Les données BCE n'ont qu'un cours par jour : ouverture = clôture de la veille, pas de mèches.
   Pour un test plus fin des stops, importez un CSV OHLC.
 
+## Passerelle MetaTrader 5 (déploiement direct)
+
+La fenêtre **Déployer** peut envoyer l'EA directement dans MT5 grâce à une petite passerelle locale
+(`bridge/forexia_bridge.py`, Python 3 sans module supplémentaire) :
+
+1. installer Python (python.org, cocher « Add python.exe to PATH ») ;
+2. télécharger `bridge/forexia_bridge.py` et `bridge/demarrer-passerelle.bat` dans un même dossier,
+   double-cliquer sur le `.bat` et laisser la fenêtre ouverte ;
+3. dans Forexia → Déployer, coller le **code d'appairage** affiché (une seule fois).
+
+« Déployer dans MetaTrader 5 » : dépose l'EA dans `MQL5\Experts\Forexia`, le **compile avec MetaEditor**
+(erreurs affichées dans la page), lance si demandé le **testeur MT5** sur la même période et affiche
+Forexia et MT5 côte à côte, puis peut **ouvrir l'EA sur un graphique** (MT5 est relancé avec un fichier
+de configuration). MT5 doit être fermé pour le testeur et l'ouverture du graphique : la page le demande.
+
+Sécurité : la passerelle n'écoute que `127.0.0.1`, n'accepte que la page Forexia et le code d'appairage,
+n'écrit que dans les dossiers Forexia du terminal et n'exécute que MetaEditor et le terminal. L'EA refuse
+de trader sur un compte réel tant que le paramètre « Autoriser le trading sur un compte RÉEL » est désactivé.
+Test (faux MT5) : `python3 tests/bridge-check.py`.
+
 ## Réalisme : se rapprocher de MetaTrader 5
 
 Les cours BCE n'ont qu'**un prix par jour** (14 h 15), sans plus haut ni plus bas. Sans correction, un stop-loss
@@ -152,6 +172,8 @@ js/app.js           contrôleur de l'interface
 tests/run-tests.js  tests du moteur : npm test
 tests/mql5-check.js signaux de l'EA (compilés en C++) = signaux du backtest
 tests/realism-check.js écart entre Forexia et de vraies bougies (export MT5…)
+tests/bridge-check.py passerelle MT5 testée avec un faux MetaEditor / terminal
+bridge/             passerelle locale Forexia <-> MetaTrader 5
 ```
 
 > Outil éducatif : les performances passées ne préjugent pas des performances futures.

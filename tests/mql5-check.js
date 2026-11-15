@@ -92,7 +92,49 @@ cases.push(['Règles avancées', {
   shortExit: 'CROSS_UP(MACD_HIST(5,35,5), 0) OR CLOSE > BB_UPPER(20,2)',
 }]);
 
+// Rapport OnTester : le JSON écrit par l'EA doit être valide.
+function checkReport() {
+  const code = M.generate(P.list[0], { pair: 'GBP/USD' }).code;
+  const lines = code.split('\n');
+  const a = lines.findIndex((l) => l.startsWith('double OnTester()'));
+  let b = a + 1; while (lines[b] !== '  }') b++;
+  const body = lines.slice(a, b + 1).join('\n').replace(/\(first \? "" : ","\)/g, 'string(first ? "" : ",")');
+  const shim = `
+#include <string>
+#include <cstdio>
+typedef std::string string; typedef unsigned long ulong; typedef long datetime;
+#define FX_REPORT "x"
+enum { FILE_WRITE = 1, FILE_TXT = 2, FILE_ANSI = 4, FILE_COMMON = 8, INVALID_HANDLE = -1 };
+enum { STAT_INITIAL_DEPOSIT, STAT_PROFIT, STAT_TRADES, STAT_PROFIT_TRADES, STAT_PROFIT_FACTOR, STAT_EQUITY_DDREL_PERCENT, STAT_SHARPE_RATIO };
+enum { DEAL_ENTRY, DEAL_TYPE, DEAL_TIME, DEAL_REASON }; enum { DEAL_PROFIT, DEAL_SWAP, DEAL_COMMISSION, DEAL_VOLUME, DEAL_PRICE };
+enum { DEAL_ENTRY_IN, DEAL_ENTRY_OUT, DEAL_ENTRY_INOUT }; enum { TIME_DATE = 1, TIME_MINUTES = 2 };
+static double TesterStatistics(int k) { double v[] = { 100, 110.81, 25, 6, 1.44, 46.27, 0.82 }; return v[k]; }
+static int FileOpen(const char *, int) { return 1; }
+static string OUT; static void FileWriteString(int, const string &s) { OUT = s; } static void FileClose(int) {}
+static string DoubleToString(double v, int d) { char b[64]; snprintf(b, 64, "%.*f", d, v); return b; }
+static string IntegerToString(long v) { return std::to_string(v); }
+static string _Symbol = "GBPUSD"; static int _Digits = 5; static int InpTimeframe = 0;
+static string EnumToString(int) { return "PERIOD_D1"; }
+static bool HistorySelect(long, long) { return true; } static long TimeCurrent() { return 0; }
+static int HistoryDealsTotal() { return 4; } static ulong HistoryDealGetTicket(int i) { return i + 1; }
+static long HistoryDealGetInteger(ulong t, int p) { if (p == DEAL_ENTRY) return t % 2 ? DEAL_ENTRY_IN : DEAL_ENTRY_OUT; if (p == DEAL_REASON) return 4; return 1; }
+static double HistoryDealGetDouble(ulong, int p) { return p == DEAL_PRICE ? 1.27123 : -12.5; }
+static string TimeToString(datetime, int) { return "2025.01.02 00:00"; }
+static void PrintFormat(const char *, ...) {} static int GetLastError() { return 0; }
+`;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fxrep-'));
+  fs.writeFileSync(path.join(dir, 'r.cpp'), shim + body + '\nint main() { OnTester(); puts(OUT.c_str()); return 0; }\n');
+  try { execFileSync('g++', ['-w', '-o', path.join(dir, 'r'), path.join(dir, 'r.cpp')], { stdio: 'pipe' }); }
+  catch (e) { throw new Error('compilation : ' + e.stderr.toString().split('\n').slice(0, 10).join('\n')); }
+  const out = execFileSync(path.join(dir, 'r')).toString();
+  fs.rmSync(dir, { recursive: true, force: true });
+  const j = JSON.parse(out);
+  if (j.trades !== 25 || j.deals.length !== 2 || j.deals[0].reason !== 4 || j.symbol !== 'GBPUSD') throw new Error('contenu inattendu : ' + out);
+}
+
 let failed = 0;
+try { checkReport(); console.log('  ok  Rapport de test (OnTester) : JSON valide'); }
+catch (e) { failed++; console.log('  ÉCHEC Rapport de test (OnTester)\n       ' + e.message); }
 console.log('Vérification de l\'EA MQL5 (compilé en C++) contre le moteur JavaScript');
 for (const [label, s] of cases) {
   try { const a = check(label, s, bars); console.log('  ok  ' + label + ' (' + a + ' bougies avec signal)'); }

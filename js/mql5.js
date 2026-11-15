@@ -428,6 +428,47 @@ void FxCross(const double &a[], const double &b[], const int dir, double &out[])
       '               bool &le, bool &lx, bool &se, bool &sx)\n  {\n' + comp.lines.join('\n') + '\n  }\n';
   }
 
+  // ---------- Rapport de test (OnTester) ----------
+  const ONTESTER = String.raw`   int fh = FileOpen(FX_REPORT, FILE_WRITE | FILE_TXT | FILE_ANSI | FILE_COMMON);
+   if(fh == INVALID_HANDLE)
+     {
+      PrintFormat("Rapport Forexia impossible à écrire (%d)", GetLastError());
+      return TesterStatistics(STAT_PROFIT);
+     }
+   string js = "{";
+   js += "\"deposit\":" + DoubleToString(TesterStatistics(STAT_INITIAL_DEPOSIT), 2);
+   js += ",\"profit\":" + DoubleToString(TesterStatistics(STAT_PROFIT), 2);
+   js += ",\"trades\":" + IntegerToString((int)TesterStatistics(STAT_TRADES));
+   js += ",\"profitTrades\":" + IntegerToString((int)TesterStatistics(STAT_PROFIT_TRADES));
+   js += ",\"profitFactor\":" + DoubleToString(TesterStatistics(STAT_PROFIT_FACTOR), 4);
+   js += ",\"maxDrawdownPct\":" + DoubleToString(TesterStatistics(STAT_EQUITY_DDREL_PERCENT), 2);
+   js += ",\"sharpe\":" + DoubleToString(TesterStatistics(STAT_SHARPE_RATIO), 4);
+   js += ",\"symbol\":\"" + _Symbol + "\",\"period\":\"" + EnumToString(InpTimeframe) + "\"";
+   js += ",\"deals\":[";
+   bool first = true;
+   if(HistorySelect(0, TimeCurrent()))
+     {
+      int total = HistoryDealsTotal();
+      for(int i = 0; i < total; i++)
+        {
+         ulong t = HistoryDealGetTicket(i);
+         if(t == 0) continue;
+         long entry = HistoryDealGetInteger(t, DEAL_ENTRY);
+         if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_INOUT) continue;
+         double pnl = HistoryDealGetDouble(t, DEAL_PROFIT) + HistoryDealGetDouble(t, DEAL_SWAP) + HistoryDealGetDouble(t, DEAL_COMMISSION);
+         js += (first ? "" : ",") + "{\"time\":\"" + TimeToString((datetime)HistoryDealGetInteger(t, DEAL_TIME), TIME_DATE | TIME_MINUTES) + "\"";
+         js += ",\"type\":" + IntegerToString(HistoryDealGetInteger(t, DEAL_TYPE));
+         js += ",\"volume\":" + DoubleToString(HistoryDealGetDouble(t, DEAL_VOLUME), 2);
+         js += ",\"price\":" + DoubleToString(HistoryDealGetDouble(t, DEAL_PRICE), _Digits);
+         js += ",\"profit\":" + DoubleToString(pnl, 2);
+         js += ",\"reason\":" + IntegerToString(HistoryDealGetInteger(t, DEAL_REASON)) + "}";
+         first = false;
+        }
+     }
+   js += "]}";
+   FileWriteString(fh, js);
+   FileClose(fh);`;
+
   // ---------- Fichier .mq5 complet ----------
   function mqlString(s) { return '"' + String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n]+/g, ' ') + '"'; }
   function asciiName(s) {
@@ -451,6 +492,7 @@ void FxCross(const double &a[], const double &b[], const int dir, double &out[])
     const fn = signalsFunction(strategy);
     const name = strategy.name || 'Stratégie Forexia';
     const pairCode = String(o.pair || '').replace('/', '');
+    const baseName = 'Forexia_' + asciiName(name);
     const magic = 100000 + (hash(name + pairCode) % 900000);
     const tf = TIMEFRAMES.includes(o.timeframe) ? o.timeframe : 'PERIOD_D1';
     const st = o.stats;
@@ -514,10 +556,12 @@ input double InpMaxSpreadPips = ${o.maxSpreadPips ?? 5}; // Spread maximum pour 
 input bool InpTradeOnStart = false; // Agir sur la dernière bougie close dès le lancement
 input int InpHistoryBars = 1000; // Nombre de bougies pour calculer les indicateurs
 input ulong InpMagic = ${magic}; // Identifiant des ordres de cet EA
+input bool InpAllowRealAccount = false; // Autoriser le trading sur un compte RÉEL
 
 #define FX_NAME ${mqlString(name)}
 #define FX_PAIR ${mqlString(pairCode)}
 #define FX_COMMENT ${mqlString(('Forexia ' + asciiName(name)).slice(0, 31))}
+#define FX_REPORT "Forexia\\\\${baseName}.json"
 
 CTrade   g_trade;
 datetime g_lastBar = 0;
@@ -700,6 +744,11 @@ int OnInit()
       Print("InpHistoryBars doit valoir au moins 100.");
       return INIT_PARAMETERS_INCORRECT;
      }
+   if(!MQLInfoInteger(MQL_TESTER) && AccountInfoInteger(ACCOUNT_TRADE_MODE) == ACCOUNT_TRADE_MODE_REAL && !InpAllowRealAccount)
+     {
+      Alert(FX_NAME, " : compte RÉEL détecté. Activez le paramètre « Autoriser le trading sur un compte RÉEL » pour trader en réel.");
+      return INIT_FAILED;
+     }
    g_trade.SetExpertMagicNumber(InpMagic);
    g_trade.SetDeviationInPoints(30);
    g_trade.SetTypeFillingBySymbol(_Symbol);
@@ -717,6 +766,14 @@ void OnDeinit(const int reason)
    Comment("");
   }
 
+// Fin d'un test dans le testeur de stratégie : résultats écrits pour la passerelle Forexia
+// (dossier commun des terminaux : ...\MetaQuotes\Terminal\Common\Files\Forexia).
+double OnTester()
+  {
+${ONTESTER}
+   return TesterStatistics(STAT_PROFIT);
+  }
+
 void OnTick()
   {
    datetime t = iTime(_Symbol, InpTimeframe, 0);
@@ -725,7 +782,7 @@ void OnTick()
   }
 //+------------------------------------------------------------------+
 `;
-    return { code: code, fileName: 'Forexia_' + asciiName(name) + '.mq5', magic: magic };
+    return { code: code, fileName: baseName + '.mq5', baseName: baseName, magic: magic };
   }
 
   F.mql5 = { generate, signalsFunction, CALC_LIB, TIMEFRAMES };

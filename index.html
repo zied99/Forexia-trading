@@ -284,6 +284,56 @@
             <input id="depSpread" type="number" min="0" step="0.5" value="5">
           </label>
         </div>
+        <section class="bridge" id="bridgeBox">
+          <div class="bridge-head"><b>Envoi direct dans MetaTrader 5</b><span class="pill" id="bridgeState">recherche…</span></div>
+          <div id="bridgeSetup" hidden>
+            <p class="hint">La passerelle est un petit programme qui tourne sur votre PC : elle dépose l'EA dans MT5, le compile, lance le testeur et peut l'ouvrir sur un graphique. Installation unique :</p>
+            <ol class="steps">
+              <li>Installez <a href="https://www.python.org/downloads/" target="_blank" rel="noopener">Python</a> (cochez « Add python.exe to PATH »).</li>
+              <li>Téléchargez <a href="bridge/forexia_bridge.py" download>forexia_bridge.py</a> et <a href="bridge/demarrer-passerelle.bat" download>demarrer-passerelle.bat</a> dans un même dossier.</li>
+              <li>Double-cliquez sur <code>demarrer-passerelle.bat</code> et laissez la fenêtre ouverte. Si le navigateur demande l'accès au « réseau local », acceptez.</li>
+              <li>Collez le code d'appairage affiché dans cette fenêtre :</li>
+            </ol>
+            <div class="row buttons">
+              <input id="bridgeToken" type="text" placeholder="ABCD-EFGH" maxlength="9" autocomplete="off" spellcheck="false">
+              <button type="button" class="secondary" id="bridgeConnect">Connecter</button>
+            </div>
+          </div>
+          <div id="bridgeReady" hidden>
+            <div class="row">
+              <label class="field">Terminal MT5
+                <select id="bridgeTerminal"></select>
+              </label>
+              <label class="field">Symbole dans MT5
+                <input id="bridgeSymbol" type="text" spellcheck="false" maxlength="30">
+              </label>
+            </div>
+            <label class="check"><input type="checkbox" id="bridgeTest" checked>
+              <span>Lancer le testeur MT5 sur la même période <small>(MT5 doit être fermé : il s'ouvre, teste puis se referme)</small></span></label>
+            <div class="row" id="bridgeTestOpts">
+              <label class="field">Devise du dépôt
+                <select id="bridgeCurrency"><option>EUR</option><option>USD</option><option>GBP</option><option>CHF</option><option>JPY</option></select>
+              </label>
+              <label class="field">Modélisation
+                <select id="bridgeModel">
+                  <option value="1" selected>1 minute OHLC (recommandé)</option>
+                  <option value="2">Prix d'ouverture uniquement (rapide)</option>
+                  <option value="0">Chaque tick</option>
+                  <option value="4">Ticks réels (lent)</option>
+                </select>
+              </label>
+            </div>
+            <label class="check"><input type="checkbox" id="bridgeAttach">
+              <span>Ensuite, ouvrir l'EA sur un graphique <small>(MT5 redémarre ; l'EA refuse de trader sur un compte réel sauf autorisation dans ses paramètres)</small></span></label>
+            <button type="button" class="primary" id="bridgeDeploy">Déployer dans MetaTrader 5</button>
+            <div class="bridge-confirm" id="bridgeConfirm" hidden>
+              <p><b>MetaTrader 5 est ouvert.</b> Il doit être fermé pour lancer le testeur ou ouvrir le graphique. Vos graphiques seront sauvegardés normalement.</p>
+              <div class="row buttons"><button type="button" class="primary" id="bridgeCloseGo">Fermer MT5 et continuer</button><button type="button" class="secondary" id="bridgeCloseCancel">Annuler</button></div>
+            </div>
+            <div class="bridge-log" id="bridgeLog"></div>
+          </div>
+        </section>
+
         <div class="row buttons deploy-buttons">
           <button type="button" class="primary" id="depDownload">Télécharger l'EA (.mq5)</button>
           <button type="button" class="secondary" id="depCopy">Copier le code</button>

@@ -6,6 +6,7 @@
   "scripts": {
     "test": "node tests/run-tests.js && node tests/mql5-check.js",
     "start": "npx --yes http-server -c-1 -p 8080 .",
-    "test:mql5": "node tests/mql5-check.js"
+    "test:mql5": "node tests/mql5-check.js",
+    "test:bridge": "python3 tests/bridge-check.py"
   }
 }
