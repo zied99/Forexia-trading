@@ -379,6 +379,14 @@ test('Courtier : spread trop large à minuit -> ordre reporté (comme l\'EA), ou
   eq(b.trades.length, 0); eq(b.diag.spreadMissed, 1);
 });
 
+test('Courtier : spread réel, fixe ou réel + marge', () => {
+  const bars = [0, 1, 2, 3, 4].map((i) => ({ date: '2024-01-0' + (i + 1), t: 1704067200 + i * 86400, open: 1.1, high: 1.1, low: 1.1, close: 1.1, spread: 20 }));
+  const spec = { digits: 5, point: 0.00001, contract: 100000, volumeMin: 0.01, volumeStep: 0.01, volumeMax: 100, swapMode: 0 };
+  const run = (mode, pips) => BK.runBrokerBacktest(bars, { longEntry: 'CLOSE > 0' }, { capital: 10000, leverage: 100, sizing: 'fixed', fixedLots: 1, maxLots: 10, maxSpreadPips: 0, startIndex: 1, spreadMode: mode, spreadPips: pips }, { spec }).stats.netProfit;
+  near(run(undefined, 5), -20, 1e-6); // réel : 2 pips × 10 $
+  near(run('fixed', 5), -50, 1e-6);
+  near(run('add', 1), -30, 1e-6);
+});
 console.log('Expert Advisor MT5');
 test('EA généré pour chaque modèle : paramètres repris de la stratégie', () => {
   for (const p of P.list) {

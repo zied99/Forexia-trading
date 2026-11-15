@@ -86,6 +86,7 @@
       period: periodValue(), dateFrom: $('dateFrom').value, dateTo: $('dateTo').value, source: sourceValue(),
       estimateWicks: $('estimateWicks').checked,
       withdraw: { on: $('withdrawOn').checked, pct: $('withdrawPct').value, share: $('withdrawShare').value },
+      spreadMode: $('spreadMode').value,
       broker: { symbol: $('brokerSymbol').value, tf: $('brokerTf').value, sizing: $('brokerSizing').value, lots: $('brokerLots').value,
         risk: $('brokerRisk').value, maxLots: $('brokerMaxLots').value, maxSpread: $('brokerMaxSpread').value, intrabar: $('brokerIntrabar').checked },
     };
@@ -104,6 +105,7 @@
     const src = c.source !== 'csv' && document.querySelector('input[name=source][value="' + c.source + '"]');
     if (src) { src.checked = true; $('csvField').hidden = true; }
     if (c.estimateWicks !== undefined) $('estimateWicks').checked = c.estimateWicks;
+    if (c.spreadMode) $('spreadMode').value = c.spreadMode;
     if (c.withdraw) {
       $('withdrawOn').checked = !!c.withdraw.on; $('withdrawPct').value = c.withdraw.pct; $('withdrawShare').value = c.withdraw.share;
       updateWithdrawUI();
@@ -381,12 +383,21 @@
     } catch (e) { $('formError').textContent = 'CSV : ' + e.message; }
     updateWicksField();
   });
+  let brokerSpreadInfo = '';
+  $('spreadMode').addEventListener('change', () => updateWicksField());
   function updateWicksField() {
     const src = sourceValue();
     $('wicksField').hidden = !(src === 'online' || (src === 'csv' && csvMeta && !csvMeta.real));
     $('brokerField').hidden = src !== 'broker';
-    // Avec les données du courtier, le spread réel de chaque bougie remplace le spread saisi.
-    $('spread').disabled = src === 'broker';
+    // Avec les données du courtier : spread réel bougie par bougie (par défaut), fixe, ou réel + marge.
+    const mode = $('spreadMode').value;
+    $('spreadModeField').hidden = src !== 'broker';
+    $('spread').disabled = src === 'broker' && mode === 'real';
+    $('spreadHint').hidden = src !== 'broker';
+    $('spreadHint').textContent = src !== 'broker' ? '' : mode === 'real'
+      ? 'Le spread historique de chaque bougie de votre courtier est utilisé, comme dans le testeur MT5' + (brokerSpreadInfo ? ' (médian sur la dernière simulation : ' + brokerSpreadInfo + ')' : '') + '. Choisissez « Fixe » ou « Réel + marge » pour saisir une valeur.'
+      : mode === 'fixed' ? 'Chaque trade paie ce spread, quel que soit le moment : le résultat s\'écartera du testeur MT5.'
+      : 'Le spread réel est augmenté de cette valeur : simulation plus prudente que le testeur MT5.';
     if (src === 'broker') brokerStatus();
   }
   document.querySelectorAll('input[name=source]').forEach((r) => r.addEventListener('change', updateWicksField));
@@ -558,7 +569,7 @@
       }
       if (loaded.broker) {
         Object.assign(settings, {
-          broker: loaded.broker, symbol: loaded.symbol, sizing: $('brokerSizing').value, fixedLots: Number($('brokerLots').value) || 0.01,
+          broker: loaded.broker, symbol: loaded.symbol, spreadMode: $('spreadMode').value, sizing: $('brokerSizing').value, fixedLots: Number($('brokerLots').value) || 0.01,
           riskPct: Number($('brokerRisk').value) || 1, maxLots: Number($('brokerMaxLots').value) || 1, maxSpreadPips: Number($('brokerMaxSpread').value) || 0,
         });
       }
@@ -572,6 +583,16 @@
         warnings.push('<b>Scalping sur données journalières</b> : le scalping se joue sur des bougies de quelques minutes. Pour un test réaliste, importez un CSV en M1 à M15 (source « Mon fichier CSV »).');
       }
       for (const nt of result.notes || []) warnings.push({ info: true, html: esc(nt) });
+      if (loaded.broker) {
+        const sps = bars.slice(startIndex).map((b) => b.spread).filter((x) => x > 0).sort((a, b) => a - b);
+        const pipPts = F.broker.pipOf(loaded.broker.spec) / loaded.broker.spec.point;
+        brokerSpreadInfo = sps.length ? num1.format(sps[Math.floor(sps.length / 2)] / pipPts) + ' pip' : '';
+        updateWicksField();
+        if (settings.spreadMode !== 'real') {
+          warnings.push({ info: true, html: (settings.spreadMode === 'fixed' ? 'Spread fixe de ' : 'Spread réel + ') + num1.format(spread) + (spread > 1 ? ' pips' : ' pip') +
+            ' : choix volontaire, le résultat ne sera pas identique au testeur MT5 (qui utilise le spread historique).' });
+        }
+      }
       if (result.ruined) warnings.push('<b>Compte liquidé</b> : le capital a été entièrement perdu. Réduisez le levier ou l\'exposition.');
       const config = currentConfig();
       lastRunCtx = { bars, strat, settings, config, timeframe: loaded.timeframe || 'D1', lastTrades: result.trades, diag: result.diag };

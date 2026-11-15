@@ -68,7 +68,9 @@
     const trades = [], equity = [], dates = [];
     const wd = F.backtest.makeWithdrawals(s, bars);
 
-    const sp = (b) => (b.spread || 0) * point;
+    // Spread : réel du courtier (bougie par bougie, comme le testeur MT5), fixe, ou réel + marge de sécurité.
+    const fixedSp = (s.spreadPips || 0) * pip;
+    const sp = s.spreadMode === 'fixed' ? () => fixedSp : s.spreadMode === 'add' ? (b) => (b.spread || 0) * point + fixedSp : (b) => (b.spread || 0) * point;
     const conv = (t) => convFactor(broker.conv, t);
 
     function lotsFor(entry, t, eq) {
