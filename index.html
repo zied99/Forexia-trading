@@ -132,6 +132,22 @@
             <label><input type="radio" name="period" value="6m"><span>6 mois</span></label>
             <label><input type="radio" name="period" value="1y" checked><span>1 an</span></label>
             <label><input type="radio" name="period" value="2y"><span>2 ans</span></label>
+            <label><input type="radio" name="period" value="custom"><span>Dates</span></label>
+          </div>
+          <div class="row date-range" id="customRange" hidden>
+            <label class="field">Du
+              <input id="dateFrom" type="date" min="1999-01-04">
+            </label>
+            <label class="field">Au
+              <input id="dateTo" type="date" min="1999-01-04">
+            </label>
+          </div>
+          <div class="quick-ranges" id="quickRanges" hidden>
+            <button type="button" class="chip" data-years="3">3 ans</button>
+            <button type="button" class="chip" data-years="5">5 ans</button>
+            <button type="button" class="chip" data-years="10">10 ans</button>
+            <button type="button" class="chip" data-year="last">Année dernière</button>
+            <button type="button" class="chip" data-year="ytd">Depuis janvier</button>
           </div>
         </fieldset>
         <label class="field">Spread (pips par trade)

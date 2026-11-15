@@ -7,7 +7,7 @@
   const STORE_KEY = 'forexia.strategies';
   const LEVERAGES = [1, 2, 5, 10, 20, 30, 50, 100, 200, 500];
   const SERIES_COLORS = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)'];
-  const PERIOD_LABEL = { '6m': '6 mois', '1y': '1 an', '2y': '2 ans' };
+  const PERIOD_LABEL = { '6m': '6 mois', '1y': '1 an', '2y': '2 ans', custom: 'Période personnalisée' };
 
   const money = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const num1 = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 });
@@ -191,6 +191,36 @@
   // ---------- Source des données ----------
   function sourceValue() { return document.querySelector('input[name=source]:checked').value; }
   function periodValue() { return document.querySelector('input[name=period]:checked').value; }
+
+  // ---------- Période : 6 mois / 1 an / 2 ans ou dates libres ----------
+  const todayIso = () => F.data.iso(new Date());
+  function setDates(from, to) { $('dateFrom').value = F.data.iso(from); $('dateTo').value = F.data.iso(to); }
+  function syncPeriodUI() {
+    const custom = periodValue() === 'custom';
+    $('customRange').hidden = !custom;
+    $('quickRanges').hidden = !custom;
+    $('dateFrom').max = $('dateTo').max = todayIso();
+    if (!custom) {
+      // Les dates suivent le choix rapide : en passant à « Dates », on part de cette période.
+      const r = F.data.periodRange(periodValue(), new Date(todayIso() + 'T00:00:00Z'));
+      setDates(r.start, r.end);
+    }
+  }
+  document.querySelectorAll('input[name=period]').forEach((r) => r.addEventListener('change', syncPeriodUI));
+  $('quickRanges').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    const now = new Date(todayIso() + 'T00:00:00Z');
+    if (b.dataset.years) setDates(F.data.addMonths(now, -12 * +b.dataset.years), now);
+    else if (b.dataset.year === 'last') { const y = now.getUTCFullYear() - 1; setDates(new Date(Date.UTC(y, 0, 1)), new Date(Date.UTC(y, 11, 31))); }
+    else if (b.dataset.year === 'ytd') setDates(new Date(Date.UTC(now.getUTCFullYear(), 0, 1)), now);
+  });
+  syncPeriodUI();
+
+  function rangeFor(periodKey, defaultEnd) {
+    if (periodKey === 'custom') return F.data.customRange($('dateFrom').value, $('dateTo').value);
+    return F.data.periodRange(periodKey, defaultEnd);
+  }
   document.querySelectorAll('input[name=source]').forEach((r) => r.addEventListener('change', () => { $('csvField').hidden = sourceValue() !== 'csv'; }));
   $('csvFile').addEventListener('change', async () => {
     const file = $('csvFile').files[0];
@@ -208,13 +238,15 @@
     if (src === 'csv') {
       if (!csvBars) throw new Error('Choisissez un fichier CSV valide.');
       const last = new Date(csvBars[csvBars.length - 1].date.slice(0, 10) + 'T00:00:00Z');
-      const range = F.data.periodRange(periodKey, last);
+      const range = rangeFor(periodKey, last);
       return { bars: csvBars, range: range, source: 'Fichier « ' + csvName + ' »' };
     }
     const today = new Date(F.data.iso(new Date()) + 'T00:00:00Z');
-    const range = F.data.periodRange(periodKey, today);
+    const range = rangeFor(periodKey, today);
+    if (range.end > today) range.end = today;
     if (src === 'online') {
-      const key = pair + '|' + periodKey + '|' + F.data.iso(today);
+      if (F.data.iso(range.end) < F.data.ECB_FIRST_DATE) throw new Error('Les cours BCE commencent le 04/01/1999 : choisissez une période plus récente.');
+      const key = pair + '|' + F.data.iso(range.fetchStart) + '|' + F.data.iso(range.end);
       try {
         if (!onlineCache.has(key)) onlineCache.set(key, await F.data.fetchFrankfurter(pair, range.fetchStart, range.end));
         return { bars: onlineCache.get(key), range: range, source: 'Cours BCE journaliers (Frankfurter)' };
@@ -251,7 +283,11 @@
       const endIso = F.data.iso(loaded.range.end);
       const bars = loaded.bars.filter((b) => b.date.slice(0, 10) <= endIso);
       const startIndex = F.data.indexFrom(bars, loaded.range.start);
-      if (bars.length - startIndex < 10) throw new Error('Pas assez de cotations sur la période choisie.');
+      if (bars.length - startIndex < 10) {
+        const all = loaded.bars;
+        throw new Error('Pas assez de cotations sur la période choisie. Données disponibles du ' + frDate(all[0].date.slice(0, 10)) +
+          ' au ' + frDate(all[all.length - 1].date.slice(0, 10)) + '.');
+      }
       const settings = { capital, leverage, exposurePct: exposure, spreadPips: spread, pair, startIndex };
       const result = F.backtest.runBacktest(bars, strat, settings);
       const warnings = [];

@@ -27,6 +27,15 @@
     return { start: start, end: end, fetchStart: addDays(start, -WARMUP_DAYS) };
   }
 
+  /** Période choisie librement (dates ISO « AAAA-MM-JJ »). */
+  function customRange(fromIso, toIso) {
+    const start = new Date(fromIso + 'T00:00:00Z'), end = new Date(toIso + 'T00:00:00Z');
+    if (isNaN(start) || isNaN(end)) throw new Error('Dates de début et de fin invalides.');
+    if (end <= start) throw new Error('La date de fin doit être après la date de début.');
+    if ((end - start) / 864e5 < 30) throw new Error('Choisissez une période d\'au moins 30 jours.');
+    return { start: start, end: end, fetchStart: addDays(start, -WARMUP_DAYS) };
+  }
+
   // Les taux BCE n'ont qu'une valeur par jour : on construit des barres OHLC
   // avec ouverture = clôture précédente.
   function barsFromCloses(points) {
@@ -38,8 +47,9 @@
     return bars;
   }
 
-  async function fetchFrankfurter(pair, from, to) {
-    const [base, quote] = pair.split('/');
+  const ECB_FIRST_DATE = '1999-01-04';
+
+  async function fetchChunk(base, quote, from, to) {
     const path = '/' + iso(from) + '..' + iso(to) + '?from=' + base + '&to=' + quote;
     const hosts = ['https://api.frankfurter.dev/v1', 'https://api.frankfurter.app'];
     let lastErr;
@@ -48,13 +58,33 @@
         const res = await fetch(h + path);
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const json = await res.json();
-        const points = Object.keys(json.rates || {}).sort().map((d) => ({ date: d, close: Number(json.rates[d][quote]) }))
-          .filter((p) => Number.isFinite(p.close));
-        if (points.length < 30) throw new Error('trop peu de cotations reçues');
-        return barsFromCloses(points);
+        return Object.keys(json.rates || {}).map((d) => ({ date: d, close: Number(json.rates[d][quote]) }));
       } catch (e) { lastErr = e; }
     }
-    throw new Error('Impossible de récupérer les cours en ligne (' + (lastErr && lastErr.message) + ')');
+    throw lastErr;
+  }
+
+  // Les cours sont demandés par tranches d'un an (en parallèle) puis fusionnés,
+  // pour garder des cotations journalières même sur de longues périodes.
+  async function fetchFrankfurter(pair, from, to) {
+    const [base, quote] = pair.split('/');
+    const first = new Date(ECB_FIRST_DATE + 'T00:00:00Z');
+    if (from < first) from = first;
+    const chunks = [];
+    for (let s = new Date(from); s <= to; s = addDays(s, 366)) {
+      const e = addDays(s, 365);
+      chunks.push([s, e < to ? e : to]);
+    }
+    try {
+      const parts = await Promise.all(chunks.map(([s, e]) => fetchChunk(base, quote, s, e)));
+      const byDate = new Map();
+      for (const p of parts.flat()) if (Number.isFinite(p.close)) byDate.set(p.date, p.close);
+      const points = [...byDate.keys()].sort().map((d) => ({ date: d, close: byDate.get(d) }));
+      if (points.length < 30) throw new Error('trop peu de cotations reçues');
+      return barsFromCloses(points);
+    } catch (e) {
+      throw new Error('Impossible de récupérer les cours en ligne (' + e.message + ')');
+    }
   }
 
   // Générateur pseudo-aléatoire reproductible (mulberry32).
@@ -134,6 +164,6 @@
   }
 
   root.Forexia.data = {
-    PAIRS, PERIODS, periodRange, fetchFrankfurter, generateSynthetic, parseCSV, indexFrom, barsFromCloses, iso, addMonths,
+    PAIRS, PERIODS, ECB_FIRST_DATE, periodRange, customRange, fetchFrankfurter, generateSynthetic, parseCSV, indexFrom, barsFromCloses, iso, addMonths,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -9,6 +9,10 @@ function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
   catch (e) { failed++; console.log('  ÉCHEC ' + name + '\n       ' + e.message); }
 }
+async function atest(name, fn) {
+  try { await fn(); passed++; console.log('  ok  ' + name); }
+  catch (e) { failed++; console.log('  ÉCHEC ' + name + '\n       ' + e.message); }
+}
 function eq(a, b, msg) { if (a !== b) throw new Error((msg || '') + ' attendu ' + b + ', obtenu ' + a); }
 function near(a, b, tol, msg) { if (!(Math.abs(a - b) <= tol)) throw new Error((msg || '') + ' attendu ≈' + b + ', obtenu ' + a); }
 function bar(date, c, o) { o = o ?? c; return { date, open: o, high: Math.max(o, c), low: Math.min(o, c), close: c }; }
@@ -130,6 +134,16 @@ test('CSV sans en-tête, séparateur ; et virgule décimale', () => {
   eq(D.parseCSV(rows.join('\n'))[3].high, 1.2);
 });
 
+test('Période personnalisée : dates et contrôles', () => {
+  const r = D.customRange('2015-03-01', '2018-06-30');
+  eq(D.iso(r.start), '2015-03-01'); eq(D.iso(r.end), '2018-06-30');
+  if (!(r.fetchStart < r.start)) throw new Error('pas d\'historique de préchauffage');
+  for (const [a, b] of [['2020-01-01', '2019-01-01'], ['2020-01-01', '2020-01-10'], ['', '2020-01-01']]) {
+    let threw = false; try { D.customRange(a, b); } catch (e) { threw = true; }
+    if (!threw) throw new Error('aurait dû refuser ' + a + ' → ' + b);
+  }
+});
+
 console.log('Stratégies en français');
 const PHRASES = [
   ["J'achète lorsque le RSI est inférieur à 30", { longEntry: 'RSI(14) < 30' }],
@@ -182,5 +196,31 @@ test('500 stratégies aléatoires : toutes valides et testables', () => {
   }
 });
 
-console.log('\n' + passed + ' réussis, ' + failed + ' échoués');
+(async () => {
+  console.log('Téléchargement des cours (API simulée)');
+  const calls = [];
+  globalThis.fetch = async (url) => {
+    calls.push(url);
+    const m = /\/(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})/.exec(url);
+    const rates = {};
+    for (let d = new Date(m[1]); d <= new Date(m[2]); d.setUTCDate(d.getUTCDate() + 1)) {
+      if (d.getUTCDay() % 6) rates[d.toISOString().slice(0, 10)] = { USD: 1.1 };
+    }
+    return { ok: true, json: async () => ({ rates }) };
+  };
+  await atest('Longue période : découpée par années, cotations journalières sans doublon', async () => {
+    const bars = await D.fetchFrankfurter('EUR/USD', new Date('2010-01-01'), new Date('2015-12-31'));
+    if (calls.length < 6) throw new Error(calls.length + ' requêtes seulement');
+    const dates = bars.map((b) => b.date);
+    eq(new Set(dates).size, dates.length, 'doublons');
+    eq(dates.join() === [...dates].sort().join(), true, 'ordre');
+    if (bars.length < 1500) throw new Error(bars.length + ' bougies seulement');
+  });
+  await atest('Pas de requête avant 1999 (début des cours BCE)', async () => {
+    calls.length = 0;
+    const bars = await D.fetchFrankfurter('EUR/USD', new Date('1990-01-01'), new Date('1999-06-30'));
+    eq(bars[0].date >= '1999-01-04', true); if (!calls.every((u) => !/199[0-8]-/.test(u))) throw new Error('requête avant 1999');
+  });
+  console.log('\n' + passed + ' réussis, ' + failed + ' échoués');
 process.exit(failed ? 1 : 0);
+})();
