@@ -76,6 +76,7 @@
     frenchDirty = false;
     renderTranslation(s.frenchText ? F.french.parse(s.frenchText) : null);
     validateAll();
+    try { updateEvalCount(); } catch (e) { /* pas encore initialisé au tout premier chargement */ }
   }
   // ---------- Configuration (paire, levier, capital…) enregistrée avec la stratégie ----------
   function currentConfig() {
@@ -1308,7 +1309,7 @@
     await C.signOut();
     for (const k of ['forexia.strategies', 'forexia.evaluations', 'forexia.lastRun']) { try { localStorage.removeItem(k); } catch (e) { /* ignoré */ } }
     evalMemory = null;
-    $('evalCount').textContent = '0';
+    updateEvalCount();
     refreshPresetSelect('preset:' + F.presets.list[0].id);
     applyPresetSelection();
     renderUser();
@@ -1516,7 +1517,21 @@
   };
   let evalMemory = null; // repli si le stockage du navigateur est indisponible
   function evalList() { const l = evalStore.get(); return l.length || !evalMemory ? l : evalMemory; }
-  function evalSave(list) { evalMemory = list; evalStore.set(list); $('evalCount').textContent = list.length; }
+  function evalSave(list) { evalMemory = list; evalStore.set(list); updateEvalCount(); }
+  // Onglet « Stratégie en cours » (par défaut) ou « Historique complet ».
+  let evalScope = 'current';
+  function currentStratName() { return currentStrategy().name; }
+  function updateEvalCount() {
+    const all = evalList(), name = currentStratName(), n = all.filter((e) => e.name === name).length;
+    $('evalCount').textContent = n;
+    $('evalBtn').title = n + ' simulation(s) de « ' + name + ' » · ' + all.length + ' au total dans l\'historique';
+  }
+  function setEvalScope(scope) {
+    evalScope = scope;
+    $('evalScopeCurrent').setAttribute('aria-selected', scope === 'current');
+    $('evalScopeAll').setAttribute('aria-selected', scope === 'all');
+    renderEvaluation();
+  }
   function dataLabel(loaded, settings) {
     if (loaded.broker) return 'MT5 ' + (settings.symbol || '') + ' ' + (loaded.timeframe || '');
     if (/^Fichier/.test(loaded.source)) return 'CSV ' + (loaded.timeframe || '');
@@ -1558,7 +1573,8 @@
     sel.value = values.includes(cur) ? cur : '';
   }
   function evalFiltered(list) {
-    const fs = $('evalFStrat').value, q = $('evalFSearch').value.trim().toLowerCase(), fp = $('evalFPair').value, fd = $('evalFData').value, fr = $('evalFResult').value;
+    const fs = evalScope === 'current' ? currentStratName() : $('evalFStrat').value;
+    const q = evalScope === 'current' ? '' : $('evalFSearch').value.trim().toLowerCase(), fp = $('evalFPair').value, fd = $('evalFData').value, fr = $('evalFResult').value;
     return list.map((e, i) => ({ e: e, i: i })).filter(({ e }) => (!fs || e.name === fs) && (!q || e.name.toLowerCase().includes(q)) &&
       (!fp || e.pair === fp) && (!fd || e.data === fd) && (!fr || (fr === 'win' ? e.returnPct > 0 : e.returnPct <= 0)));
   }
@@ -1573,12 +1589,24 @@
     const all = evalList();
     const uniq = (f) => [...new Set(all.map(f))].sort((a, b) => a.localeCompare(b, 'fr'));
     fillFilter('evalFStrat', uniq((e) => e.name)); fillFilter('evalFPair', uniq((e) => e.pair)); fillFilter('evalFData', uniq((e) => e.data));
+    const name = currentStratName(), mineN = all.filter((e) => e.name === name).length;
+    $('evalScopeCurrentN').textContent = mineN; $('evalScopeAllN').textContent = all.length;
+    $('evalTitle').textContent = evalScope === 'current' ? 'Évaluation de « ' + name + ' »' : 'Historique des simulations';
+    // dans l'onglet « Stratégie en cours », le choix de stratégie et la recherche n'ont pas lieu d'être
+    $('evalFStratField').hidden = evalScope === 'current';
+    $('evalFSearch').closest('label').hidden = evalScope === 'current';
     $('evalFilters').hidden = !all.length;
     $('evalClear').disabled = !all.length;
     if (!all.length) { $('evalExport').disabled = true; $('evalBody').innerHTML = '<p class="eval-empty">Aucune simulation pour l\'instant : lancez un backtest, il s\'ajoutera ici.</p>'; return; }
     const shown = evalFiltered(all);
     $('evalExport').disabled = !shown.length;
-    if (!shown.length) { $('evalBody').innerHTML = '<p class="eval-empty">Aucune simulation ne correspond à ces filtres.</p>'; return; }
+    if (!shown.length) {
+      $('evalBody').innerHTML = evalScope === 'current' && !mineN
+        ? '<p class="eval-empty">Aucune simulation de « ' + esc(name) + ' » pour l\'instant : lancez un backtest. Les ' + all.length + ' simulations précédentes sont dans <button type="button" class="link" id="evalGoAll">l\'historique complet</button>.</p>'
+        : '<p class="eval-empty">Aucune simulation ne correspond à ces filtres.</p>';
+      const go = $('evalGoAll'); if (go) go.addEventListener('click', () => setEvalScope('all'));
+      return;
+    }
     const list = shown.map((x) => x.e);
     const p = (v) => '<span class="' + cls(v) + '">' + signed(v, num2) + ' %</span>';
     const rows = shown.map(({ e, i }) => '<tr>' +
@@ -1590,7 +1618,7 @@
       '<td>' + e.trades + '</td><td>' + num1.format(e.winRate) + ' %</td><td>−' + num1.format(e.maxDrawdownPct) + ' %</td>' +
       '<td>' + (e.strategy ? '<button type="button" class="reload" data-reload="' + i + '" title="Remettre cette stratégie et ses réglages dans le formulaire">Recharger</button>' : '') + '</td>' +
       '<td><button type="button" class="del" data-del="' + i + '" title="Retirer cette ligne" aria-label="Retirer la simulation ' + (i + 1) + '">✕</button></td></tr>').join('');
-    const filtered = shown.length < all.length;
+    const filtered = evalScope === 'all' && shown.length < all.length;
     const foot = '<tr><td colspan="8" class="l">Moyenne sur ' + list.length + ' simulation' + (list.length > 1 ? 's' : '') + (filtered ? ' (filtrées)' : '') + '</td>' +
       '<td>' + p(mean(list.map((e) => e.returnPct))) + '</td><td class="avg-col" title="Moyenne des gains moyens">' + p(mean(list.map((e) => e.avgGainPct))) + '</td><td>' + signed(mean(list.filter((e) => e.monthlyGain != null).map((e) => e.monthlyGain)), money) + '</td><td>' + money.format(mean(list.map((e) => e.withdrawn || 0))) + '</td>' +
       '<td>' + num1.format(mean(list.map((e) => e.trades))) + '</td><td>' + num1.format(mean(list.map((e) => e.winRate))) + ' %</td>' +
@@ -1599,7 +1627,11 @@
       '<th class="l">Période testée</th><th class="l">Données</th><th>Levier</th><th>Capital</th><th>Résultat</th><th class="avg-col">Gain moyen</th><th>Par mois</th><th>Retiré</th>' +
       '<th>Trades</th><th>Gagnants</th><th>Drawdown</th><th></th><th></th></tr></thead><tbody>' + rows + '</tbody><tfoot>' + foot + '</tfoot></table></div>';
   }
+  $('evalScopeCurrent').addEventListener('click', () => setEvalScope('current'));
+  $('evalScopeAll').addEventListener('click', () => setEvalScope('all'));
   function openEvaluation() {
+    evalScope = 'current';
+    $('evalScopeCurrent').setAttribute('aria-selected', 'true'); $('evalScopeAll').setAttribute('aria-selected', 'false');
     $('evalConfirm').hidden = true;
     renderEvaluation();
     $('evalModal').hidden = false;
@@ -1659,7 +1691,9 @@
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   });
-  $('evalCount').textContent = evalList().length;
+  updateEvalCount();
+  $('stratName').addEventListener('input', updateEvalCount);
+  $('form').addEventListener('change', () => setTimeout(updateEvalCount, 0));
   dbBadge();
   // Au chargement : compte en ligne (ou écran de connexion), puis base du PC si la passerelle tourne.
   renderUser();

@@ -86,7 +86,8 @@ d'un mois est la variation de « compte + retraits » sur ce mois. L'évaluation
 améliorations, import, enregistrement ou suppression de stratégie, suppression de simulations), Ctrl+Y ou Ctrl+Maj+Z la
 rétablit. Dans une zone de texte, Ctrl+Z annule la frappe. Les annulations sont reportées dans la base du PC et le compte.
 
-**Évaluation** (bouton en haut de page) : tableau de toutes les simulations lancées (stratégie, paire, période,
+**Évaluation** (bouton en haut de page) : s'ouvre sur les simulations de la **stratégie en cours** (onglet « Stratégie en cours »,
+compteur du bouton) ; l'onglet « Historique complet » contient toutes les simulations lancées (stratégie, paire, période,
 données, levier, capital, résultat, gain moyen, trades, % gagnants, drawdown), **filtrable** par stratégie, recherche,
 paire, source de données et résultat, avec une ligne de moyenne calculée sur les lignes affichées
 (dont la **moyenne des gains moyens**) ; lignes supprimables, export CSV. Le **gain moyen** est l'écart entre le
