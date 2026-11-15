@@ -263,6 +263,31 @@ test('Améliorer : chaque suggestion est testée, meilleure que l\'actuel, et co
   }
   if (!total) throw new Error('aucune suggestion');
 });
+test('Ma propre amélioration : ET, OU, remplacement, sorties, stop-loss', () => {
+  const rg = D.periodRange('1y', new Date('2025-06-30'));
+  const bars = D.generateSynthetic('EUR/USD', rg.fetchStart, rg.end);
+  const set = Object.assign({}, base, { startIndex: D.indexFrom(bars, rg.start) });
+  const macd = P.list.find((p) => p.id === 'macd');
+  const txt = 'Acheter seulement si le RSI 14 est au-dessus de 50. Vendre dans le cas inverse.';
+  const and = E.customSuggestion(bars, macd, set, txt, 'and');
+  const sA = and.apply({ strat: macd, settings: set }).strat;
+  eq(sA.longEntry, 'CROSS_UP(MACD(12,26,9), MACD_SIGNAL(12,26,9)) AND RSI(14) > 50'); eq(sA.shortEntry, 'CROSS_DOWN(MACD(12,26,9), MACD_SIGNAL(12,26,9)) AND RSI(14) < 50');
+  near(and.stats.returnPct, E.run(bars, sA, set).returnPct, 1e-9); if (!and.validation) throw new Error('pas de contrôle');
+  const or = E.customSuggestion(bars, macd, set, 'Acheter quand le RSI sort de la zone de survente', 'or').apply({ strat: macd, settings: set }).strat;
+  eq(or.longEntry, 'CROSS_UP(MACD(12,26,9), MACD_SIGNAL(12,26,9)) OR CROSS_UP(RSI(14), 30)'); eq(or.shortEntry, macd.shortEntry);
+  const rep = E.customSuggestion(bars, macd, set, 'Acheter quand la moyenne mobile 20 passe au-dessus de la moyenne mobile 50', 'replace').apply({ strat: macd, settings: set }).strat;
+  eq(rep.longEntry, 'CROSS_UP(SMA(20), SMA(50))');
+  const ex = E.customSuggestion(bars, macd, set, "Sortir de l'achat quand le RSI dépasse 70. Stop loss 40 pips, take profit 90 pips", 'and').apply({ strat: macd, settings: set }).strat;
+  eq(ex.longExit, 'RSI(14) > 70'); eq(ex.stopLossPips, 40); eq(ex.takeProfitPips, 90);
+  const rsi = P.list.find((p) => p.id === 'rsi');
+  eq(E.customSuggestion(bars, rsi, set, "Sortir de l'achat quand le prix passe sous la moyenne mobile 20", 'and').apply({ strat: rsi, settings: set }).strat.longExit, 'RSI(14) > 60 OR CROSS_DOWN(CLOSE, SMA(20))');
+  const longOnly = Object.assign({}, macd, { shortEntry: '', shortExit: '' });
+  const ign = E.customSuggestion(bars, longOnly, set, 'Vendre seulement si le RSI est en dessous de 50', 'and');
+  if (!ign.error || !/ne prend pas de ventes/.test(ign.error)) throw new Error('vente ignorée non signalée : ' + JSON.stringify(ign.error));
+  if (!E.customSuggestion(bars, macd, set, 'la lune est pleine', 'and').error) throw new Error('texte incompris accepté');
+  const c = E.combine(macd, set, [and, { group: 'Stop-loss', apply: ({ strat, settings }) => ({ strat: Object.assign({}, strat, { stopLossPips: 10 }), settings }) }]);
+  eq(c.strat.stopLossPips, 10); eq(c.strat.longEntry, sA.longEntry);
+});
 test('« Ne prendre que les achats » garde une sortie', () => {
   const rg = D.periodRange('1y', new Date('2025-06-30'));
   const bars = D.generateSynthetic('EUR/USD', rg.fetchStart, rg.end);

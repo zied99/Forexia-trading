@@ -42,6 +42,9 @@ d'indicateurs, seuils des oscillateurs, filtre de tendance, confirmation RSI, r�
 seulement, stop-loss, take-profit, levier). Chaque suggestion est backtestée sur les mêmes données et affichée
 avec son résultat ; on en coche plusieurs, le résultat combiné s'affiche, puis « Appliquer et relancer ».
 Attention à la sur-optimisation : vérifiez ensuite la stratégie sur une autre période.
+**Ma propre amélioration** (en haut de la fenêtre) : une idée écrite en français (« Acheter seulement si le RSI 14 est au-dessus
+de 50. Vendre dans le cas inverse. », « Stop loss 40 pips »…), appliquée comme condition supplémentaire (ET), alternative (OU)
+ou en remplacement de la règle ; elle est testée comme les suggestions (résultat seule, période précédente) puis combinée.
 
 **Déployer** : génère un **Expert Advisor MetaTrader 5** (fichier `.mq5`) qui applique la stratégie sur votre compte.
 Les indicateurs y sont recalculés avec exactement les mêmes formules que le backtest (vérifié par `npm run test:mql5`,

@@ -902,29 +902,57 @@
     setTimeout(() => {
       const { bars, strat, settings } = lastRunCtx;
       enh = E.suggest(bars, strat, settings, strat.style || $('style').value);
-      const base = enh.base;
-      let html = '<div class="modal-note"><b>Résultat actuel :</b> ' + statLine(base) + '</div>';
-      if (!enh.suggestions.length) {
-        html += '<p>Aucune des modifications testées (réglages des indicateurs, seuils, filtre de tendance, stop-loss, take-profit, sens des positions…) n\'améliore ce résultat sur cette période.</p>';
-      }
-      html += enh.suggestions.map((sg, i) => {
-        const d = sg.stats.returnPct - base.returnPct;
-        return '<label class="sugg"><input type="checkbox" data-i="' + i + '"><div>' +
-          '<div class="grp' + (sg.risk ? ' risk' : '') + '">' + esc(sg.group) + '</div><b>' + esc(sg.title) + '</b><p>' + esc(sg.detail) + '</p>' +
-          '<div class="res">Seule : ' + statLine(sg.stats) + ' <span class="delta ' + cls(d) + '">' + signed(d, num1) + ' pts</span></div>' + validationLine(sg.validation) + '</div></label>';
-      }).join('');
+      let html = '<div class="modal-note"><b>Résultat actuel :</b> ' + statLine(enh.base) + '</div>' +
+        '<div class="custom-box"><b>Ma propre amélioration</b>' +
+        '<p class="hint">Écrivez-la en français : elle est testée comme les suggestions, puis ajoutée à la liste.</p>' +
+        '<textarea id="customText" class="prose" rows="2" spellcheck="true" placeholder="ex. Acheter seulement si le RSI 14 est au-dessus de 50. Vendre dans le cas inverse.&#10;ou : Stop loss 40 pips, take profit 100 pips"></textarea>' +
+        '<div class="row buttons custom-actions"><select id="customMode" aria-label="Comment appliquer cette amélioration">' +
+        '<option value="and">Ajouter comme condition (ET)</option><option value="or">Ajouter comme alternative (OU)</option><option value="replace">Remplacer la règle</option></select>' +
+        '<button type="button" class="secondary" id="customTest">Tester</button></div><p class="err" id="customError"></p><p class="hint" id="customNotes"></p></div>' +
+        '<div id="suggList"></div>';
       if (enh.suggestions.length) {
         if (enh.validation) html += '<p class="modal-note">Chaque suggestion est aussi testée sur la <b>période précédente</b> de même durée, qui n\'a pas servi à la choisir. Privilégiez les suggestions « confirmées ».</p>';
         html += '<p class="modal-note">Ces améliorations sont calculées sur la période testée. Plus vous en cumulez, plus le risque de « sur-optimisation » est grand : la stratégie colle au passé sans être meilleure à l\'avenir. Vérifiez ensuite le résultat sur une autre période (bouton « Dates »).</p>';
       }
       $('enhanceBody').innerHTML = html;
+      renderSuggList(new Set());
+      $('customTest').addEventListener('click', testCustom);
+      $('customText').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) testCustom(); });
       updateCombined();
     }, 30);
   }
-  function validationLine(v) {
+  // Liste des suggestions (les miennes en premier), en gardant les cases déjà cochées.
+  function renderSuggList(checked) {
+    const base = enh.base;
+    $('suggList').innerHTML = (enh.suggestions.length ? '' : '<p>Aucune des modifications testées automatiquement (réglages des indicateurs, seuils, filtre de tendance, stop-loss, take-profit, sens des positions…) n\'améliore ce résultat sur cette période. Vous pouvez tester votre propre idée ci-dessus.</p>') +
+      enh.suggestions.map((sg, i) => {
+        const d = sg.stats.returnPct - base.returnPct;
+        return '<label class="sugg' + (sg.custom ? ' mine' : '') + '"><input type="checkbox" data-i="' + i + '"' + (checked.has(sg.id) ? ' checked' : '') + '><div>' +
+          '<div class="grp' + (sg.risk ? ' risk' : '') + '">' + esc(sg.group) + '</div><b>' + esc(sg.title) + '</b><p>' + esc(sg.detail) + '</p>' +
+          '<div class="res">Seule : ' + statLine(sg.stats) + ' <span class="delta ' + cls(d) + '">' + signed(d, num1) + ' pts</span></div>' + validationLine(sg.validation, sg) + '</div></label>';
+      }).join('');
+  }
+  function testCustom() {
+    const text = $('customText').value, mode = $('customMode').value;
+    $('customError').textContent = ''; $('customNotes').textContent = '';
+    const { bars, strat, settings } = lastRunCtx;
+    const sg = E.customSuggestion(bars, strat, settings, text, mode);
+    if (sg.error) { $('customError').textContent = sg.error; return; }
+    const checked = new Set(selectedSuggestions().map((x) => x.id));
+    checked.add(sg.id);
+    enh.suggestions.unshift(sg);
+    renderSuggList(checked);
+    $('customNotes').textContent = (sg.notes.length ? sg.notes.join(' ') + ' ' : '') + 'Ajoutée en tête de liste et cochée : comparez puis « Appliquer et relancer ».';
+    $('customText').value = '';
+    updateCombined();
+  }
+  function validationLine(v, sg) {
     if (!v) return '';
-    return '<div class="val ' + (v.confirmed ? 'ok' : 'ko') + '">Période précédente : ' + pct(v.stats.returnPct) + ' au lieu de ' + pct(v.base.returnPct) +
-      (v.confirmed ? ' : confirmée' : ' : non confirmée, peut-être un hasard') + '</div>';
+    // Mes améliorations peuvent être moins bonnes que l'actuel sur la période testée : on le dit.
+    const worseNow = sg && sg.custom && sg.score <= E.score(enh.base);
+    const verdict = worseNow ? (v.confirmed ? ' : moins bonne sur la période testée, meilleure sur la précédente' : ' : moins bonne sur les deux périodes')
+      : v.confirmed ? ' : confirmée' : ' : non confirmée, peut-être un hasard';
+    return '<div class="val ' + (v.confirmed && !worseNow ? 'ok' : 'ko') + '">Période précédente : ' + pct(v.stats.returnPct) + ' au lieu de ' + pct(v.base.returnPct) + verdict + '</div>';
   }
   function selectedSuggestions() {
     return [...$('enhanceBody').querySelectorAll('input[type=checkbox]:checked')].map((c) => enh.suggestions[+c.dataset.i]);

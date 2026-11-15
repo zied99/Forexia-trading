@@ -305,12 +305,71 @@
   }
 
   // Ordre d'application : réglages, seuils, filtres, sorties, sens, stop/objectif, levier.
-  const ORDER = ['Réglage des indicateurs', 'Seuils des oscillateurs', 'Filtre de tendance', 'Confirmation', 'Sortie', 'Sens des positions', 'Stop-loss', 'Take-profit', 'Gestion du risque'];
+  const ORDER = ['Réglage des indicateurs', 'Seuils des oscillateurs', 'Filtre de tendance', 'Confirmation', 'Sortie', 'Sens des positions', 'Stop-loss', 'Take-profit', 'Gestion du risque', 'Mon amélioration'];
+
+  /**
+   * Amélioration écrite par l'utilisateur, en français (« Acheter seulement si le RSI 14 est au-dessus de 50 »,
+   * « Stop loss 40 pips »…). mode : 'and' (condition supplémentaire), 'or' (alternative) ou 'replace'.
+   * Les règles de sortie s'ajoutent toujours en alternative (n'importe laquelle déclenche la sortie).
+   * Renvoie une suggestion testée comme les autres, ou { error }.
+   */
+  function customSuggestion(bars, strat, settings, text, mode) {
+    if (!String(text || '').trim()) return { error: 'Écrivez votre amélioration.' };
+    const parsed = FR.parse(text);
+    const notes = parsed.warnings.filter((w) => !/Aucune règle d'entrée/.test(w));
+    const LABEL = { longEntry: 'Entrée achat', shortEntry: 'Entrée vente', longExit: 'Sortie achat', shortExit: 'Sortie vente' };
+    const changes = [];
+    for (const k of ['longEntry', 'shortEntry', 'longExit', 'shortExit']) {
+      if (!parsed[k]) continue;
+      const isExit = /Exit$/.test(k);
+      if (mode === 'and' && !isExit && !strat[k]) {
+        notes.push('La stratégie ne prend pas de ' + (k === 'longEntry' ? 'achats' : 'ventes') + ' : condition ignorée (choisissez « Remplacer la règle » pour en ajouter).');
+        continue;
+      }
+      changes.push({ k: k, rule: parsed[k], isExit: isExit });
+    }
+    if (parsed.stopLossPips) changes.push({ k: 'sl', v: parsed.stopLossPips });
+    if (parsed.takeProfitPips) changes.push({ k: 'tp', v: parsed.takeProfitPips });
+    if (!changes.length) {
+      return { error: (notes.length ? notes.join(' ') + ' ' : '') + 'Rien à appliquer : commencez par « Acheter… », « Vendre… », « Sortir… », « Stop loss … pips » ou « Take profit … pips ».' };
+    }
+    const apply = ({ strat: s, settings: se }) => {
+      const o = Object.assign({}, s);
+      for (const c of changes) {
+        if (c.k === 'sl') o.stopLossPips = c.v;
+        else if (c.k === 'tp') o.takeProfitPips = c.v;
+        else if (mode === 'replace' || !o[c.k]) o[c.k] = c.rule;
+        else if (c.isExit || mode === 'or') o[c.k] = orWith(o[c.k], c.rule);
+        else o[c.k] = andWith(o[c.k], c.rule);
+      }
+      return { strat: o, settings: se };
+    };
+    const out = apply({ strat: strat, settings: settings });
+    for (const k of ['longEntry', 'longExit', 'shortEntry', 'shortExit']) { const e = R.validate(out.strat[k]); if (e) return { error: 'Règle invalide : ' + e }; }
+    const stats = run(bars, out.strat, out.settings);
+    if (!stats) return { error: 'Simulation impossible avec cette amélioration.' };
+    const how = { and: 'ET', or: 'OU', replace: 'remplacée par' };
+    const detail = changes.map((c) => (c.k === 'sl' ? 'Stop-loss : ' + c.v + ' pips' : c.k === 'tp' ? 'Take-profit : ' + c.v + ' pips'
+      : LABEL[c.k] + (mode === 'replace' || !strat[c.k] ? ' : ' : c.isExit ? ' OU ' : ' ' + how[mode] + ' ') + c.rule)).join(' · ');
+    // contrôle sur la période précédente, comme les suggestions automatiques
+    const st0 = settings.startIndex, vStart = st0 - (bars.length - st0);
+    let validation = null;
+    if (vStart >= 250) {
+      const vBars = bars.slice(0, st0), vSet = Object.assign({}, settings, { startIndex: vStart });
+      const vBase = run(vBars, strat, vSet), v = apply({ strat: strat, settings: vSet }), vStats = run(vBars, v.strat, v.settings);
+      if (vBase && vStats) validation = { stats: vStats, base: vBase, confirmed: score(vStats) > score(vBase) };
+    }
+    return {
+      id: 'custom-' + Date.now() + '-' + Math.floor(Math.random() * 1e6), group: 'Mon amélioration', custom: true,
+      title: String(text).trim().replace(/\s+/g, ' ').slice(0, 160), detail: detail, notes: notes,
+      stats: stats, score: score(stats), apply: apply, validation: validation,
+    };
+  }
   function combine(strat, settings, selected) {
     let cur = { strat: Object.assign({}, strat), settings: Object.assign({}, settings) };
     for (const s of selected.slice().sort((a, b) => ORDER.indexOf(a.group) - ORDER.indexOf(b.group))) cur = s.apply(cur);
     return cur;
   }
 
-  F.enhancer = { STYLES, adaptToStyle, scaleStrategy, suggest, combine, score, run };
+  F.enhancer = { STYLES, adaptToStyle, scaleStrategy, suggest, combine, score, run, customSuggestion };
 })(typeof window !== 'undefined' ? window : globalThis);
