@@ -288,3 +288,22 @@ table.compare th:first-child, table.compare td:first-child { text-align: left; }
 .broker-panel .row { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
 table.trades-cmp td, table.trades-cmp th { font-size: 12px; padding: 4px 8px; }
 table.trades-cmp tr.diff td { background: var(--warn-soft); }
+
+.chart .ref.strong { stroke-dasharray: 6 4; stroke-width: 1.6; }
+.chart .ref-label { font-size: 11px; font-weight: 600; paint-order: stroke; stroke: var(--panel); stroke-width: 3px; }
+
+/* Évaluation */
+.top-actions { display: flex; gap: 8px; align-items: center; }
+button.eval-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; font-weight: 600; font-size: 13px; }
+button.eval-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+button.eval-btn .count { background: var(--accent); color: var(--accent-ink); border-radius: 99px; font-size: 11px; padding: 0 7px; min-width: 20px; text-align: center; }
+.modal-box.wide { width: min(1180px, 100%); }
+table.eval { font-size: 12.5px; }
+table.eval td, table.eval th { padding: 6px 6px; }
+table.eval td.name { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+table.eval tfoot td { position: sticky; bottom: 0; background: var(--panel); border-top: 2px solid var(--text); font-weight: 700; }
+table.eval .avg-col { background: var(--accent-soft); }
+table.eval button.del { padding: 0 6px; font-size: 13px; line-height: 1.4; background: none; border-color: transparent; color: var(--muted); }
+table.eval button.del:hover { color: var(--down); }
+.eval-empty { padding: 30px 0; text-align: center; color: var(--muted); }
+@media (max-width: 600px) { .eval-btn .label-long { display: none; } }

@@ -72,7 +72,14 @@
       }
       el('rect', { x: m.l, y: t0, width: innerW, height: h, class: 'frame' }, g);
       for (const r of p.refLines || []) {
-        el('line', { x1: m.l, x2: m.l + innerW, y1: y(r.value), y2: y(r.value), class: 'ref', style: 'stroke:' + (r.color || 'var(--muted)') }, g);
+        el('line', { x1: m.l, x2: m.l + innerW, y1: y(r.value), y2: y(r.value), class: 'ref' + (r.strong ? ' strong' : ''), style: 'stroke:' + (r.color || 'var(--muted)') }, g);
+        if (r.label) {
+          // étiquette posée sur la ligne, à gauche, avec un fond pour rester lisible sur la courbe
+          const above = y(r.value) - t0 > 18;
+          const ty = above ? y(r.value) - 5 : y(r.value) + 14;
+          const tx = el('text', { x: m.l + 8, y: ty, class: 'ref-label', style: 'fill:' + (r.color || 'var(--muted)') }, g);
+          tx.textContent = r.label;
+        }
       }
       if (p.title) { const tt = el('text', { x: m.l + 6, y: t0 + 14, class: 'ptitle' }, g); tt.textContent = p.title; }
       for (const s of p.series) {

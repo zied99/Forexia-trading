@@ -1,17 +1,21 @@
 <!doctype html>
-<html lang="fr" data-version="2026.11.15-9">
+<html lang="fr" data-version="2026.11.15-10">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Forexia Backtest</title>
   <meta name="description" content="Backtesting de stratégies de trading Forex basées sur RSI, MACD, stochastique, moyennes mobiles…">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%232563eb'/><path d='M6 22l6-7 5 4 9-11' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
-  <link rel="stylesheet" href="css/style.css?v=2026.11.15-9">
+  <link rel="stylesheet" href="css/style.css?v=2026.11.15-10">
 </head>
 <body>
   <header class="topbar">
     <div class="brand"><span class="logo" aria-hidden="true"></span>Forexia <small>Backtest Forex</small></div>
+    <div class="top-actions">
+    <button type="button" class="ghost eval-btn" id="evalBtn" title="Tableau de toutes vos simulations">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Évaluation <span class="count" id="evalCount">0</span></button>
     <button type="button" class="ghost theme" id="themeToggle" aria-label="Basculer thème clair / sombre" title="Thème clair / sombre"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z"/></svg></button>
+    </div>
   </header>
 
   <main class="layout">
@@ -284,6 +288,31 @@
     </div>
   </div>
 
+  <div class="modal" id="evalModal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-box wide" role="dialog" aria-modal="true" aria-labelledby="evalTitle">
+      <header class="modal-head">
+        <div>
+          <h2 id="evalTitle">Évaluation des simulations</h2>
+          <p class="hint">Chaque backtest lancé s'ajoute à ce tableau (enregistré dans ce navigateur). « Gain moyen » : écart entre le capital moyen sur la période et le capital de départ.</p>
+        </div>
+        <button type="button" class="ghost close" data-close aria-label="Fermer">✕</button>
+      </header>
+      <div class="modal-body" id="evalBody"></div>
+      <footer class="modal-foot">
+        <div class="bridge-confirm" id="evalConfirm" hidden>
+          <p><b>Effacer les <span id="evalConfirmN"></span> simulations du tableau ?</b> Cette action est définitive.</p>
+          <div class="row buttons"><button type="button" class="primary" id="evalClearGo">Tout effacer</button><button type="button" class="secondary" id="evalClearCancel">Annuler</button></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="secondary danger" id="evalClear">Tout effacer</button>
+          <button type="button" class="secondary" id="evalExport">Exporter en CSV</button>
+          <button type="button" class="primary" data-close>Fermer</button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
   <div class="modal" id="deployModal" hidden>
     <div class="modal-backdrop" data-close></div>
     <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="deployTitle">
@@ -337,7 +366,7 @@
             <p class="hint">La passerelle est un petit programme qui tourne sur votre PC : elle dépose l'EA dans MT5, le compile, lance le testeur et peut l'ouvrir sur un graphique. Installation unique :</p>
             <ol class="steps">
               <li>Installez <a href="https://www.python.org/downloads/" target="_blank" rel="noopener">Python</a> (cochez « Add python.exe to PATH »).</li>
-              <li>Téléchargez <a href="bridge/forexia_bridge.py?v=2026.11.15-9" download="forexia_bridge.py">forexia_bridge.py</a> et <a href="bridge/demarrer-passerelle.bat?v=2026.11.15-9" download="demarrer-passerelle.bat">demarrer-passerelle.bat</a> dans un même dossier.</li>
+              <li>Téléchargez <a href="bridge/forexia_bridge.py?v=2026.11.15-10" download="forexia_bridge.py">forexia_bridge.py</a> et <a href="bridge/demarrer-passerelle.bat?v=2026.11.15-10" download="demarrer-passerelle.bat">demarrer-passerelle.bat</a> dans un même dossier.</li>
               <li>Double-cliquez sur <code>demarrer-passerelle.bat</code> et laissez la fenêtre ouverte. Si le navigateur demande l'accès au « réseau local », acceptez.</li>
               <li>Collez le code d'appairage affiché dans cette fenêtre :</li>
             </ol>
@@ -409,19 +438,19 @@
   <footer class="foot">
     Simulation à but éducatif : les performances passées ne préjugent pas des performances futures.
     Les données BCE sont des taux journaliers de référence (pas de haut/bas intra-journalier).
-    <br>Version <span id="appVersion">2026.11.15-9</span>
+    <br>Version <span id="appVersion">2026.11.15-10</span>
   </footer>
 
-  <script src="js/indicators.js?v=2026.11.15-9"></script>
-  <script src="js/expr.js?v=2026.11.15-9"></script>
-  <script src="js/backtest.js?v=2026.11.15-9"></script>
-  <script src="js/data.js?v=2026.11.15-9"></script>
-  <script src="js/presets.js?v=2026.11.15-9"></script>
-  <script src="js/french.js?v=2026.11.15-9"></script>
-  <script src="js/enhancer.js?v=2026.11.15-9"></script>
-  <script src="js/mql5.js?v=2026.11.15-9"></script>
-  <script src="js/broker.js?v=2026.11.15-9"></script>
-  <script src="js/chart.js?v=2026.11.15-9"></script>
-  <script src="js/app.js?v=2026.11.15-9"></script>
+  <script src="js/indicators.js?v=2026.11.15-10"></script>
+  <script src="js/expr.js?v=2026.11.15-10"></script>
+  <script src="js/backtest.js?v=2026.11.15-10"></script>
+  <script src="js/data.js?v=2026.11.15-10"></script>
+  <script src="js/presets.js?v=2026.11.15-10"></script>
+  <script src="js/french.js?v=2026.11.15-10"></script>
+  <script src="js/enhancer.js?v=2026.11.15-10"></script>
+  <script src="js/mql5.js?v=2026.11.15-10"></script>
+  <script src="js/broker.js?v=2026.11.15-10"></script>
+  <script src="js/chart.js?v=2026.11.15-10"></script>
+  <script src="js/app.js?v=2026.11.15-10"></script>
 </body>
 </html>

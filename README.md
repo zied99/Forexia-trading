@@ -49,6 +49,11 @@ qui compile le calcul des signaux en C++ et le compare au moteur JavaScript). R�
 positions (comme le backtest, lots fixes ou % de risque), plafond de lots, spread maximum. La fenêtre détaille
 l'installation : copie dans `MQL5\Experts`, compilation dans MetaEditor, backtest dans le testeur de MT5, puis compte démo.
 
+**Évaluation** (bouton en haut de page) : tableau de toutes les simulations lancées (stratégie, paire, période,
+données, levier, capital, résultat, gain moyen, trades, % gagnants, drawdown), avec une ligne de moyenne
+(dont la **moyenne des gains moyens**) ; lignes supprimables, export CSV. Le **gain moyen** est l'écart entre le
+capital moyen sur la période (ligne pointillée orange du graphique du capital) et le capital de départ.
+
 Résultats : capital final, profit net, nombre de trades et taux de réussite, profit factor, drawdown max,
 ratio de Sharpe, courbe du capital, cours avec les points d'entrée/sortie et les indicateurs,
 statistiques détaillées et historique des trades (export CSV).

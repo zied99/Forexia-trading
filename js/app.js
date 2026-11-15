@@ -538,6 +538,7 @@
       lastRunCtx = { bars, strat, settings, config, timeframe: loaded.timeframe || 'D1', lastTrades: result.trades, diag: result.diag };
       lastRun = { key: JSON.stringify([strat.longEntry, strat.longExit, strat.shortEntry, strat.shortExit, strat.stopLossPips, strat.takeProfitPips, config]), stats: result.stats };
       render({ bars, strat, settings, result, loaded, periodKey, warnings, config });
+      recordEvaluation({ bars, strat, settings, result, loaded, periodKey, config });
     } catch (err) {
       $('formError').textContent = err.message;
     } finally {
@@ -587,8 +588,12 @@
       kpi('Ratio de Sharpe', signed(s.sharpe, num2), 'annualisé', cls(s.sharpe)) +
       '</div>';
 
+    // Capital moyen sur la période : moyenne de la courbe, et le gain moyen qu'elle représente.
+    const avg = averageGain(result.equity, settings.capital);
     html += '<div class="panel card"><div class="card-head"><h3>Évolution du capital</h3>' +
-      '<div class="legend"><span><i style="background:var(--s1)"></i>Capital</span><span><i style="background:var(--muted)"></i>Capital initial</span></div></div><div id="equityChart"></div></div>';
+      '<div class="legend"><span><i style="background:var(--s1)"></i>Capital</span><span><i style="background:var(--s2)"></i>Moyenne : ' +
+      money.format(avg.mean) + ' (<span class="' + cls(avg.pct) + '">' + signed(avg.pct, num1) + ' %</span>)</span>' +
+      '<span><i style="background:var(--muted)"></i>Capital initial</span></div></div><div id="equityChart"></div></div>';
 
     html += '<div class="panel card"><div class="card-head"><h3>Cours et positions</h3><div class="legend" id="priceLegend"></div></div><div id="priceChart"></div></div>';
 
@@ -630,7 +635,8 @@
       panels: [{
         height: 220, format: (v, full) => (full ? money.format(v) : compact(v)),
         series: [{ name: 'Capital', values: result.equity, color: 'var(--s1)', width: 2, fill: true }],
-        refLines: [{ value: settings.capital, color: 'var(--muted)' }],
+        refLines: [{ value: settings.capital, color: 'var(--muted)' },
+          { value: avg.mean, color: 'var(--s2)', strong: true, label: 'Moyenne ' + signed(avg.pct, num1) + ' %' }],
       }],
     });
 
@@ -696,6 +702,12 @@
     const exp = $('exportCsv');
     if (exp) exp.addEventListener('click', () => exportTrades(result.trades, strat, settings));
     if (window.matchMedia('(max-width: 900px)').matches) $('results').scrollIntoView({ behavior: 'smooth' });
+  }
+
+  /** Capital moyen sur la période et gain moyen correspondant (en % du capital de départ). */
+  function averageGain(equity, capital) {
+    const mean = equity.length ? equity.reduce((a, b) => a + b, 0) / equity.length : capital;
+    return { mean: mean, pct: ((mean - capital) / capital) * 100 };
   }
 
   function compact(v) {
@@ -1045,6 +1057,96 @@
   $('bridgeDeploy').addEventListener('click', () => bridgeDeploy(false));
   $('bridgeCloseGo').addEventListener('click', () => { $('bridgeConfirm').hidden = true; bridgeDeploy(true); });
   $('bridgeCloseCancel').addEventListener('click', () => { $('bridgeConfirm').hidden = true; bridgeStep('ko', 'Annulé : MetaTrader 5 n\'a pas été fermé.'); });
+
+  // ---------- Évaluation : historique des simulations ----------
+  const EVAL_KEY = 'forexia.evaluations';
+  const evalStore = {
+    get() { try { return JSON.parse(localStorage.getItem(EVAL_KEY)) || []; } catch (e) { return []; } },
+    set(list) { try { localStorage.setItem(EVAL_KEY, JSON.stringify(list.slice(-500))); } catch (e) { /* ignoré */ } },
+  };
+  let evalMemory = null; // repli si le stockage du navigateur est indisponible
+  function evalList() { const l = evalStore.get(); return l.length || !evalMemory ? l : evalMemory; }
+  function evalSave(list) { evalMemory = list; evalStore.set(list); $('evalCount').textContent = list.length; }
+  function dataLabel(loaded, settings) {
+    if (loaded.broker) return 'MT5 ' + (settings.symbol || '') + ' ' + (loaded.timeframe || '');
+    if (/^Fichier/.test(loaded.source)) return 'CSV ' + (loaded.timeframe || '');
+    if (/BCE/.test(loaded.source)) return 'BCE' + (/mèches/.test(loaded.source) ? ' + mèches' : '');
+    return 'Simulées';
+  }
+  function recordEvaluation(c) {
+    const s = c.result.stats, st = c.result.startIndex;
+    const avg = averageGain(c.result.equity, c.settings.capital);
+    const entry = {
+      at: new Date().toISOString(), name: c.strat.name, pair: c.settings.pair, style: c.strat.style || 'none',
+      from: c.bars[st].date.slice(0, 10), to: c.bars[c.bars.length - 1].date.slice(0, 10), period: PERIOD_LABEL[c.periodKey],
+      data: dataLabel(c.loaded, c.settings), leverage: c.settings.leverage, capital: c.settings.capital,
+      returnPct: s.returnPct, avgGainPct: avg.pct, trades: s.trades, winRate: s.winRate, maxDrawdownPct: s.maxDrawdownPct,
+      profitFactor: Number.isFinite(s.profitFactor) ? s.profitFactor : null,
+      rules: [c.strat.longEntry, c.strat.longExit, c.strat.shortEntry, c.strat.shortExit, c.strat.stopLossPips, c.strat.takeProfitPips].join('|'),
+    };
+    const list = evalList();
+    const last = list[list.length - 1];
+    // Même stratégie, mêmes réglages, même résultat : on ne compte pas deux fois la même simulation.
+    const same = (a, b) => a && ['name', 'pair', 'from', 'to', 'data', 'leverage', 'capital', 'rules'].every((k) => a[k] === b[k]) && Math.abs(a.returnPct - b.returnPct) < 1e-9;
+    if (same(last, entry)) return;
+    list.push(entry);
+    evalSave(list);
+  }
+  const mean = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
+  function renderEvaluation() {
+    const list = evalList();
+    $('evalClear').disabled = $('evalExport').disabled = !list.length;
+    if (!list.length) { $('evalBody').innerHTML = '<p class="eval-empty">Aucune simulation pour l\'instant : lancez un backtest, il s\'ajoutera ici.</p>'; return; }
+    const p = (v) => '<span class="' + cls(v) + '">' + signed(v, num2) + ' %</span>';
+    const rows = list.map((e, i) => '<tr>' +
+      '<td>' + (i + 1) + '</td><td class="l">' + new Date(e.at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) + '</td>' +
+      '<td class="name" title="' + esc(e.name) + '">' + esc(e.name) + '</td><td class="l">' + esc(e.pair) + '</td>' +
+      '<td class="l">' + frDate(e.from) + ' → ' + frDate(e.to) + '</td><td class="l">' + esc(e.data) + '</td>' +
+      '<td>1:' + e.leverage + '</td><td>' + money.format(e.capital) + '</td>' +
+      '<td>' + p(e.returnPct) + '</td><td class="avg-col">' + p(e.avgGainPct) + '</td>' +
+      '<td>' + e.trades + '</td><td>' + num1.format(e.winRate) + ' %</td><td>−' + num1.format(e.maxDrawdownPct) + ' %</td>' +
+      '<td><button type="button" class="del" data-del="' + i + '" title="Retirer cette ligne" aria-label="Retirer la simulation ' + (i + 1) + '">✕</button></td></tr>').join('');
+    const foot = '<tr><td colspan="8" class="l">Moyenne sur ' + list.length + ' simulation' + (list.length > 1 ? 's' : '') + '</td>' +
+      '<td>' + p(mean(list.map((e) => e.returnPct))) + '</td><td class="avg-col" title="Moyenne des gains moyens">' + p(mean(list.map((e) => e.avgGainPct))) + '</td>' +
+      '<td>' + num1.format(mean(list.map((e) => e.trades))) + '</td><td>' + num1.format(mean(list.map((e) => e.winRate))) + ' %</td>' +
+      '<td>−' + num1.format(mean(list.map((e) => e.maxDrawdownPct))) + ' %</td><td></td></tr>';
+    $('evalBody').innerHTML = '<div class="table-wrap"><table class="eval"><thead><tr><th>#</th><th class="l">Date</th><th class="l">Stratégie</th><th class="l">Paire</th>' +
+      '<th class="l">Période testée</th><th class="l">Données</th><th>Levier</th><th>Capital</th><th>Résultat</th><th class="avg-col">Gain moyen</th>' +
+      '<th>Trades</th><th>Gagnants</th><th>Drawdown</th><th></th></tr></thead><tbody>' + rows + '</tbody><tfoot>' + foot + '</tfoot></table></div>';
+  }
+  function openEvaluation() {
+    $('evalConfirm').hidden = true;
+    renderEvaluation();
+    $('evalModal').hidden = false;
+    document.body.style.overflow = 'hidden';
+    $('evalModal').querySelector('.close').focus();
+  }
+  function closeEvaluation() { $('evalModal').hidden = true; document.body.style.overflow = ''; }
+  $('evalBtn').addEventListener('click', openEvaluation);
+  $('evalModal').addEventListener('click', (e) => {
+    if (e.target.closest('[data-close]')) return closeEvaluation();
+    const del = e.target.closest('[data-del]');
+    if (del) { const list = evalList(); list.splice(+del.dataset.del, 1); evalSave(list); renderEvaluation(); }
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('evalModal').hidden) closeEvaluation(); });
+  $('evalClear').addEventListener('click', () => { $('evalConfirmN').textContent = evalList().length; $('evalConfirm').hidden = false; });
+  $('evalClearCancel').addEventListener('click', () => { $('evalConfirm').hidden = true; });
+  $('evalClearGo').addEventListener('click', () => { evalSave([]); $('evalConfirm').hidden = true; renderEvaluation(); });
+  $('evalExport').addEventListener('click', () => {
+    const list = evalList();
+    const head = 'numero;date;strategie;paire;debut;fin;donnees;levier;capital;resultat_pct;gain_moyen_pct;trades;gagnants_pct;drawdown_pct';
+    const f2 = (v) => String(Math.round(v * 100) / 100).replace('.', ',');
+    const rows = list.map((e, i) => [i + 1, e.at.slice(0, 16).replace('T', ' '), '"' + e.name.replace(/"/g, '""') + '"', e.pair, e.from, e.to, e.data, e.leverage,
+      f2(e.capital), f2(e.returnPct), f2(e.avgGainPct), e.trades, f2(e.winRate), f2(e.maxDrawdownPct)].join(';'));
+    rows.push(['moyenne', '', '', '', '', '', '', '', '', f2(mean(list.map((e) => e.returnPct))), f2(mean(list.map((e) => e.avgGainPct))),
+      f2(mean(list.map((e) => e.trades))), f2(mean(list.map((e) => e.winRate))), f2(mean(list.map((e) => e.maxDrawdownPct)))].join(';'));
+    const blob = new Blob(['\ufeff' + [head].concat(rows).join('\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'forexia-evaluation.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+  $('evalCount').textContent = evalList().length;
 
   // ---------- Thème ----------
   $('themeToggle').addEventListener('click', () => {
