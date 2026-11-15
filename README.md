@@ -74,7 +74,8 @@ compilations, tests MT5 et comparaisons Forexia / MT5). Le navigateur garde une 
 sont fusionnés. La fenêtre affiche le journal (filtrable) et permet d'exporter toute la base en JSON.
 
 **Retrait fictif des gains** (section Marché et capital) : quand le compte atteint « capital × (1 + seuil %) », une part
-du gain (100 % par défaut) est retirée à la clôture d'un trade et mise à l'abri ; le compte repart plus petit, les positions
+du gain (100 % par défaut) est retirée et mise à l'abri, soit **dès que le seuil est atteint** (la position est clôturée à ce
+niveau, par défaut), soit **à la clôture du trade** (le gain peut alors dépasser le seuil) ; le compte repart plus petit, les positions
 suivantes aussi. Résultat, drawdown et gain moyen portent sur « compte + retraits » ; le graphique montre les deux courbes
 et chaque retrait. Disponible dans les deux moteurs (standard et courtier MT5).
 

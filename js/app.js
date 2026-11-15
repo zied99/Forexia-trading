@@ -85,7 +85,7 @@
       exposurePct: Number($('exposure').value), spreadPips: Number($('spread').value) || 0,
       period: periodValue(), dateFrom: $('dateFrom').value, dateTo: $('dateTo').value, source: sourceValue(),
       estimateWicks: $('estimateWicks').checked,
-      withdraw: { on: $('withdrawOn').checked, pct: $('withdrawPct').value, share: $('withdrawShare').value },
+      withdraw: { on: $('withdrawOn').checked, pct: $('withdrawPct').value, share: $('withdrawShare').value, when: $('withdrawWhen').value },
       spreadMode: $('spreadMode').value,
       broker: { symbol: $('brokerSymbol').value, tf: $('brokerTf').value, sizing: $('brokerSizing').value, lots: $('brokerLots').value,
         risk: $('brokerRisk').value, maxLots: $('brokerMaxLots').value, maxSpread: $('brokerMaxSpread').value, intrabar: $('brokerIntrabar').checked },
@@ -108,6 +108,7 @@
     if (c.spreadMode) $('spreadMode').value = c.spreadMode;
     if (c.withdraw) {
       $('withdrawOn').checked = !!c.withdraw.on; $('withdrawPct').value = c.withdraw.pct; $('withdrawShare').value = c.withdraw.share;
+      $('withdrawWhen').value = c.withdraw.when || 'close';
       updateWithdrawUI();
     }
     if (c.broker) {
@@ -121,12 +122,16 @@
   }
   function updateWithdrawUI() {
     const on = $('withdrawOn').checked;
-    $('withdrawFields').hidden = $('withdrawHint').hidden = !on;
+    $('withdrawFields').hidden = $('withdrawHint').hidden = $('withdrawWhenField').hidden = !on;
     const cap = Number($('capital').value) || 0, pct = Number($('withdrawPct').value) || 0, share = Number($('withdrawShare').value) || 100;
-    $('withdrawHint').textContent = on ? 'Exemple : avec ' + money.format(cap) + ', dès que le compte atteint ' + money.format(cap * (1 + pct / 100)) + ', ' +
-      (share >= 100 ? 'tout le gain est retiré et le compte revient à ' + money.format(cap) : share + ' % du gain est retiré') + ' (à la clôture d\'un trade).' : '';
+    const now = $('withdrawWhen').value === 'immediate', target = money.format(cap * (1 + pct / 100));
+    $('withdrawHint').textContent = !on ? '' : now
+      ? 'Exemple : avec ' + money.format(cap) + ', dès que le compte touche ' + target + ', la position est clôturée et ' +
+        (share >= 100 ? 'tout le gain est retiré (le compte revient à ' + money.format(cap) + ')' : share + ' % du gain est retiré') + '. Le trade suivant attend un nouveau signal.'
+      : 'Exemple : avec ' + money.format(cap) + ', quand un trade se clôture avec le compte à ' + target + ' ou plus, ' +
+        (share >= 100 ? 'tout le gain est retiré' : share + ' % du gain est retiré') + '. Le gain peut alors dépasser le seuil, car le trade continue jusqu\'à sa propre sortie.';
   }
-  ['withdrawOn', 'withdrawPct', 'withdrawShare', 'capital'].forEach((id) => { $(id).addEventListener('input', updateWithdrawUI); $(id).addEventListener('change', updateWithdrawUI); });
+  ['withdrawOn', 'withdrawPct', 'withdrawShare', 'withdrawWhen', 'capital'].forEach((id) => { $(id).addEventListener('input', updateWithdrawUI); $(id).addEventListener('change', updateWithdrawUI); });
   updateWithdrawUI();
   function describeConfig(c) {
     if (!c) return '';
@@ -566,6 +571,7 @@
       if ($('withdrawOn').checked) {
         settings.withdrawPct = Number($('withdrawPct').value) || 0;
         settings.withdrawShare = Number($('withdrawShare').value) || 100;
+        settings.withdrawWhen = $('withdrawWhen').value;
       }
       if (loaded.broker) {
         Object.assign(settings, {
@@ -710,7 +716,7 @@
       row('Frais de spread payés', money.format(s.totalCosts)) +
       (settings.withdrawPct
         ? row('Total retiré', money.format(s.totalWithdrawn || 0), s.totalWithdrawn > 0 ? 'pos' : '') +
-          row('Nombre de retraits (seuil +' + settings.withdrawPct + ' %)', String(s.withdrawals || 0)) +
+          row('Nombre de retraits (seuil +' + settings.withdrawPct + ' %, ' + (settings.withdrawWhen === 'immediate' ? 'dès le seuil' : 'à la clôture') + ')', String(s.withdrawals || 0)) +
           row('Solde final du compte de trading', money.format(s.finalAccount))
         : '') +
       '</dl></div></div>';

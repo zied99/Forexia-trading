@@ -148,6 +148,30 @@ test('Retrait fictif : aussi dans le moteur courtier', () => {
   eq(r.withdrawals.length, 1); near(r.stats.totalWithdrawn, 1881, 1e-3); near(r.stats.finalAccount, 10000, 1e-3);
 });
 
+test('Retrait « dès le seuil » : position clôturée quand le compte atteint +2 %', () => {
+  const bars = series([1, 1, 1, 1.05, 1.10, 1.10]);
+  const strat = { longEntry: 'CLOSE == 1' };
+  const set = Object.assign({}, base, { withdrawPct: 2, withdrawWhen: 'immediate' });
+  const r = B.runBacktest(bars, strat, set);
+  eq(r.trades[0].reason, 'Retrait'); near(r.trades[0].exitPrice, 1.002, 1e-12);
+  eq(r.withdrawals.length, 1); near(r.withdrawals[0].amount, 200, 1e-6); near(r.stats.finalEquity, 10200, 1e-6);
+  near(r.stats.finalAccount, 10000, 1e-6); // retrait immédiat, compte remis à niveau tout de suite
+  // arrondi : seuil atteint à 1e-12 près -> retrait quand même
+  const close = B.makeWithdrawals({ capital: 100, withdrawPct: 2 }, [{ date: 'x' }]);
+  let taken = 0; close.check(0, 101.99999999999, (a) => { taken = a; }); if (!(taken > 1.99)) throw new Error('retrait manqué à cause de l\'arrondi');
+  // mode par défaut : retrait seulement à la clôture du trade (ici en fin de période, à +10 %)
+  const late = B.runBacktest(bars, strat, Object.assign({}, set, { withdrawWhen: 'close' }));
+  eq(late.trades[0].reason, 'Fin de période'); near(late.withdrawals[0].amount, 10000, 1e-6);
+  // le take-profit plus proche de l'entrée passe avant le seuil
+  const tp = B.runBacktest(bars, Object.assign({}, strat, { takeProfitPips: 10 }), set);
+  eq(tp.trades[0].reason, 'Take-profit');
+  // moteur courtier
+  const bb = bars.map((b, i) => Object.assign({}, b, { t: 1704067200 + i * 86400, spread: 0 }));
+  const spec = { digits: 5, point: 0.00001, contract: 100000, volumeMin: 1e-9, volumeStep: 1e-9, volumeMax: 1e9, swapMode: 0 };
+  const rb = BK.runBrokerBacktest(bb, strat, { capital: 10000, leverage: 10, exposurePct: 50, sizing: 'backtest', maxLots: 1e9, maxSpreadPips: 0, startIndex: 1, withdrawPct: 2, withdrawWhen: 'immediate' }, { spec });
+  eq(rb.trades[0].reason, 'Retrait'); near(rb.withdrawals[0].amount, 200, 1e-6);
+});
+
 console.log('Données');
 test('CSV MT4 avec en-tête', () => {
   const rows = ['<DATE>,<TIME>,<OPEN>,<HIGH>,<LOW>,<CLOSE>'];

@@ -113,8 +113,16 @@
         if (slFirst && hit(pos.sl)) close(i, fill(pos.sl), 'Stop-loss');
         else if (hit(liq)) close(i, fill(liq), 'Margin call');
         else if (pos.sl !== null && hit(pos.sl)) close(i, fill(pos.sl), 'Stop-loss');
-        else if (pos.tp !== null && (pos.dir > 0 ? best >= pos.tp : best <= pos.tp)) {
-          close(i, pos.dir > 0 ? Math.max(bar.open, pos.tp) : Math.min(bar.open, pos.tp), 'Take-profit');
+        else {
+          // Objectifs favorables : take-profit et, en mode « retrait dès le seuil », le prix où le compte atteint le seuil.
+          // Le plus proche du prix d'entrée est touché en premier.
+          const wLevel = wd.immediate ? pos.entryPrice * (1 + (wd.target - cash) / (pos.notional * pos.dir)) : null;
+          const reach = (lv) => lv !== null && Number.isFinite(lv) && (pos.dir > 0 ? best >= lv : best <= lv);
+          const tpOk = reach(pos.tp), wOk = reach(wLevel);
+          const nearer = (a, b) => (pos.dir > 0 ? a <= b : a >= b);
+          const at = (lv) => (pos.dir > 0 ? Math.max(bar.open, lv) : Math.min(bar.open, lv));
+          if (wOk && (!tpOk || nearer(wLevel, pos.tp))) close(i, at(wLevel), 'Retrait');
+          else if (tpOk) close(i, at(pos.tp), 'Take-profit');
         }
       }
       // 3) fin de période : on solde la position
@@ -148,11 +156,15 @@
     const threshold = settings.withdrawPct > 0 ? settings.withdrawPct / 100 : 0;
     const share = Math.min(100, Math.max(1, settings.withdrawShare == null ? 100 : settings.withdrawShare)) / 100;
     const base = settings.capital;
+    // « Dès le seuil » : la position est clôturée quand le compte atteint le seuil (sinon : au prochain trade clôturé).
+    const immediate = !!threshold && settings.withdrawWhen === 'immediate';
     let total = 0;
     const list = [], wealth = [];
     return {
+      immediate: immediate, target: base * (1 + threshold),
       check(i, account, take) {
-        if (!threshold || account < base * (1 + threshold)) return;
+        // tolérance d'arrondi : une position clôturée pile au seuil donne 101,9999999… pour 102
+        if (!threshold || account < base * (1 + threshold) - 1e-7 * base) return;
         const amount = (account - base) * share;
         if (amount <= 0) return;
         take(amount);

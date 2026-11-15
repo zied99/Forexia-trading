@@ -133,14 +133,20 @@
     // Déroulé intra-bougie : stops testés sur chaque bougie fine.
     function checkStops(i, b, first) {
       const spr = sp(b);
-      if (pos.dir > 0) {
-        if (pos.sl !== null && b.low <= pos.sl) { close(i, first && b.open <= pos.sl ? b.open : pos.sl, 'Stop-loss', b.t); return; }
-        if (pos.tp !== null && b.high >= pos.tp) { close(i, first && b.open >= pos.tp ? b.open : pos.tp, 'Take-profit', b.t); return; }
-      } else {
-        const aH = b.high + spr, aL = b.low + spr, aO = b.open + spr;
-        if (pos.sl !== null && aH >= pos.sl) { close(i, first && aO >= pos.sl ? aO : pos.sl, 'Stop-loss', b.t); return; }
-        if (pos.tp !== null && aL <= pos.tp) { close(i, first && aO <= pos.tp ? aO : pos.tp, 'Take-profit', b.t); return; }
+      // prix vus par la position : bid pour un achat, ask (bid + spread) pour une vente
+      const o = pos.dir > 0 ? b.open : b.open + spr, hi = pos.dir > 0 ? b.high : b.high + spr, lo = pos.dir > 0 ? b.low : b.low + spr;
+      const worse = pos.dir > 0 ? lo : hi, better = pos.dir > 0 ? hi : lo;
+      if (pos.sl !== null && (pos.dir > 0 ? worse <= pos.sl : worse >= pos.sl)) {
+        close(i, first && (pos.dir > 0 ? o <= pos.sl : o >= pos.sl) ? o : pos.sl, 'Stop-loss', b.t); return;
       }
+      // Objectifs favorables : take-profit et, en mode « retrait dès le seuil », le prix où le compte atteint le seuil ;
+      // le plus proche du prix d'entrée est touché en premier.
+      const wLevel = wd.immediate ? pos.entry + (pos.dir * (wd.target - balance - pos.swap)) / (C * pos.lots * conv(b.t)) : null;
+      const reach = (lv) => lv !== null && Number.isFinite(lv) && (pos.dir > 0 ? better >= lv : better <= lv);
+      const tpOk = reach(pos.tp), wOk = reach(wLevel);
+      const at = (lv) => (first && (pos.dir > 0 ? o >= lv : o <= lv) ? o : lv);
+      if (wOk && (!tpOk || (pos.dir > 0 ? wLevel <= pos.tp : wLevel >= pos.tp))) { close(i, at(wLevel), 'Retrait', b.t); return; }
+      if (tpOk) { close(i, at(pos.tp), 'Take-profit', b.t); return; }
       // stop-out : fonds propres au pire prix de la bougie fine
       const worst = pos.dir > 0 ? b.low : b.high + spr;
       if (balance + pnlAt(worst, b.t) < soLevel * pos.margin) close(i, worst, 'Margin call', b.t);
