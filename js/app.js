@@ -422,6 +422,7 @@
       '<div class="hint save-config">Configuration enregistrée avec : ' + esc(describeConfig(config)) + '</div>' +
       '</div><div class="save-actions">' +
       '<button type="button" class="enhance" id="enhanceBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/></svg>Améliorer</button>' +
+      '<button type="button" class="deploy" id="deployBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>Déployer</button>' +
       '<button type="button" class="primary inline-save" id="saveFromResults">Enregistrer</button></div></div>';
     html += '<div class="summary-head"><h2>' + esc(strat.name) + ' · ' + esc(settings.pair) + '</h2>' +
       '<span class="meta">' + PERIOD_LABEL[periodKey] + ' · du ' + frDate(dates[0]) + ' au ' + frDate(dates[dates.length - 1]) +
@@ -538,6 +539,7 @@
       '<span><i class="tri-up"></i>Achat</span><span><i class="tri-dn"></i>Vente</span><span><i class="dot" style="background:var(--muted)"></i>Sortie</span>';
 
     $('enhanceBtn').addEventListener('click', openEnhancer);
+    $('deployBtn').addEventListener('click', openDeploy);
     $('saveFromResults').addEventListener('click', () => {
       const saved = saveStrategy(strat, config, s);
       if (saved) { $('saveFromResults').textContent = 'Enregistrée ✓'; $('saveFromResults').disabled = true; }
@@ -639,6 +641,81 @@
     updateStyleHint();
     closeEnhancer();
     $('form').requestSubmit();
+  });
+
+  // ---------- Fenêtre « Déployer sur MetaTrader 5 » ----------
+  let deployed = null; // { code, fileName }
+  function deployOptions() {
+    const { strat, settings, config } = lastRunCtx;
+    return {
+      pair: settings.pair, leverage: settings.leverage, exposurePct: settings.exposurePct, capital: settings.capital,
+      periodLabel: config.period === 'custom' ? 'du ' + frDate(config.dateFrom) + ' au ' + frDate(config.dateTo) : PERIOD_LABEL[config.period],
+      stats: lastRun && lastRun.stats, timeframe: $('depTimeframe').value, sizing: $('depSizing').value,
+      fixedLots: Number($('depLots').value) || 0.01, riskPct: Number($('depRisk').value) || 1,
+      maxLots: Number($('depMaxLots').value) || 1, maxSpreadPips: Number($('depSpread').value) || 0, strat: strat,
+    };
+  }
+  function refreshDeploy() {
+    const o = deployOptions();
+    $('depLotsField').hidden = o.sizing !== 'fixed';
+    $('depRiskField').hidden = o.sizing !== 'risk';
+    const notional = o.capital * o.exposurePct / 100 * o.leverage;
+    $('depSizingHint').textContent = o.sizing === 'backtest'
+      ? 'Taille = capital du compte × ' + o.exposurePct + ' % × levier ' + o.leverage + '. Avec ' + money.format(o.capital) + ' : ≈ ' + num2.format(notional / 100000) +
+        ' lot(s) standard (' + Math.round(notional).toLocaleString('fr-FR') + ' unités), limité par le plafond.'
+      : o.sizing === 'risk' ? 'La taille est calculée pour perdre ' + num1.format(o.riskPct) + ' % du capital si le stop-loss (' + (o.strat.stopLossPips || 0) + ' pips) est touché.' +
+        (o.strat.stopLossPips ? '' : ' Cette stratégie n\'a pas de stop-loss : l\'EA utilisera les lots fixes.')
+      : 'Chaque position fait ' + num2.format(o.fixedLots) + ' lot(s), quel que soit le capital.';
+    $('depError').textContent = '';
+    try {
+      deployed = F.mql5.generate(o.strat, o);
+      $('depCode').textContent = deployed.code;
+      $('depFileName').textContent = deployed.fileName;
+      $('depDownload').disabled = $('depCopy').disabled = false;
+    } catch (e) {
+      deployed = null;
+      $('depError').textContent = 'Impossible de générer l\'EA : ' + e.message;
+      $('depDownload').disabled = $('depCopy').disabled = true;
+    }
+  }
+  function openDeploy() {
+    if (!lastRunCtx) return;
+    const { strat, settings } = lastRunCtx;
+    $('deploySub').textContent = '« ' + strat.name + ' » sur ' + settings.pair + ' : un Expert Advisor qui applique ces règles sur votre compte MT5.';
+    document.querySelectorAll('.dep-pair').forEach((e) => { e.textContent = settings.pair.replace('/', ''); });
+    $('depTimeframe').value = strat.style === 'scalping' ? 'PERIOD_M5' : 'PERIOD_D1';
+    $('depNotice').textContent = '';
+    refreshDeploy();
+    $('deployModal').hidden = false;
+    document.body.style.overflow = 'hidden';
+    $('deployModal').querySelector('.close').focus();
+  }
+  ['depTimeframe', 'depSizing', 'depLots', 'depRisk', 'depMaxLots', 'depSpread'].forEach((id) => $(id).addEventListener('input', refreshDeploy));
+  function closeDeploy() { $('deployModal').hidden = true; document.body.style.overflow = ''; }
+  $('deployModal').addEventListener('click', (e) => { if (e.target.closest('[data-close]')) closeDeploy(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('deployModal').hidden) closeDeploy(); });
+  $('depDownload').addEventListener('click', () => {
+    if (!deployed) return;
+    // BOM UTF-8 : MetaEditor lit alors correctement les accents.
+    const blob = new Blob(['\ufeff' + deployed.code.replace(/\n/g, '\r\n')], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = deployed.fileName;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    $('depNotice').textContent = 'Fichier « ' + deployed.fileName + ' » téléchargé. Suivez les étapes ci-dessous pour l\'installer.';
+  });
+  $('depCopy').addEventListener('click', async () => {
+    if (!deployed) return;
+    try {
+      await navigator.clipboard.writeText(deployed.code);
+      $('depNotice').textContent = 'Code copié. Dans MetaEditor : Fichier → Nouveau → Expert Advisor, collez le code à la place du modèle, enregistrez sous « ' + deployed.fileName + ' », puis compilez.';
+    } catch (e) {
+      const det = $('depCode').closest('details'); det.open = true;
+      const range = document.createRange(); range.selectNodeContents($('depCode'));
+      const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+      $('depNotice').textContent = 'Copie automatique impossible : le code est sélectionné, copiez-le avec Ctrl+C.';
+    }
   });
 
   // ---------- Thème ----------

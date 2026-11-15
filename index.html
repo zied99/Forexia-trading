@@ -221,6 +221,78 @@
     </div>
   </div>
 
+  <div class="modal" id="deployModal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="deployTitle">
+      <header class="modal-head">
+        <div>
+          <h2 id="deployTitle">Déployer sur MetaTrader 5</h2>
+          <p class="hint" id="deploySub"></p>
+        </div>
+        <button type="button" class="ghost close" data-close aria-label="Fermer">✕</button>
+      </header>
+      <div class="modal-body">
+        <div class="row">
+          <label class="field">Unité de temps
+            <select id="depTimeframe">
+              <option value="PERIOD_M1">M1 (1 minute)</option>
+              <option value="PERIOD_M5">M5 (5 minutes)</option>
+              <option value="PERIOD_M15">M15 (15 minutes)</option>
+              <option value="PERIOD_M30">M30 (30 minutes)</option>
+              <option value="PERIOD_H1">H1 (1 heure)</option>
+              <option value="PERIOD_H4">H4 (4 heures)</option>
+              <option value="PERIOD_D1" selected>D1 (1 jour, comme le backtest)</option>
+              <option value="PERIOD_W1">W1 (1 semaine)</option>
+            </select>
+          </label>
+          <label class="field">Taille des positions
+            <select id="depSizing">
+              <option value="backtest">Comme le backtest</option>
+              <option value="fixed">Lots fixes</option>
+              <option value="risk">% du capital risqué</option>
+            </select>
+          </label>
+        </div>
+        <p class="hint" id="depSizingHint"></p>
+        <div class="row">
+          <label class="field" id="depLotsField">Lots par position
+            <input id="depLots" type="number" min="0.01" step="0.01" value="0.01">
+          </label>
+          <label class="field" id="depRiskField">Risque par trade (%)
+            <input id="depRisk" type="number" min="0.1" max="10" step="0.1" value="1">
+          </label>
+          <label class="field">Plafond (lots)
+            <input id="depMaxLots" type="number" min="0.01" step="0.01" value="1">
+          </label>
+          <label class="field">Spread max (pips)
+            <input id="depSpread" type="number" min="0" step="0.5" value="5">
+          </label>
+        </div>
+        <div class="row buttons deploy-buttons">
+          <button type="button" class="primary" id="depDownload">Télécharger l'EA (.mq5)</button>
+          <button type="button" class="secondary" id="depCopy">Copier le code</button>
+        </div>
+        <p class="notice" id="depNotice"></p>
+        <p class="err" id="depError"></p>
+        <details class="help">
+          <summary>Installer et lancer l'EA dans MetaTrader 5</summary>
+          <ol class="steps">
+            <li><b>Copier le fichier.</b> Dans MT5 : menu <i>Fichier → Ouvrir le dossier des données</i>, puis ouvrez <code>MQL5\Experts</code> et copiez-y le fichier <code id="depFileName">.mq5</code>.</li>
+            <li><b>Compiler.</b> Ouvrez MetaEditor (touche <kbd>F4</kbd> dans MT5), ouvrez le fichier puis <i>Compiler</i> (<kbd>F7</kbd>). Il doit indiquer « 0 errors ». Les « warnings » sont sans gravité.</li>
+            <li><b>Backtester dans MT5.</b> Menu <i>Affichage → Testeur de stratégie</i> (<kbd>Ctrl+R</kbd>) : choisissez l'EA, le symbole <span class="dep-pair"></span>, l'unité de temps et la même période qu'ici, modèle « Prix d'ouverture uniquement ». Comparez avec le résultat Forexia.</li>
+            <li><b>Compte démo.</b> Glissez l'EA depuis le Navigateur sur un graphique <span class="dep-pair"></span>, cochez « Autoriser le trading algorithmique », puis activez le bouton <i>Algo Trading</i> de la barre d'outils (il devient vert). Le coin du graphique affiche l'état de l'EA.</li>
+            <li><b>Laisser tourner.</b> L'EA ne travaille que si MT5 est ouvert : ordinateur allumé, ou VPS (MT5 en propose un : clic droit sur le compte → <i>Enregistrer un serveur virtuel</i>).</li>
+          </ol>
+        </details>
+        <details class="help">
+          <summary>Voir le code</summary>
+          <pre class="code" id="depCode"></pre>
+        </details>
+        <p class="modal-note">Le backtest Forexia utilise les cours de référence BCE (un cours par jour, sans plus haut ni plus bas). En réel, les prix, le spread, le swap et l'exécution de votre courtier changent les résultats : testez d'abord dans MT5 puis sur un compte démo.</p>
+      </div>
+    </div>
+  </div>
+
   <footer class="foot">
     Simulation à but éducatif : les performances passées ne préjugent pas des performances futures.
     Les données BCE sont des taux journaliers de référence (pas de haut/bas intra-journalier).
@@ -233,6 +305,7 @@
   <script src="js/presets.js"></script>
   <script src="js/french.js"></script>
   <script src="js/enhancer.js"></script>
+  <script src="js/mql5.js"></script>
   <script src="js/chart.js"></script>
   <script src="js/app.js"></script>
 </body>

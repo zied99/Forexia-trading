@@ -243,3 +243,13 @@ button.close { padding: 4px 10px; font-size: 16px; line-height: 1; }
   .modal-box { border-radius: 16px 16px 0 0; max-height: 92vh; padding-bottom: env(safe-area-inset-bottom, 0px); }
   .modal-actions { display: grid; grid-template-columns: 1fr 2fr; }
 }
+
+/* Déploiement MT5 */
+button.deploy { display: inline-flex; align-items: center; gap: 6px; background: var(--panel); color: var(--up); border: 1px solid var(--up); padding: 10px 18px; }
+button.deploy svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.deploy-buttons { grid-template-columns: auto auto 1fr; }
+.deploy-buttons button.primary { width: auto; margin: 0; padding: 10px 18px; font-size: 14px; }
+.steps { margin: 8px 0; padding-left: 20px; display: grid; gap: 8px; font-size: 13px; }
+kbd { font-family: var(--mono); font-size: 11.5px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: var(--panel-2); }
+pre.code { font-family: var(--mono); font-size: 11.5px; line-height: 1.45; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px; overflow: auto; max-height: 360px; white-space: pre; margin: 8px 0 0; }
+@media (max-width: 600px) { .deploy-buttons { grid-template-columns: 1fr; } }

@@ -1,8 +1,8 @@
 /* Tests du moteur : node tests/run-tests.js */
 'use strict';
 const path = require('path');
-for (const f of ['indicators', 'expr', 'backtest', 'data', 'presets', 'french', 'enhancer']) require(path.join(__dirname, '..', 'js', f + '.js'));
-const { indicators: I, rules: R, backtest: B, data: D, presets: P, french: FR, enhancer: E } = globalThis.Forexia;
+for (const f of ['indicators', 'expr', 'backtest', 'data', 'presets', 'french', 'enhancer', 'mql5']) require(path.join(__dirname, '..', 'js', f + '.js'));
+const { indicators: I, rules: R, backtest: B, data: D, presets: P, french: FR, enhancer: E, mql5: MQ } = globalThis.Forexia;
 
 let failed = 0, passed = 0;
 function test(name, fn) {
@@ -245,6 +245,28 @@ test('« Ne prendre que les achats » garde une sortie', () => {
   const r = E.suggest(bars, macd, Object.assign({}, base, { startIndex: D.indexFrom(bars, rg.start) }), 'none');
   const dir = r.suggestions.find((x) => /^dir-/.test(x.id));
   if (dir) { const o = dir.apply({ strat: macd, settings: base }).strat; if (!o.longExit && !o.shortExit) throw new Error('pas de sortie'); }
+});
+
+console.log('Expert Advisor MT5');
+test('EA généré pour chaque modèle : paramètres repris de la stratégie', () => {
+  for (const p of P.list) {
+    const r = MQ.generate(p, { pair: 'EUR/USD', leverage: 20, exposurePct: 50, sizing: 'risk', riskPct: 2, maxLots: 3 });
+    if (!/^Forexia_[A-Za-z0-9_]+\.mq5$/.test(r.fileName)) throw new Error('nom de fichier ' + r.fileName);
+    for (const needle of ['void OnTick()', 'int OnInit()', 'FxSignals(o, h, l, c, n, le, lx, se, sx)', 'InpSizing = FX_SIZING_RISK', 'InpLeverage = 20',
+      'InpExposurePct = 50', 'InpRiskPct = 2', 'InpMaxLots = 3', 'InpStopLossPips = ' + (p.stopLossPips || 0), 'FX_PAIR "EURUSD"']) {
+      if (!r.code.includes(needle)) throw new Error(p.id + ' : « ' + needle + ' » absent');
+    }
+    eq(r.code.includes('InpAllowShort = ' + (p.shortEntry ? 'true' : 'false')), true);
+  }
+});
+test('EA : stratégie sans entrée ou règle invalide refusée', () => {
+  let n = 0;
+  for (const s of [{ longExit: 'RSI(14) > 70' }, { longEntry: 'RSI(14) >' }]) { try { MQ.generate(s, {}); } catch (e) { n++; } }
+  eq(n, 2);
+});
+test('EA : accolades et parenthèses équilibrées', () => {
+  const code = MQ.generate(P.list[5], { pair: 'EUR/USD' }).code.replace(/"(?:[^"\\\n]|\\.)*"/g, '""').replace(/\/\/.*$/gm, '');
+  for (const [o, c] of [['{', '}'], ['(', ')'], ['[', ']']]) eq(code.split(o).length, code.split(c).length, o + c);
 });
 
 (async () => {

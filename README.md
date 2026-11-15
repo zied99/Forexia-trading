@@ -43,6 +43,12 @@ seulement, stop-loss, take-profit, levier). Chaque suggestion est backtestée su
 avec son résultat ; on en coche plusieurs, le résultat combiné s'affiche, puis « Appliquer et relancer ».
 Attention à la sur-optimisation : vérifiez ensuite la stratégie sur une autre période.
 
+**Déployer** : génère un **Expert Advisor MetaTrader 5** (fichier `.mq5`) qui applique la stratégie sur votre compte.
+Les indicateurs y sont recalculés avec exactement les mêmes formules que le backtest (vérifié par `npm run test:mql5`,
+qui compile le calcul des signaux en C++ et le compare au moteur JavaScript). Réglages : unité de temps, taille des
+positions (comme le backtest, lots fixes ou % de risque), plafond de lots, spread maximum. La fenêtre détaille
+l'installation : copie dans `MQL5\Experts`, compilation dans MetaEditor, backtest dans le testeur de MT5, puis compte démo.
+
 Résultats : capital final, profit net, nombre de trades et taux de réussite, profit factor, drawdown max,
 ratio de Sharpe, courbe du capital, cours avec les points d'entrée/sortie et les indicateurs,
 statistiques détaillées et historique des trades (export CSV).
@@ -113,9 +119,11 @@ js/data.js          sources de données (API, CSV, simulation)
 js/presets.js       modèles de stratégies
 js/french.js        stratégies en français + stratégie aléatoire
 js/enhancer.js      styles de trading et suggestions d'amélioration
+js/mql5.js          génération de l'Expert Advisor MetaTrader 5
 js/chart.js         graphiques SVG
 js/app.js           contrôleur de l'interface
 tests/run-tests.js  tests du moteur : npm test
+tests/mql5-check.js signaux de l'EA (compilés en C++) = signaux du backtest
 ```
 
 > Outil éducatif : les performances passées ne préjugent pas des performances futures.
