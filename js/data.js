@@ -14,8 +14,8 @@
     'NZD/USD': 0.61, 'EUR/GBP': 0.85, 'EUR/JPY': 162, 'GBP/JPY': 190, 'EUR/CHF': 0.95, 'AUD/JPY': 99,
     'EUR/AUD': 1.64, 'GBP/CHF': 1.12,
   };
-  const PERIODS = { '6m': 6, '1y': 12, '2y': 24 };
-  const WARMUP_DAYS = 420; // historique supplémentaire pour initialiser les indicateurs (EMA 200…)
+  const PERIODS = { '1m': 1, '2m': 2, '3m': 3, '6m': 6, '1y': 12, '2y': 24 };
+  const WARMUP_DAYS = 800; // historique supplémentaire pour initialiser les indicateurs (EMA 200, SMA 400 du long terme…)
 
   function iso(d) { return d.toISOString().slice(0, 10); }
   function addMonths(d, m) { const x = new Date(d); x.setUTCMonth(x.getUTCMonth() + m); return x; }

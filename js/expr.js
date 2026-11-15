@@ -278,5 +278,41 @@
     } catch (e) { return e.message; }
   }
 
-  root.Forexia.rules = { parse, evaluateRule, evaluateSeries, makeContext, validate, RuleError, FUNCTIONS: Object.keys(FUNCS) };
+  // ---------- Réécriture : arbre -> texte ----------
+  const PREC = { OR: 1, AND: 2, '>': 4, '<': 4, '>=': 4, '<=': 4, '==': 4, '!=': 4, '+': 5, '-': 5, '*': 6, '/': 6 };
+  const SPACED_ARGS = { CROSS_UP: 1, CROSS_DOWN: 1, PREV: 1 };
+  function stringify(node, parentPrec, isRight) {
+    parentPrec = parentPrec || 0;
+    switch (node.k) {
+      case 'num': return String(node.v);
+      case 'series': return node.name === 'PRICE' ? 'CLOSE' : node.name;
+      case 'neg': return '-' + stringify(node.a, 7);
+      case 'not': { const t = 'NOT ' + stringify(node.a, 3); return parentPrec > 3 ? '(' + t + ')' : t; }
+      case 'call': {
+        const spaced = SPACED_ARGS[node.name] || (node.args[0] && node.args[0].k !== 'num');
+        return node.name + '(' + node.args.map((x) => stringify(x, 0)).join(spaced ? ', ' : ',') + ')';
+      }
+      case 'bin': {
+        const p = PREC[node.op];
+        const t = stringify(node.a, p) + ' ' + node.op + ' ' + stringify(node.b, p + (p >= 4 ? 1 : 0), true);
+        return parentPrec > p || (isRight && parentPrec === p && p >= 4) ? '(' + t + ')' : t;
+      }
+    }
+    throw new RuleError('Nœud inconnu');
+  }
+  /** Applique fn à chaque nœud (de bas en haut) ; fn renvoie un nœud de remplacement ou undefined. */
+  function mapNodes(node, fn) {
+    let n = node;
+    if (node.k === 'bin') n = Object.assign({}, node, { a: mapNodes(node.a, fn), b: mapNodes(node.b, fn) });
+    else if (node.k === 'neg' || node.k === 'not') n = Object.assign({}, node, { a: mapNodes(node.a, fn) });
+    else if (node.k === 'call') n = Object.assign({}, node, { args: node.args.map((x) => mapNodes(x, fn)) });
+    const r = fn(n);
+    return r === undefined ? n : r;
+  }
+  /** Forme canonique d'une règle (pour comparer deux écritures). */
+  function canonical(text) { return text && text.trim() ? stringify(parse(text)) : ''; }
+
+  root.Forexia.rules = {
+    parse, evaluateRule, evaluateSeries, makeContext, validate, stringify, mapNodes, canonical, RuleError, FUNCTIONS: Object.keys(FUNCS),
+  };
 })(typeof window !== 'undefined' ? window : globalThis);

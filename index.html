@@ -28,6 +28,19 @@
           </button>
         </div>
         <p class="hint" id="presetDesc"></p>
+        <label class="field">Style de trading
+          <select id="style">
+            <option value="none">Aucun (réglages du modèle)</option>
+            <option value="scalping">Scalping</option>
+            <option value="short">Court terme</option>
+            <option value="medium">Moyen terme</option>
+            <option value="long">Long terme</option>
+          </select>
+        </label>
+        <div class="style-hint" id="styleHint" hidden>
+          <p class="hint" id="styleDesc"></p>
+          <button type="button" class="secondary small" id="adaptStyle" hidden>Adapter ma stratégie à ce style</button>
+        </div>
         <label class="field">Nom de la stratégie
           <input id="stratName" type="text" placeholder="Ma stratégie" maxlength="80">
         </label>
@@ -128,11 +141,14 @@
         </div>
         <fieldset class="field">
           <legend>Période de backtesting</legend>
-          <div class="segmented">
+          <div class="segmented periods">
+            <label><input type="radio" name="period" value="1m"><span>1 mois</span></label>
+            <label><input type="radio" name="period" value="2m"><span>2 mois</span></label>
+            <label><input type="radio" name="period" value="3m"><span>3 mois</span></label>
             <label><input type="radio" name="period" value="6m"><span>6 mois</span></label>
             <label><input type="radio" name="period" value="1y" checked><span>1 an</span></label>
             <label><input type="radio" name="period" value="2y"><span>2 ans</span></label>
-            <label><input type="radio" name="period" value="custom"><span>Dates</span></label>
+            <label class="wide"><input type="radio" name="period" value="custom"><span>Dates</span></label>
           </div>
           <div class="row date-range" id="customRange" hidden>
             <label class="field">Du
@@ -184,6 +200,27 @@
     </section>
   </main>
 
+  <div class="modal" id="enhanceModal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="enhanceTitle">
+      <header class="modal-head">
+        <div>
+          <h2 id="enhanceTitle">Améliorer la stratégie</h2>
+          <p class="hint" id="enhanceSub"></p>
+        </div>
+        <button type="button" class="ghost close" data-close aria-label="Fermer">✕</button>
+      </header>
+      <div class="modal-body" id="enhanceBody"></div>
+      <footer class="modal-foot">
+        <div id="enhanceCombined" class="combined"></div>
+        <div class="modal-actions">
+          <button type="button" class="secondary" data-close>Annuler</button>
+          <button type="button" class="primary" id="enhanceApply" disabled>Appliquer et relancer</button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
   <footer class="foot">
     Simulation à but éducatif : les performances passées ne préjugent pas des performances futures.
     Les données BCE sont des taux journaliers de référence (pas de haut/bas intra-journalier).
@@ -195,6 +232,7 @@
   <script src="js/data.js"></script>
   <script src="js/presets.js"></script>
   <script src="js/french.js"></script>
+  <script src="js/enhancer.js"></script>
   <script src="js/chart.js"></script>
   <script src="js/app.js"></script>
 </body>

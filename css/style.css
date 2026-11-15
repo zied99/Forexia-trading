@@ -200,3 +200,46 @@ input[type=date] { font: inherit; color: var(--text); background: var(--panel-2)
 button.chip { padding: 4px 10px; font-size: 12.5px; font-weight: 500; border-radius: 99px; background: var(--panel-2); border-color: var(--border); color: var(--text); }
 button.chip:hover { border-color: var(--accent); color: var(--accent); }
 .save-card .save-config { font-size: 12px; margin-top: 6px; }
+
+/* Périodes : 1/2/3/6 mois, 1 an, 2 ans, dates */
+.segmented.periods { grid-template-columns: repeat(4, 1fr); }
+.segmented.periods .wide { grid-column: span 2; }
+
+/* Style de trading */
+.style-hint { margin: -4px 0 10px; display: grid; gap: 6px; justify-items: start; }
+.style-hint .hint { margin: 0; }
+
+/* Fenêtre « Améliorer » */
+.save-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+button.enhance { display: inline-flex; align-items: center; gap: 6px; background: var(--panel); color: var(--accent); border: 1px solid var(--accent); padding: 10px 18px; }
+button.enhance svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.modal { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.modal-backdrop { position: absolute; inset: 0; background: rgba(15, 23, 42, .55); }
+.modal-box { position: relative; background: var(--panel); color: var(--text); border-radius: 16px; width: min(680px, 100%); max-height: min(88vh, 900px); display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,.3); }
+.modal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 16px 18px 10px; border-bottom: 1px solid var(--border); }
+.modal-head h2 { margin: 0 0 2px; font-size: 17px; }
+.modal-head .hint { margin: 0; }
+button.close { padding: 4px 10px; font-size: 16px; line-height: 1; }
+.modal-body { overflow-y: auto; padding: 12px 18px; display: grid; gap: 10px; overscroll-behavior: contain; }
+.modal-foot { border-top: 1px solid var(--border); padding: 12px 18px; display: grid; gap: 10px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.modal-actions button.primary { width: auto; margin: 0; padding: 10px 18px; font-size: 14px; }
+.combined { font-size: 13px; }
+.combined:empty { display: none; }
+.sugg { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; font-weight: 400; }
+.sugg:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.sugg input { margin-top: 3px; width: 18px; height: 18px; accent-color: var(--accent); }
+.sugg .grp { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
+.sugg .grp.risk { color: var(--warn); }
+.sugg b { display: block; font-size: 13.5px; margin: 1px 0 2px; }
+.sugg p { margin: 0 0 4px; font-size: 12.5px; color: var(--muted); }
+.sugg .res { font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.delta { display: inline-block; padding: 0 7px; border-radius: 99px; font-weight: 700; }
+.delta.pos { background: var(--up-soft); } .delta.neg { background: var(--down-soft); }
+.modal-note { font-size: 12px; color: var(--muted); background: var(--panel-2); border-radius: 8px; padding: 8px 10px; }
+.modal-loading { padding: 30px 0; text-align: center; color: var(--muted); }
+@media (max-width: 600px) {
+  .modal { padding: 0; align-items: flex-end; }
+  .modal-box { border-radius: 16px 16px 0 0; max-height: 92vh; padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .modal-actions { display: grid; grid-template-columns: 1fr 2fr; }
+}

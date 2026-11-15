@@ -35,10 +35,14 @@
   // Réutilise la dernière période citée : « le RSI 9 … le RSI repasse sous 50 » = RSI(9).
   const remember = (name, m1, def) => (m1 ? (periodCtx[name] = [+m1]) : periodCtx[name] || [def]).slice();
 
+  const bbMake = (name) => (m) => ind(name, [toInt(m[1], 20), m[2] ? Number(m[2].replace(',', '.')) : 2], 'BB');
   const PERIOD = '(?:\\s*\\(?\\s*(?:sur\\s+|de\\s+)?(\\d+)\\s*\\)?(?:\\s*(?:periodes?|jours|bougies|seances))?)?';
   const MENTIONS = [
     { re: /(?:le\s+)?(?:%d|stoch\w*\s+%?d\b|ligne\s+%?d\b|signal\s+du\s+stoch\w*)/g, make: () => ind('STOCH_D', stochCtx.slice(), 'STOCH') },
-    { re: /histogramme(?:\s+du)?(?:\s+macd)?/g, make: () => ind('MACD_HIST', macdCtx.slice(), 'MACD') },
+    { re: /histogramme(?:\s+du)?(?:\s+macd)?(?:\s*\(?\s*(\d+)\s*[,;/ ]\s*(\d+)\s*[,;/ ]\s*(\d+)\s*\)?)?/g, make: (m) => {
+      if (m[1]) macdCtx = [+m[1], +m[2], +m[3]];
+      return ind('MACD_HIST', macdCtx.slice(), 'MACD');
+    } },
     { re: /macd(?:\s*\(?\s*(\d+)\s*[,;/ ]\s*(\d+)\s*[,;/ ]\s*(\d+)\s*\)?)?/g, make: (m) => {
       if (m[1]) macdCtx = [+m[1], +m[2], +m[3]];
       return ind('MACD', macdCtx.slice(), 'MACD');
@@ -49,9 +53,9 @@
       if (m[1]) stochCtx = [+m[1], toInt(m[2], 3), toInt(m[3], 3)];
       return ind('STOCH_K', stochCtx.slice(), 'STOCH');
     } },
-    { re: /(?:la\s+)?(?:bande\s+(?:de\s+)?bollinger\s+(?:haute|superieure|du haut)|bande\s+(?:haute|superieure)(?:\s+de\s+bollinger)?|bollinger\s+(?:haute|superieure|haut))/g, make: () => ind('BB_UPPER', [20, 2], 'BB') },
-    { re: /(?:la\s+)?(?:bande\s+(?:de\s+)?bollinger\s+(?:basse|inferieure|du bas)|bande\s+(?:basse|inferieure)(?:\s+de\s+bollinger)?|bollinger\s+(?:basse|inferieure|bas))/g, make: () => ind('BB_LOWER', [20, 2], 'BB') },
-    { re: /(?:la\s+)?(?:(?:bande|ligne|moyenne)\s+(?:mediane|centrale|du milieu)(?:\s+de\s+bollinger)?|moyenne\s+de\s+bollinger|bollinger\s+(?:mediane|centrale|milieu))/g, make: () => ind('BB_MIDDLE', [20, 2], 'BB') },
+    { re: /(?:la\s+)?(?:bande\s+(?:de\s+)?bollinger\s+(?:haute|superieure|du haut)|bande\s+(?:haute|superieure)(?:\s+de\s+bollinger)?|bollinger\s+(?:haute|superieure|haut))(?:\s*\(?\s*(\d+)\s*[,;/]\s*(\d+(?:[.,]\d+)?)\s*\)?)?/g, make: bbMake('BB_UPPER') },
+    { re: /(?:la\s+)?(?:bande\s+(?:de\s+)?bollinger\s+(?:basse|inferieure|du bas)|bande\s+(?:basse|inferieure)(?:\s+de\s+bollinger)?|bollinger\s+(?:basse|inferieure|bas))(?:\s*\(?\s*(\d+)\s*[,;/]\s*(\d+(?:[.,]\d+)?)\s*\)?)?/g, make: bbMake('BB_LOWER') },
+    { re: /(?:la\s+)?(?:(?:bande|ligne|moyenne)\s+(?:mediane|centrale|du milieu)(?:\s+de\s+bollinger)?|moyenne\s+de\s+bollinger|bollinger\s+(?:mediane|centrale|milieu))(?:\s*\(?\s*(\d+)\s*[,;/]\s*(\d+(?:[.,]\d+)?)\s*\)?)?/g, make: bbMake('BB_MIDDLE') },
     { re: new RegExp('(?:la\\s+)?(?:moyenne\\s+mobile\\s+exponentielle|mm\\s+exponentielle|mme|ema)' + PERIOD, 'g'), make: (m) => ind('EMA', [toInt(m[1], 20)], 'PRICE') },
     { re: new RegExp('(?:la\\s+)?(?:moyenne\\s+mobile(?:\\s+simple|\\s+arithmetique)?|mms|mm|sma|ma(?=\\s*\\(?\\d))' + PERIOD, 'g'), make: (m) => ind('SMA', [toInt(m[1], 20)], 'PRICE') },
     { re: /cci(?:\s*\(?\s*(\d+)\s*\)?)?/g, make: (m) => ind('CCI', remember('CCI', m[1], 20)) },
@@ -62,6 +66,12 @@
   ];
 
   function findMentions(clause) {
+    // Les paramètres explicites (MACD (5,35,5), stochastique (9,3,3)) valent pour toute la condition,
+    // y compris « sa ligne de signal » / « sa ligne %D » citées avant ou après.
+    const mm = /macd\s*\(?\s*(\d+)\s*[,;/ ]\s*(\d+)\s*[,;/ ]\s*(\d+)/.exec(clause);
+    if (mm) macdCtx = [+mm[1], +mm[2], +mm[3]];
+    const sm = /(?:stochastique|stoch)\s*%?k?\s*\(\s*(\d+)(?:\s*[,;/]\s*(\d+))?(?:\s*[,;/]\s*(\d+))?/.exec(clause);
+    if (sm) stochCtx = [+sm[1], toInt(sm[2], 3), toInt(sm[3], 3)];
     let masked = clause;
     const found = [];
     for (const def of MENTIONS) {
@@ -351,6 +361,76 @@
     return Object.assign({ name: name, frenchText: text, description: 'Stratégie tirée au hasard. Si elle vous plaît, cliquez sur « Enregistrer ».' }, rules);
   }
 
+  // ---------- Règles techniques -> français ----------
+  const R = () => root.Forexia.rules;
+  function opFr(n) {
+    if (n.k === 'num') return String(n.v);
+    if (n.k === 'neg' && n.a.k === 'num') return String(-n.a.v);
+    if (n.k === 'series' && (n.name === 'CLOSE' || n.name === 'PRICE')) return 'le prix';
+    if (n.k !== 'call' || n.args.some((a) => a.k !== 'num')) throw new Error('non traduisible');
+    const a = n.args.map((x) => x.v);
+    const p = (d) => (a[0] !== undefined ? a[0] : d);
+    switch (n.name) {
+      case 'RSI': return 'le RSI ' + p(14);
+      case 'SMA': return 'la moyenne mobile ' + p(20);
+      case 'EMA': return 'la moyenne mobile exponentielle ' + p(20);
+      case 'MACD': return 'le MACD (' + (a.length ? a : [12, 26, 9]).join(',') + ')';
+      case 'MACD_SIGNAL': return 'sa ligne de signal';
+      case 'MACD_HIST': return "l'histogramme du MACD (" + (a.length ? a : [12, 26, 9]).join(',') + ')';
+      case 'STOCH_K': return 'le stochastique (' + (a.length ? a : [14, 3, 3]).join(',') + ')';
+      case 'STOCH_D': return 'sa ligne %D';
+      case 'BB_UPPER': return 'la bande de Bollinger haute (' + (a.length ? a : [20, 2]).join(',') + ')';
+      case 'BB_LOWER': return 'la bande de Bollinger basse (' + (a.length ? a : [20, 2]).join(',') + ')';
+      case 'BB_MIDDLE': return 'la bande médiane de Bollinger (' + (a.length ? a : [20, 2]).join(',') + ')';
+      case 'CCI': return 'le CCI ' + p(20);
+      case 'WILLR': return 'le Williams %R ' + p(14);
+      case 'ATR': return "l'ATR " + p(14);
+      case 'MOM': return 'le momentum ' + p(10);
+    }
+    throw new Error('non traduisible');
+  }
+  const isNum = (n) => n.k === 'num' || (n.k === 'neg' && n.a.k === 'num');
+  function clauseFr(n) {
+    const S = R().stringify;
+    if (n.k === 'call' && (n.name === 'CROSS_UP' || n.name === 'CROSS_DOWN') && n.args.length === 2) {
+      let [x, y] = n.args, up = n.name === 'CROSS_UP';
+      if (isNum(x) && !isNum(y)) { [x, y] = [y, x]; up = !up; }
+      return opFr(x) + (up ? ' passe au-dessus de ' : ' passe en dessous de ') + opFr(y);
+    }
+    if (n.k === 'bin' && (n.op === '>' || n.op === '<' || n.op === '==')) {
+      let x = n.a, y = n.b, op = n.op;
+      if (y.k === 'call' && y.name === 'PREV' && y.args.length === 2 && y.args[1].v === 1 && S(y.args[0]) === S(x) && op !== '==') {
+        return opFr(x) + (op === '>' ? ' monte' : ' descend');
+      }
+      if (isNum(x) && !isNum(y)) { [x, y] = [y, x]; op = { '>': '<', '<': '>', '==': '==' }[op]; }
+      return opFr(x) + (op === '>' ? ' est au-dessus de ' : op === '<' ? ' est en dessous de ' : ' vaut ') + opFr(y);
+    }
+    throw new Error('non traduisible');
+  }
+  function splitBin(n, op) { return n.k === 'bin' && n.op === op ? splitBin(n.a, op).concat(splitBin(n.b, op)) : [n]; }
+  function conditionFr(rule) {
+    return splitBin(R().parse(rule), 'OR').map((g) => splitBin(g, 'AND').map(clauseFr).join(' et que ')).join(' ou que ');
+  }
+
+  /** Décrit une stratégie en français. Renvoie null si le texte ne redonne pas exactement les mêmes règles. */
+  function toFrench(strategy) {
+    const lines = [];
+    const PREFIX = { longEntry: 'Acheter quand ', shortEntry: 'Vendre quand ', longExit: "Sortir de l'achat quand ", shortExit: 'Sortir de la vente quand ' };
+    try {
+      for (const k of ['longEntry', 'shortEntry', 'longExit', 'shortExit']) if (strategy[k]) lines.push(PREFIX[k] + conditionFr(strategy[k]) + '.');
+    } catch (e) { return null; }
+    const risk = [];
+    if (strategy.stopLossPips > 0) risk.push('stop loss ' + strategy.stopLossPips + ' pips');
+    if (strategy.takeProfitPips > 0) risk.push('take profit ' + strategy.takeProfitPips + ' pips');
+    if (risk.length) lines.push(risk[0][0].toUpperCase() + risk.join(', ').slice(1) + '.');
+    const text = lines.join('\n');
+    const back = parse(text);
+    if (back.warnings.length) return null;
+    for (const k of ['longEntry', 'shortEntry', 'longExit', 'shortExit']) if (R().canonical(back[k]) !== R().canonical(strategy[k] || '')) return null;
+    if ((back.stopLossPips || 0) !== (strategy.stopLossPips || 0) || (back.takeProfitPips || 0) !== (strategy.takeProfitPips || 0)) return null;
+    return text;
+  }
+
   root.Forexia = root.Forexia || {};
-  root.Forexia.french = { parse, randomStrategy, derivePlots, normalize };
+  root.Forexia.french = { parse, randomStrategy, derivePlots, normalize, toFrench };
 })(typeof window !== 'undefined' ? window : globalThis);

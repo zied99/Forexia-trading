@@ -18,11 +18,15 @@ pas d'installation.
    - ou choisir un modèle (RSI, MACD, croisement de moyennes, stochastique + EMA 200, Bollinger, combinée) ;
    - ou cliquer sur **« Stratégie aléatoire »** : une stratégie est tirée au hasard et testée aussitôt.
      Si elle vous plaît, cliquez sur **« Enregistrer »** (en haut des résultats).
+   - **Style de trading** : *Aucun* (réglages du modèle), *Scalping*, *Court terme*, *Moyen terme* ou *Long terme*.
+     Le style règle les périodes des indicateurs et le stop-loss / take-profit des modèles et des stratégies
+     aléatoires ; « Adapter ma stratégie » l'applique à une stratégie écrite à la main.
+     Le scalping demande des données intraday (CSV en M1 à M15).
    Les stratégies enregistrées sont dans Modèle → *Mes stratégies* (stockées dans ce navigateur).
    L'enregistrement garde aussi la configuration (paire, levier, capital, exposition, spread, période ou dates,
    source des données) et le résultat du dernier backtest ; recharger la stratégie remet tout en place.
 2. **Marché et capital** : paire de devises, levier (1:1 à 1:500), capital, exposition, spread,
-   période : **6 mois, 1 an, 2 ans**, ou **Dates** pour choisir librement le début et la fin du test
+   période : **1, 2, 3 ou 6 mois, 1 an, 2 ans**, ou **Dates** pour choisir librement le début et la fin du test
    (raccourcis 3 / 5 / 10 ans, année dernière, depuis janvier). Les cours BCE remontent à janvier 1999.
 3. **Données** :
    - *Cours réels en ligne* : taux de référence journaliers de la BCE via l'API gratuite
@@ -32,6 +36,12 @@ pas d'installation.
      Colonnes `date, open, high, low, close` (en-tête facultatif, séparateur `,` `;` ou tabulation).
      La période est comptée à partir de la dernière date du fichier.
    - *Données simulées* : marche aléatoire reproductible, pour tester hors ligne.
+
+**Améliorer** : après une simulation, ce bouton ouvre une fenêtre de suggestions (réglage des périodes
+d'indicateurs, seuils des oscillateurs, filtre de tendance, confirmation RSI, règle de sortie, achats ou ventes
+seulement, stop-loss, take-profit, levier). Chaque suggestion est backtestée sur les mêmes données et affichée
+avec son résultat ; on en coche plusieurs, le résultat combiné s'affiche, puis « Appliquer et relancer ».
+Attention à la sur-optimisation : vérifiez ensuite la stratégie sur une autre période.
 
 Résultats : capital final, profit net, nombre de trades et taux de réussite, profit factor, drawdown max,
 ratio de Sharpe, courbe du capital, cours avec les points d'entrée/sortie et les indicateurs,
@@ -102,6 +112,7 @@ js/backtest.js      moteur de simulation et statistiques
 js/data.js          sources de données (API, CSV, simulation)
 js/presets.js       modèles de stratégies
 js/french.js        stratégies en français + stratégie aléatoire
+js/enhancer.js      styles de trading et suggestions d'amélioration
 js/chart.js         graphiques SVG
 js/app.js           contrôleur de l'interface
 tests/run-tests.js  tests du moteur : npm test

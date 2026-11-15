@@ -7,7 +7,7 @@
   const STORE_KEY = 'forexia.strategies';
   const LEVERAGES = [1, 2, 5, 10, 20, 30, 50, 100, 200, 500];
   const SERIES_COLORS = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)'];
-  const PERIOD_LABEL = { '6m': '6 mois', '1y': '1 an', '2y': '2 ans', custom: 'Période personnalisée' };
+  const PERIOD_LABEL = { '1m': '1 mois', '2m': '2 mois', '3m': '3 mois', '6m': '6 mois', '1y': '1 an', '2y': '2 ans', custom: 'Période personnalisée' };
 
   const money = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const num1 = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 });
@@ -43,8 +43,11 @@
     if (selected) $('preset').value = selected;
   }
 
+  const E = F.enhancer;
+  let appliedStyle = 'none'; // style auquel les règles du formulaire sont réglées
+
   function currentStrategy() {
-    const s = { name: $('stratName').value.trim() || 'Ma stratégie', plots: $('plots').value.trim(), frenchText: $('frenchText').value.trim() };
+    const s = { name: $('stratName').value.trim() || 'Ma stratégie', plots: $('plots').value.trim(), frenchText: $('frenchText').value.trim(), style: appliedStyle };
     for (const f of RULE_FIELDS) s[f] = $(f).value.trim();
     s.stopLossPips = Number($('stopLoss').value) || 0;
     s.takeProfitPips = Number($('takeProfit').value) || 0;
@@ -58,6 +61,8 @@
     $('plots').value = s.plots || '';
     $('frenchText').value = s.frenchText || '';
     $('presetDesc').textContent = s.description || '';
+    appliedStyle = s.style || 'none';
+    if (s.style !== undefined || !s.longEntry && !s.shortEntry) $('style').value = appliedStyle === 'none' && !s.style ? $('style').value : appliedStyle;
     frenchDirty = false;
     renderTranslation(s.frenchText ? F.french.parse(s.frenchText) : null);
     validateAll();
@@ -92,24 +97,59 @@
   }
   function describeSaved(s) {
     let d = 'Enregistrée le ' + (s.savedAt ? new Date(s.savedAt).toLocaleDateString('fr-FR') : '?');
+    if (s.style && s.style !== 'none') d += ' · ' + E.STYLES[s.style].label;
     if (s.config) d += ' · ' + describeConfig(s.config);
     if (s.lastResult) d += ' · résultat : ' + signed(s.lastResult.returnPct, num2) + ' % (' + s.lastResult.trades + ' trades, drawdown max −' + num2.format(s.lastResult.maxDrawdownPct) + ' %)';
     return d + '.';
   }
+  let lastRunCtx = null; // données et réglages du dernier backtest, pour « Améliorer »
   let lastRun = null; // { key, stats } du dernier backtest, pour joindre son résultat à l'enregistrement
 
   function applyPresetSelection() {
     const v = $('preset').value;
     $('deleteStrat').hidden = !v.startsWith('saved:');
     if (v === 'custom') { loadStrategy({ name: '' }); $('longEntry').focus(); return; }
-    if (v.startsWith('preset:')) loadStrategy(F.presets.list.find((p) => 'preset:' + p.id === v));
+    if (v.startsWith('preset:')) {
+      const preset = F.presets.list.find((p) => 'preset:' + p.id === v), style = $('style').value;
+      loadStrategy(style === 'none' ? Object.assign({ style: 'none' }, preset) : E.adaptToStyle(preset, style));
+      if (style !== 'none') $('presetDesc').textContent = preset.description + ' Réglée pour le ' + E.STYLES[style].label.toLowerCase() + '.';
+    }
     if (v.startsWith('saved:')) {
       const saved = storage.get()[+v.slice(6)];
       loadStrategy(saved);
       applyConfig(saved.config);
       $('presetDesc').textContent = describeSaved(saved);
     }
+    updateStyleHint();
   }
+
+  // ---------- Style de trading ----------
+  function hasRules() { return RULE_FIELDS.some((f) => $(f).value.trim()); }
+  function updateStyleHint() {
+    const style = $('style').value, v = $('preset').value;
+    $('styleHint').hidden = style === 'none' && appliedStyle === 'none';
+    $('styleDesc').textContent = style === 'none' ? 'Réglages d\'origine de la stratégie.' : E.STYLES[style].desc;
+    $('adaptStyle').hidden = v.startsWith('preset:') || style === appliedStyle || !hasRules();
+    $('adaptStyle').textContent = style === 'none' ? 'Revenir aux réglages d\'origine' : 'Adapter ma stratégie au ' + E.STYLES[style].label.toLowerCase();
+  }
+  $('style').addEventListener('change', () => {
+    if ($('preset').value.startsWith('preset:')) applyPresetSelection();
+    updateStyleHint();
+  });
+  $('adaptStyle').addEventListener('click', () => {
+    if (frenchDirty && $('frenchText').value.trim()) translateFrench();
+    const style = $('style').value, before = currentStrategy();
+    const s = E.adaptToStyle(before, style, { fromStyle: appliedStyle });
+    s.name = before.name === 'Ma stratégie' && !$('stratName').value.trim() ? '' : s.name;
+    loadStrategy(s);
+    $('preset').value = 'mine';
+    $('deleteStrat').hidden = true;
+    $('presetDesc').textContent = 'Stratégie adaptée : périodes des indicateurs ×' + (E.STYLES[style].factor / E.STYLES[before.style || 'none'].factor).toFixed(2).replace(/\.?0+$/, '') +
+      (style !== 'none' ? ', stop-loss ' + s.stopLossPips + ' pips' + (s.takeProfitPips ? ', take-profit ' + s.takeProfitPips + ' pips' : '') : '') + '.' +
+      (s.frenchText ? '' : ' Le texte français ne peut pas décrire ces réglages : voir « Règles techniques ».');
+    if (!s.frenchText) $('rulesDetails').open = true;
+    updateStyleHint();
+  });
   $('preset').addEventListener('change', applyPresetSelection);
 
   // Enregistre la stratégie du formulaire (ou celle du dernier backtest) dans le navigateur.
@@ -200,7 +240,10 @@
 
   // ---------- Stratégie aléatoire ----------
   $('randomBtn').addEventListener('click', () => {
-    const s = F.french.randomStrategy();
+    const style = $('style').value;
+    let s = F.french.randomStrategy();
+    if (style !== 'none') s = E.adaptToStyle(s, style, { rnd: Math.random });
+    else s.style = 'none';
     loadStrategy(s);
     $('preset').value = 'mine';
     $('deleteStrat').hidden = true;
@@ -338,8 +381,12 @@
       const warnings = [];
       if (loaded.warning) warnings.push(loaded.warning);
       if (startIndex < 200) warnings.push('Historique antérieur limité (' + startIndex + ' bougies) : les indicateurs à longue période (ex. EMA 200) peuvent être indisponibles en début de test.');
+      if (strat.style === 'scalping' && sourceValue() !== 'csv') {
+        warnings.push('<b>Scalping sur données journalières</b> : le scalping se joue sur des bougies de quelques minutes. Pour un test réaliste, importez un CSV en M1 à M15 (source « Mon fichier CSV »).');
+      }
       if (result.ruined) warnings.push('<b>Compte liquidé</b> : le capital a été entièrement perdu. Réduisez le levier ou l\'exposition.');
       const config = currentConfig();
+      lastRunCtx = { bars, strat, settings, config };
       lastRun = { key: JSON.stringify([strat.longEntry, strat.longExit, strat.shortEntry, strat.shortExit, strat.stopLossPips, strat.takeProfitPips, config]), stats: result.stats };
       render({ bars, strat, settings, result, loaded, periodKey, warnings, config });
     } catch (err) {
@@ -371,9 +418,11 @@
 
     let html = '';
     for (const w of warnings) html += '<div class="banner warn">' + w + '</div>';
-    html += '<div class="panel card save-card"><div><b>Cette stratégie vous plaît ?</b><div class="hint">' + esc(strat.frenchText || strat.longEntry || strat.shortEntry).replace(/\n/g, '<br>') + '</div>' +
+    html += '<div class="panel card save-card"><div><b>Cette stratégie vous plaît ?</b> <span class="hint">Sinon, « Améliorer » propose des réglages testés.</span><div class="hint">' + esc(strat.frenchText || strat.longEntry || strat.shortEntry).replace(/\n/g, '<br>') + '</div>' +
       '<div class="hint save-config">Configuration enregistrée avec : ' + esc(describeConfig(config)) + '</div>' +
-      '</div><button type="button" class="primary inline-save" id="saveFromResults">Enregistrer</button></div>';
+      '</div><div class="save-actions">' +
+      '<button type="button" class="enhance" id="enhanceBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/></svg>Améliorer</button>' +
+      '<button type="button" class="primary inline-save" id="saveFromResults">Enregistrer</button></div></div>';
     html += '<div class="summary-head"><h2>' + esc(strat.name) + ' · ' + esc(settings.pair) + '</h2>' +
       '<span class="meta">' + PERIOD_LABEL[periodKey] + ' · du ' + frDate(dates[0]) + ' au ' + frDate(dates[dates.length - 1]) +
       ' · levier 1:' + settings.leverage + ' · ' + esc(loaded.source) + ' · ' + view.length + ' bougies</span></div>';
@@ -488,6 +537,7 @@
       overlays.map((o) => '<span><i style="background:' + o.color + '"></i>' + esc(o.name) + '</span>').join('') +
       '<span><i class="tri-up"></i>Achat</span><span><i class="tri-dn"></i>Vente</span><span><i class="dot" style="background:var(--muted)"></i>Sortie</span>';
 
+    $('enhanceBtn').addEventListener('click', openEnhancer);
     $('saveFromResults').addEventListener('click', () => {
       const saved = saveStrategy(strat, config, s);
       if (saved) { $('saveFromResults').textContent = 'Enregistrée ✓'; $('saveFromResults').disabled = true; }
@@ -516,6 +566,81 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
+  // ---------- Fenêtre « Améliorer » ----------
+  let enh = null; // { suggestions, base }
+  const pct = (v) => signed(v, num1) + ' %';
+  function statLine(st) {
+    return '<span class="' + cls(st.returnPct) + '">' + pct(st.returnPct) + '</span> · drawdown −' + num1.format(st.maxDrawdownPct) + ' % · ' + st.trades + (st.trades > 1 ? ' trades' : ' trade');
+  }
+  function openEnhancer() {
+    if (!lastRunCtx) return;
+    const m = $('enhanceModal');
+    m.hidden = false;
+    document.body.style.overflow = 'hidden';
+    $('enhanceSub').textContent = 'Chaque suggestion a été testée sur ' + lastRunCtx.settings.pair + ', sur la même période. Cochez celles à appliquer.';
+    $('enhanceBody').innerHTML = '<div class="modal-loading"><span class="spinner"></span>Test des améliorations possibles…</div>';
+    $('enhanceCombined').innerHTML = '';
+    $('enhanceApply').disabled = true;
+    $('enhanceModal').querySelector('.close').focus();
+    setTimeout(() => {
+      const { bars, strat, settings } = lastRunCtx;
+      enh = E.suggest(bars, strat, settings, strat.style || $('style').value);
+      const base = enh.base;
+      let html = '<div class="modal-note"><b>Résultat actuel :</b> ' + statLine(base) + '</div>';
+      if (!enh.suggestions.length) {
+        html += '<p>Aucune des modifications testées (réglages des indicateurs, seuils, filtre de tendance, stop-loss, take-profit, sens des positions…) n\'améliore ce résultat sur cette période.</p>';
+      }
+      html += enh.suggestions.map((sg, i) => {
+        const d = sg.stats.returnPct - base.returnPct;
+        return '<label class="sugg"><input type="checkbox" data-i="' + i + '"><div>' +
+          '<div class="grp' + (sg.risk ? ' risk' : '') + '">' + esc(sg.group) + '</div><b>' + esc(sg.title) + '</b><p>' + esc(sg.detail) + '</p>' +
+          '<div class="res">Seule : ' + statLine(sg.stats) + ' <span class="delta ' + cls(d) + '">' + signed(d, num1) + ' pts</span></div></div></label>';
+      }).join('');
+      if (enh.suggestions.length) {
+        html += '<p class="modal-note">Ces améliorations sont calculées sur la période testée. Plus vous en cumulez, plus le risque de « sur-optimisation » est grand : la stratégie colle au passé sans être meilleure à l\'avenir. Vérifiez ensuite le résultat sur une autre période (bouton « Dates »).</p>';
+      }
+      $('enhanceBody').innerHTML = html;
+      updateCombined();
+    }, 30);
+  }
+  function selectedSuggestions() {
+    return [...$('enhanceBody').querySelectorAll('input[type=checkbox]:checked')].map((c) => enh.suggestions[+c.dataset.i]);
+  }
+  function updateCombined() {
+    const sel = selectedSuggestions();
+    $('enhanceApply').disabled = !sel.length;
+    if (!sel.length) { $('enhanceCombined').innerHTML = enh.suggestions.length ? '<span class="hint">Cochez une ou plusieurs améliorations.</span>' : ''; return; }
+    const { bars, strat, settings } = lastRunCtx;
+    const c = E.combine(strat, settings, sel);
+    const st = E.run(bars, c.strat, c.settings);
+    $('enhanceCombined').innerHTML = st ? '<b>Avec ' + (sel.length > 1 ? 'ces ' + sel.length + ' améliorations' : 'cette amélioration') + ' :</b> ' + statLine(st) +
+      ' <span class="hint">(au lieu de ' + pct(enh.base.returnPct) + ')</span>' : '';
+  }
+  $('enhanceBody').addEventListener('change', updateCombined);
+  function closeEnhancer() { $('enhanceModal').hidden = true; document.body.style.overflow = ''; }
+  $('enhanceModal').addEventListener('click', (e) => { if (e.target.closest('[data-close]')) closeEnhancer(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('enhanceModal').hidden) closeEnhancer(); });
+  $('enhanceApply').addEventListener('click', () => {
+    const sel = selectedSuggestions();
+    if (!sel.length) return;
+    const { strat, settings } = lastRunCtx;
+    const c = E.combine(strat, settings, sel);
+    const s = Object.assign({}, c.strat);
+    s.name = String(strat.name).replace(/ \(améliorée\)$/, '') + ' (améliorée)';
+    s.plots = F.french.derivePlots(s);
+    s.frenchText = F.french.toFrench(s) || '';
+    loadStrategy(s);
+    if (c.settings.leverage !== settings.leverage) $('leverage').value = String(c.settings.leverage);
+    $('preset').value = 'mine';
+    $('deleteStrat').hidden = true;
+    $('presetDesc').textContent = 'Améliorations appliquées : ' + sel.map((x) => x.title).join(' ; ') + '.' +
+      (s.frenchText ? '' : ' Le texte français ne peut pas décrire ces réglages : voir « Règles techniques ».');
+    if (!s.frenchText) $('rulesDetails').open = true;
+    updateStyleHint();
+    closeEnhancer();
+    $('form').requestSubmit();
+  });
+
   // ---------- Thème ----------
   $('themeToggle').addEventListener('click', () => {
     const rootEl = document.documentElement;
@@ -527,4 +652,5 @@
 
   refreshPresetSelect('preset:' + F.presets.list[0].id);
   applyPresetSelection();
+  updateStyleHint();
 })();

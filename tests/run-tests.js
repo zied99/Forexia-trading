@@ -1,8 +1,8 @@
 /* Tests du moteur : node tests/run-tests.js */
 'use strict';
 const path = require('path');
-for (const f of ['indicators', 'expr', 'backtest', 'data', 'presets', 'french']) require(path.join(__dirname, '..', 'js', f + '.js'));
-const { indicators: I, rules: R, backtest: B, data: D, presets: P, french: FR } = globalThis.Forexia;
+for (const f of ['indicators', 'expr', 'backtest', 'data', 'presets', 'french', 'enhancer']) require(path.join(__dirname, '..', 'js', f + '.js'));
+const { indicators: I, rules: R, backtest: B, data: D, presets: P, french: FR, enhancer: E } = globalThis.Forexia;
 
 let failed = 0, passed = 0;
 function test(name, fn) {
@@ -194,6 +194,57 @@ test('500 stratégies aléatoires : toutes valides et testables', () => {
     for (const k of ['longEntry', 'longExit', 'shortEntry', 'shortExit']) { const e = R.validate(s[k]); if (e) throw new Error(s[k] + ' : ' + e); }
     if (i % 25 === 0) B.runBacktest(bars, s, Object.assign({}, base, { pair: 'GBP/USD', startIndex: D.indexFrom(bars, rg.start) }));
   }
+});
+
+console.log('Réécriture, styles et améliorations');
+test('Réécriture des règles stable (texte -> arbre -> texte)', () => {
+  for (const t of ['(RSI(14) > 30 OR RSI(14) < 20) AND CLOSE > SMA(200)', '(CLOSE - SMA(20)) / ATR(14) > 1', 'SMA(RSI(14), 9) > 50', 'CROSS_UP(MACD(12,26,9), MACD_SIGNAL(12,26,9))']) eq(R.canonical(t), t);
+});
+test('Règles -> français -> règles : identiques (modèles, styles, 300 aléatoires)', () => {
+  for (const p of P.list) for (const st of Object.keys(E.STYLES)) if (!E.adaptToStyle(p, st).frenchText) throw new Error(p.id + ' / ' + st);
+  for (let i = 0; i < 300; i++) { const s = FR.randomStrategy(); if (!FR.toFrench(s)) throw new Error(s.longEntry); }
+});
+test('Styles : périodes et stops adaptés', () => {
+  const ma = P.list.find((p) => p.id === 'ma');
+  const sc = E.adaptToStyle(ma, 'scalping'), lg = E.adaptToStyle(ma, 'long');
+  eq(sc.longEntry, 'CROSS_UP(SMA(8), SMA(20))'); eq(sc.stopLossPips, 12);
+  eq(lg.longEntry, 'CROSS_UP(SMA(40), SMA(100))'); eq(lg.stopLossPips, 300);
+  eq(E.adaptToStyle(sc, 'medium', { fromStyle: 'scalping' }).longEntry, 'CROSS_UP(SMA(20), SMA(50))');
+  const macd = E.adaptToStyle(P.list.find((p) => p.id === 'macd'), 'scalping');
+  const m = /MACD\((\d+),(\d+)/.exec(macd.longEntry); if (!(+m[1] < +m[2])) throw new Error('MACD rapide >= lente');
+});
+test('Périodes de 1, 2 et 3 mois', () => {
+  const end = new Date('2025-06-30T00:00:00Z');
+  eq(D.iso(D.periodRange('1m', end).start), '2025-05-30'); eq(D.iso(D.periodRange('3m', end).start), '2025-03-30');
+});
+test('Améliorer : chaque suggestion est testée, meilleure que l\'actuel, et combinable', () => {
+  const rg = D.periodRange('1y', new Date('2025-06-30'));
+  const bars = D.generateSynthetic('EUR/USD', rg.fetchStart, rg.end);
+  const set = Object.assign({}, base, { leverage: 20, spreadPips: 1, startIndex: D.indexFrom(bars, rg.start) });
+  let total = 0;
+  for (const p of P.list) {
+    const r = E.suggest(bars, p, set, 'none');
+    for (const sg of r.suggestions) {
+      total++;
+      const out = sg.apply({ strat: p, settings: set });
+      const st = E.run(bars, out.strat, out.settings);
+      near(st.returnPct, sg.stats.returnPct, 1e-9, sg.title);
+      if (!sg.risk && !(E.score(st) > E.score(r.base))) throw new Error('pas une amélioration : ' + sg.title);
+      if (!sg.risk && st.trades < 3) throw new Error('trop peu de trades : ' + sg.title);
+      for (const k of ['longEntry', 'longExit', 'shortEntry', 'shortExit']) { const e = R.validate(out.strat[k]); if (e) throw new Error(e); }
+    }
+    const c = E.combine(p, set, r.suggestions);
+    if (!E.run(bars, c.strat, c.settings)) throw new Error('combinaison invalide ' + p.id);
+  }
+  if (!total) throw new Error('aucune suggestion');
+});
+test('« Ne prendre que les achats » garde une sortie', () => {
+  const rg = D.periodRange('1y', new Date('2025-06-30'));
+  const bars = D.generateSynthetic('EUR/USD', rg.fetchStart, rg.end);
+  const macd = P.list.find((p) => p.id === 'macd');
+  const r = E.suggest(bars, macd, Object.assign({}, base, { startIndex: D.indexFrom(bars, rg.start) }), 'none');
+  const dir = r.suggestions.find((x) => /^dir-/.test(x.id));
+  if (dir) { const o = dir.apply({ strat: macd, settings: base }).strat; if (!o.longExit && !o.shortExit) throw new Error('pas de sortie'); }
 });
 
 (async () => {
