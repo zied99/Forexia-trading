@@ -828,5 +828,58 @@ void OnTick()
     return { code: code, fileName: baseName + '.mq5', baseName: baseName, magic: magic };
   }
 
-  F.mql5 = { generate, signalsFunction, CALC_LIB, TIMEFRAMES };
+  // ---------- Relecture d'un EA Forexia (.mq5) ----------
+  const PERIOD_KEYS = { '1 mois': '1m', '2 mois': '2m', '3 mois': '3m', '6 mois': '6m', '1 an': '1y', '2 ans': '2y' };
+  const SIZING_KEYS = { FX_SIZING_BACKTEST: 'backtest', FX_SIZING_FIXED: 'fixed', FX_SIZING_RISK: 'risk' };
+  /** Retrouve la stratégie et les réglages d'un EA généré par Forexia. Renvoie null si ce n'en est pas un. */
+  function parseEA(text) {
+    const code = String(text).replace(/^﻿/, '').replace(/\r\n?/g, '\n');
+    if (!/Expert Advisor généré par Forexia/.test(code) || !/void FxSignals\(/.test(code)) return null;
+    const lines = code.split('\n');
+    const nameDef = /^#define FX_NAME "((?:[^"\\]|\\.)*)"/m.exec(code);
+    const name = nameDef ? nameDef[1].replace(/\\(.)/g, '$1') : (lines[1] || '').replace(/^\/\/\|\s*/, '').trim();
+    const iStrat = lines.indexOf('// Stratégie :'), iRules = lines.indexOf('// Règles :');
+    let frenchText = '';
+    if (iStrat >= 0 && iRules > iStrat) {
+      frenchText = lines.slice(iStrat + 1, iRules).map((l) => l.replace(/^\/\/ {3}/, '')).join('\n').trim();
+      if (/^\(pas de description en français\)$/.test(frenchText)) frenchText = '';
+    }
+    const rule = (label) => { const m = new RegExp('^//   ' + label + ' : (.*)$', 'm').exec(code); return m && m[1].trim() !== '-' ? m[1].trim() : ''; };
+    const input = (n) => { const m = new RegExp('^input\\s+\\w+\\s+' + n + '\\s*=\\s*([^;]+);', 'm').exec(code); return m ? m[1].trim() : null; };
+    const num = (n, d) => { const v = Number(input(n)); return Number.isFinite(v) ? v : d; };
+    const strategy = {
+      name: name, frenchText: frenchText,
+      longEntry: rule('Entrée achat'), longExit: rule('Sortie achat'), shortEntry: rule('Entrée vente'), shortExit: rule('Sortie vente'),
+      stopLossPips: num('InpStopLossPips', 0), takeProfitPips: num('InpTakeProfitPips', 0),
+    };
+    if (input('InpAllowLong') === 'false') { strategy.longEntry = ''; strategy.longExit = ''; }
+    if (input('InpAllowShort') === 'false') { strategy.shortEntry = ''; strategy.shortExit = ''; }
+    const config = { leverage: num('InpLeverage', 10), exposurePct: num('InpExposurePct', 100) };
+    const bt = /^\/\/ Backtest Forexia : ([A-Z]{3}\/[A-Z]{3})?,?\s*(.*)$/m.exec(code);
+    if (bt) {
+      if (bt[1]) config.pair = bt[1];
+      const parts = bt[2].split(', ');
+      const per = parts.find((x) => PERIOD_KEYS[x] || /^du \d{2}\/\d{2}\/\d{4} au \d{2}\/\d{2}\/\d{4}$/.test(x));
+      if (per && PERIOD_KEYS[per]) config.period = PERIOD_KEYS[per];
+      else if (per) {
+        const d = per.match(/\d{2}\/\d{2}\/\d{4}/g).map((x) => x.split('/').reverse().join('-'));
+        Object.assign(config, { period: 'custom', dateFrom: d[0], dateTo: d[1] });
+      }
+      const res = /résultat ([+-]?[\d.]+) %/.exec(bt[2]);
+      if (res) config.resultPct = Number(res[1]);
+    }
+    const tf = input('InpTimeframe');
+    config.timeframe = tf ? tf.replace('PERIOD_', '') : 'D1';
+    config.broker = {
+      sizing: SIZING_KEYS[input('InpSizing')] || 'backtest', lots: num('InpFixedLots', 0.01), risk: num('InpRiskPct', 1),
+      maxLots: num('InpMaxLots', 1), maxSpread: num('InpMaxSpreadPips', 5),
+    };
+    for (const k of ['longEntry', 'longExit', 'shortEntry', 'shortExit']) {
+      const err = F.rules.validate(strategy[k]);
+      if (err) throw new Error('Règle illisible dans l\'EA (' + k + ') : ' + err);
+    }
+    return { strategy: strategy, config: config };
+  }
+
+  F.mql5 = { generate, signalsFunction, CALC_LIB, TIMEFRAMES, parseEA };
 })(typeof window !== 'undefined' ? window : globalThis);

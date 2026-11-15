@@ -42,6 +42,12 @@
     const saved = storage.get();
     let html = '<optgroup label="Modèles">' + F.presets.list.map((p) => '<option value="preset:' + p.id + '">' + esc(p.name) + '</option>').join('') + '</optgroup>';
     if (saved.length) html += '<optgroup label="Mes stratégies">' + saved.map((s, i) => '<option value="saved:' + i + '">' + esc(s.name) + '</option>').join('') + '</optgroup>';
+    let last = null;
+    try { last = JSON.parse(localStorage.getItem('forexia.lastRun')); } catch (e) { /* ignoré */ }
+    if (last && last.strategy) {
+      html += '<optgroup label="Récupération"><option value="last">Dernière simulation : ' + esc(last.strategy.name) + ' (' +
+        new Date(last.at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) + ')</option></optgroup>';
+    }
     html += '<option value="custom">Stratégie vierge…</option><option value="mine" hidden>Ma stratégie (non enregistrée)</option>';
     $('preset').innerHTML = html;
     if (selected) $('preset').value = selected;
@@ -125,6 +131,14 @@
     const v = $('preset').value;
     $('deleteStrat').hidden = !v.startsWith('saved:');
     if (v === 'custom') { loadStrategy({ name: '' }); $('longEntry').focus(); return; }
+    if (v === 'last') {
+      try {
+        const last = JSON.parse(localStorage.getItem('forexia.lastRun'));
+        loadStrategy(last.strategy); applyConfig(last.config);
+        $('presetDesc').textContent = 'Dernière simulation récupérée. Pensez à « Enregistrer la stratégie ».';
+      } catch (e) { /* ignoré */ }
+      return;
+    }
     if (v.startsWith('preset:')) {
       const preset = F.presets.list.find((p) => 'preset:' + p.id === v), style = $('style').value;
       loadStrategy(style === 'none' ? Object.assign({ style: 'none' }, preset) : E.adaptToStyle(preset, style));
@@ -539,6 +553,9 @@
       lastRun = { key: JSON.stringify([strat.longEntry, strat.longExit, strat.shortEntry, strat.shortExit, strat.stopLossPips, strat.takeProfitPips, config]), stats: result.stats };
       render({ bars, strat, settings, result, loaded, periodKey, warnings, config });
       recordEvaluation({ bars, strat, settings, result, loaded, periodKey, config });
+      // Filet de sécurité : la dernière stratégie simulée est gardée, même non enregistrée.
+      try { localStorage.setItem('forexia.lastRun', JSON.stringify({ at: new Date().toISOString(), strategy: strat, config: config })); } catch (e) { /* ignoré */ }
+      refreshPresetSelect($('preset').value);
     } catch (err) {
       $('formError').textContent = err.message;
     } finally {
@@ -1058,6 +1075,61 @@
   $('bridgeCloseGo').addEventListener('click', () => { $('bridgeConfirm').hidden = true; bridgeDeploy(true); });
   $('bridgeCloseCancel').addEventListener('click', () => { $('bridgeConfirm').hidden = true; bridgeStep('ko', 'Annulé : MetaTrader 5 n\'a pas été fermé.'); });
 
+  // ---------- Import d'un EA Forexia ----------
+  function importEA(parsed, fileName) {
+    const { strategy, config } = parsed;
+    const s = Object.assign({ style: 'none' }, strategy);
+    if (!s.frenchText) s.frenchText = F.french.toFrench(s) || '';
+    s.plots = F.french.derivePlots(s);
+    loadStrategy(s);
+    const tfOk = [...$('brokerTf').options].some((o) => o.value === config.timeframe);
+    applyConfig({
+      pair: config.pair, leverage: config.leverage, exposurePct: config.exposurePct, period: config.period, dateFrom: config.dateFrom, dateTo: config.dateTo,
+      broker: Object.assign({ symbol: (config.pair || $('pair').value).replace('/', ''), tf: tfOk ? config.timeframe : 'D1', intrabar: true }, config.broker),
+    });
+    $('preset').value = 'mine';
+    $('deleteStrat').hidden = true;
+    $('presetDesc').textContent = 'Importée depuis « ' + fileName + ' »' + (config.resultPct != null ? ' (résultat au déploiement : ' + signed(config.resultPct, num2) + ' %)' : '') +
+      '. Pensez à « Enregistrer la stratégie ».';
+    $('importNotice').textContent = '« ' + s.name + ' » importée : vérifiez la source des données puis lancez le backtest.';
+    updateStyleHint();
+    $('stratName').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  function importFromText(text, fileName) {
+    $('importError').textContent = ''; $('importNotice').textContent = '';
+    try {
+      const parsed = F.mql5.parseEA(text);
+      if (!parsed) { $('importError').textContent = '« ' + fileName + ' » n\'est pas un EA généré par Forexia.'; return; }
+      importEA(parsed, fileName);
+    } catch (e) { $('importError').textContent = e.message; }
+  }
+  $('importFile').addEventListener('change', async () => {
+    const f = $('importFile').files[0];
+    if (f) importFromText(await f.text(), f.name);
+    $('importFile').value = '';
+  });
+  $('importBox').addEventListener('toggle', async () => {
+    if (!$('importBox').open || !bridgeToken) return;
+    try {
+      const st = await bridgeCall('GET', '/status');
+      bridgeTerms = st.terminals || [];
+      const r = await bridgeCall('POST', '/experts', { terminalId: (bridgeTerms[0] || {}).id });
+      if (!r.ok || !r.experts || !r.experts.length) return;
+      $('importList').innerHTML = r.experts.map((x) => '<option value="' + esc(x.fileName) + '">' + esc(x.fileName.replace(/^Forexia_|\.mq5$/g, '').replace(/_/g, ' ')) +
+        ' — ' + new Date(x.modified * 1000).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) + '</option>').join('');
+      $('importMt5').hidden = false;
+    } catch (e) { /* passerelle absente ou ancienne : import par fichier seulement */ }
+  });
+  $('importFromMt5').addEventListener('click', async () => {
+    const name = $('importList').value;
+    try {
+      const r = await bridgeCall('POST', '/experts', { terminalId: (bridgeTerms[0] || {}).id, fileName: name });
+      const item = (r.experts || []).find((x) => x.fileName === name);
+      if (!item || !item.code) throw new Error('EA introuvable dans MT5.');
+      importFromText(item.code, name);
+    } catch (e) { $('importError').textContent = e.message || 'Passerelle injoignable.'; }
+  });
+
   // ---------- Évaluation : historique des simulations ----------
   const EVAL_KEY = 'forexia.evaluations';
   const evalStore = {
@@ -1083,6 +1155,7 @@
       returnPct: s.returnPct, avgGainPct: avg.pct, trades: s.trades, winRate: s.winRate, maxDrawdownPct: s.maxDrawdownPct,
       profitFactor: Number.isFinite(s.profitFactor) ? s.profitFactor : null,
       rules: [c.strat.longEntry, c.strat.longExit, c.strat.shortEntry, c.strat.shortExit, c.strat.stopLossPips, c.strat.takeProfitPips].join('|'),
+      strategy: c.strat, config: c.config,
     };
     const list = evalList();
     const last = list[list.length - 1];
@@ -1105,14 +1178,15 @@
       '<td>1:' + e.leverage + '</td><td>' + money.format(e.capital) + '</td>' +
       '<td>' + p(e.returnPct) + '</td><td class="avg-col">' + p(e.avgGainPct) + '</td>' +
       '<td>' + e.trades + '</td><td>' + num1.format(e.winRate) + ' %</td><td>−' + num1.format(e.maxDrawdownPct) + ' %</td>' +
+      '<td>' + (e.strategy ? '<button type="button" class="reload" data-reload="' + i + '" title="Remettre cette stratégie et ses réglages dans le formulaire">Recharger</button>' : '') + '</td>' +
       '<td><button type="button" class="del" data-del="' + i + '" title="Retirer cette ligne" aria-label="Retirer la simulation ' + (i + 1) + '">✕</button></td></tr>').join('');
     const foot = '<tr><td colspan="8" class="l">Moyenne sur ' + list.length + ' simulation' + (list.length > 1 ? 's' : '') + '</td>' +
       '<td>' + p(mean(list.map((e) => e.returnPct))) + '</td><td class="avg-col" title="Moyenne des gains moyens">' + p(mean(list.map((e) => e.avgGainPct))) + '</td>' +
       '<td>' + num1.format(mean(list.map((e) => e.trades))) + '</td><td>' + num1.format(mean(list.map((e) => e.winRate))) + ' %</td>' +
-      '<td>−' + num1.format(mean(list.map((e) => e.maxDrawdownPct))) + ' %</td><td></td></tr>';
+      '<td>−' + num1.format(mean(list.map((e) => e.maxDrawdownPct))) + ' %</td><td></td><td></td></tr>';
     $('evalBody').innerHTML = '<div class="table-wrap"><table class="eval"><thead><tr><th>#</th><th class="l">Date</th><th class="l">Stratégie</th><th class="l">Paire</th>' +
       '<th class="l">Période testée</th><th class="l">Données</th><th>Levier</th><th>Capital</th><th>Résultat</th><th class="avg-col">Gain moyen</th>' +
-      '<th>Trades</th><th>Gagnants</th><th>Drawdown</th><th></th></tr></thead><tbody>' + rows + '</tbody><tfoot>' + foot + '</tfoot></table></div>';
+      '<th>Trades</th><th>Gagnants</th><th>Drawdown</th><th></th><th></th></tr></thead><tbody>' + rows + '</tbody><tfoot>' + foot + '</tfoot></table></div>';
   }
   function openEvaluation() {
     $('evalConfirm').hidden = true;
@@ -1125,6 +1199,15 @@
   $('evalBtn').addEventListener('click', openEvaluation);
   $('evalModal').addEventListener('click', (e) => {
     if (e.target.closest('[data-close]')) return closeEvaluation();
+    const re = e.target.closest('[data-reload]');
+    if (re) {
+      const entry = evalList()[+re.dataset.reload];
+      loadStrategy(entry.strategy); applyConfig(entry.config);
+      $('preset').value = 'mine'; $('deleteStrat').hidden = true;
+      $('presetDesc').textContent = 'Rechargée depuis l\'évaluation (simulation du ' + new Date(entry.at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) + '). Pensez à « Enregistrer la stratégie ».';
+      updateStyleHint();
+      return closeEvaluation();
+    }
     const del = e.target.closest('[data-del]');
     if (del) { const list = evalList(); list.splice(+del.dataset.del, 1); evalSave(list); renderEvaluation(); }
   });

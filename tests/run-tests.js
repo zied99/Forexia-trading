@@ -366,6 +366,21 @@ test('EA généré pour chaque modèle : paramètres repris de la stratégie', (
     eq(r.code.includes('InpAllowShort = ' + (p.shortEntry ? 'true' : 'false')), true);
   }
 });
+test('EA relu : stratégie, réglages et période retrouvés à l\'identique', () => {
+  for (const p of P.list.concat([E.adaptToStyle(P.list[5], 'scalping'), FR.randomStrategy()])) {
+    const s = Object.assign({}, p, { name: 'Zied3-EURUSD "amélioré" (améliorée)' });
+    const opts = { pair: 'EUR/USD', leverage: 100, exposurePct: 80, periodLabel: 'du 17/11/2025 au 13/11/2026', sizing: 'risk', riskPct: 2, maxLots: 3,
+      maxSpreadPips: 4, timeframe: 'PERIOD_H1', stats: { returnPct: 65.61, trades: 17, maxDrawdownPct: 33.82 } };
+    const code = '\ufeff' + MQ.generate(s, opts).code.replace(/\n/g, '\r\n'); // fichier tel que téléchargé
+    const r = MQ.parseEA(code);
+    for (const k of ['name', 'frenchText', 'longEntry', 'longExit', 'shortEntry', 'shortExit', 'stopLossPips', 'takeProfitPips']) eq(r.strategy[k] || '', s[k] || '', p.id + '.' + k);
+    eq(r.config.pair, 'EUR/USD'); eq(r.config.leverage, 100); eq(r.config.exposurePct, 80); eq(r.config.period, 'custom');
+    eq(r.config.dateFrom, '2025-11-17'); eq(r.config.dateTo, '2026-11-13'); eq(r.config.timeframe, 'H1'); eq(r.config.resultPct, 65.61);
+    eq(r.config.broker.sizing, 'risk'); eq(r.config.broker.risk, 2); eq(r.config.broker.maxLots, 3); eq(r.config.broker.maxSpread, 4);
+  }
+  eq(MQ.parseEA(MQ.generate(P.list[0], { pair: 'GBP/USD', periodLabel: '1 an' }).code).config.period, '1y');
+  eq(MQ.parseEA('// un autre EA\nvoid OnTick() {}'), null);
+});
 test('EA : stratégie sans entrée ou règle invalide refusée', () => {
   let n = 0;
   for (const s of [{ longExit: 'RSI(14) > 70' }, { longEntry: 'RSI(14) >' }]) { try { MQ.generate(s, {}); } catch (e) { n++; } }

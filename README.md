@@ -49,6 +49,11 @@ qui compile le calcul des signaux en C++ et le compare au moteur JavaScript). R�
 positions (comme le backtest, lots fixes ou % de risque), plafond de lots, spread maximum. La fenêtre détaille
 l'installation : copie dans `MQL5\Experts`, compilation dans MetaEditor, backtest dans le testeur de MT5, puis compte démo.
 
+**Retrouver une stratégie** : « Importer un EA Forexia (.mq5) » relit un EA généré par Forexia (fichier téléchargé,
+ou EA installé dans MT5 via la passerelle) et remet règles, texte, stop-loss, take-profit, paire, levier, période et
+taille des positions dans le formulaire. La dernière simulation est aussi gardée automatiquement (Modèle →
+*Récupération*), et chaque ligne du tableau d'évaluation peut être rechargée.
+
 **Évaluation** (bouton en haut de page) : tableau de toutes les simulations lancées (stratégie, paire, période,
 données, levier, capital, résultat, gain moyen, trades, % gagnants, drawdown), avec une ligne de moyenne
 (dont la **moyenne des gains moyens**) ; lignes supprimables, export CSV. Le **gain moyen** est l'écart entre le

@@ -27,7 +27,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
-VERSION = "1.2"
+VERSION = "1.3"
 DEFAULT_PORT = 8787
 PAGE_ORIGIN = "https://zied99.github.io"
 FILE_RE = re.compile(r"^Forexia_[A-Za-z0-9_]{1,60}\.mq5$")
@@ -369,6 +369,23 @@ def broker_bars(args, term, body):
         mt5.shutdown()
 
 
+def list_experts(args, term, body):
+    """EA Forexia présents dans MQL5\\Experts\\Forexia (le plus récent d'abord), avec leur code si demandé."""
+    folder = os.path.join(term["dataDir"], "MQL5", "Experts", "Forexia")
+    want = str(body.get("fileName", ""))
+    items = []
+    for path in glob.glob(os.path.join(folder, "Forexia_*.mq5")):
+        name = os.path.basename(path)
+        if not FILE_RE.match(name):
+            continue
+        item = {"fileName": name, "modified": int(os.path.getmtime(path)), "size": os.path.getsize(path)}
+        if want == name:
+            item["code"] = read_text(path)
+        items.append(item)
+    items.sort(key=lambda x: -x["modified"])
+    return {"ok": True, "experts": items[:200]}
+
+
 def attach(args, term, body):
     name = str(body.get("fileName", ""))
     _check_ex5(term, name)
@@ -468,7 +485,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
-        actions = {"/deploy": deploy, "/test": run_test, "/attach": attach, "/bars": broker_bars}
+        actions = {"/deploy": deploy, "/test": run_test, "/attach": attach, "/bars": broker_bars, "/experts": list_experts}
         if path not in actions:
             return self._send(404, {"ok": False, "message": "Inconnu."})
         if not self._authorized():

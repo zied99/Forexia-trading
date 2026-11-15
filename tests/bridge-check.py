@@ -182,6 +182,13 @@ def main():
     st, js, _ = call("POST", "/bars", {"terminalId": tid, "symbol": "XAUUSD", "timeframe": "D1", "from": "2023-01-01", "to": "2024-12-31"})
     check("symbole absent : symboles proches proposés", js.get("ok") is False and "GBPUSD.m" in js.get("message", ""), js)
 
+    st, js, _ = call("POST", "/experts", {"terminalId": tid})
+    names = [x["fileName"] for x in js.get("experts", [])]
+    check("liste des EA installés", js.get("ok") and "Forexia_Test.mq5" in names and all("code" not in x for x in js["experts"]), js)
+    st, js, _ = call("POST", "/experts", {"terminalId": tid, "fileName": "Forexia_Test.mq5"})
+    one = [x for x in js.get("experts", []) if x["fileName"] == "Forexia_Test.mq5"]
+    check("lecture du code d'un EA installé", one and "void OnTick()" in one[0].get("code", ""), js)
+
     proc.terminate()
     print("\n%d échec(s)" % failed)
     sys.exit(1 if failed else 0)
