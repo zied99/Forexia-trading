@@ -180,7 +180,7 @@
     if ($('preset').value.startsWith('preset:')) applyPresetSelection();
     updateStyleHint();
   });
-  $('adaptStyle').addEventListener('click', () => {
+  $('adaptStyle').addEventListener('click', () => undoable('Adaptation au style', () => {
     if (frenchDirty && $('frenchText').value.trim()) translateFrench();
     const style = $('style').value, before = currentStrategy();
     const s = E.adaptToStyle(before, style, { fromStyle: appliedStyle });
@@ -193,7 +193,7 @@
       (s.frenchText ? '' : ' Le texte français ne peut pas décrire ces réglages : voir « Règles techniques ».');
     if (!s.frenchText) $('rulesDetails').open = true;
     updateStyleHint();
-  });
+  }));
   $('preset').addEventListener('change', applyPresetSelection);
 
   // Enregistre la stratégie du formulaire (ou celle du dernier backtest) dans le navigateur.
@@ -223,18 +223,18 @@
     }
     return s;
   }
-  $('saveStrat').addEventListener('click', () => { $('formError').textContent = ''; saveStrategy(); });
-  $('deleteStrat').addEventListener('click', () => {
+  $('saveStrat').addEventListener('click', () => undoable('Enregistrement de « ' + ($('stratName').value.trim() || 'Ma stratégie') + ' »', () => { $('formError').textContent = ''; saveStrategy(); }));
+  $('deleteStrat').addEventListener('click', () => undoable('Suppression de la stratégie', () => {
     const v = $('preset').value;
     if (!v.startsWith('saved:')) return;
     const list = storage.get();
     const [removed] = list.splice(+v.slice(6), 1);
     storage.set(list);
-    if (removed) { dbPush('strategies/delete', { name: removed.name }); cloudPush(() => C.deleteStrategy(removed.name)); logEvent('strategy.deleted', 'Stratégie supprimée : ' + removed.name, { strategy: removed }); }
+    if (removed) { dbPush('strategies/delete', { name: removed.name }); cloudPush(() => C.deleteStrategy(removed.name)); logEvent('strategy.deleted', 'Stratégie supprimée : ' + removed.name, { strategy: removed }); toast('« ' + removed.name + ' » supprimée.', true); }
     refreshPresetSelect('preset:' + F.presets.list[0].id);
     applyPresetSelection();
     $('presetDesc').textContent = '« ' + (removed && removed.name) + ' » supprimée.';
-  });
+  }));
 
   // ---------- Validation en direct ----------
   function validateField(f) {
@@ -284,10 +284,10 @@
     return r;
   }
   $('frenchText').addEventListener('input', () => { frenchDirty = true; markCustom(); });
-  $('translateBtn').addEventListener('click', () => { $('formError').textContent = ''; translateFrench(); });
+  $('translateBtn').addEventListener('click', () => undoable('Traduction en règles', () => { $('formError').textContent = ''; translateFrench(); }));
 
   // ---------- Stratégie aléatoire ----------
-  $('randomBtn').addEventListener('click', () => {
+  $('randomBtn').addEventListener('click', () => undoable('Stratégie aléatoire', () => {
     const style = $('style').value;
     let s = F.french.randomStrategy();
     if (style !== 'none') s = E.adaptToStyle(s, style, { rnd: Math.random });
@@ -298,7 +298,7 @@
     $('presetDesc').textContent = s.description;
     logEvent('strategy.random', 'Stratégie aléatoire : ' + s.name, { strategy: s });
     $('form').requestSubmit();
-  });
+  }));
 
   // ---------- Aide : éléments insérables ----------
   const CHIPS = [
@@ -576,6 +576,7 @@
       lastRunCtx = { bars, strat, settings, config, timeframe: loaded.timeframe || 'D1', lastTrades: result.trades, diag: result.diag };
       lastRun = { key: JSON.stringify([strat.longEntry, strat.longExit, strat.shortEntry, strat.shortExit, strat.stopLossPips, strat.takeProfitPips, config]), stats: result.stats };
       render({ bars, strat, settings, result, loaded, periodKey, warnings, config });
+      syncFormState();
       recordEvaluation({ bars, strat, settings, result, loaded, periodKey, config });
       // Filet de sécurité : la dernière stratégie simulée est gardée, même non enregistrée.
       const lastRunRec = { at: new Date().toISOString(), strategy: strat, config: config };
@@ -785,7 +786,8 @@
     $('enhanceBtn').addEventListener('click', openEnhancer);
     $('deployBtn').addEventListener('click', openDeploy);
     $('saveFromResults').addEventListener('click', () => {
-      const saved = saveStrategy(strat, config, s);
+      let saved = null;
+      undoable('Enregistrement de « ' + strat.name + ' »', () => { saved = saveStrategy(strat, config, s); });
       if (saved) { $('saveFromResults').textContent = 'Enregistrée ✓'; $('saveFromResults').disabled = true; }
     });
     const exp = $('exportCsv');
@@ -924,7 +926,7 @@
   function closeEnhancer() { $('enhanceModal').hidden = true; document.body.style.overflow = ''; }
   $('enhanceModal').addEventListener('click', (e) => { if (e.target.closest('[data-close]')) closeEnhancer(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('enhanceModal').hidden) closeEnhancer(); });
-  $('enhanceApply').addEventListener('click', () => {
+  $('enhanceApply').addEventListener('click', () => undoable('Améliorations appliquées', () => {
     const sel = selectedSuggestions();
     if (!sel.length) return;
     const { strat, settings } = lastRunCtx;
@@ -944,7 +946,7 @@
     updateStyleHint();
     closeEnhancer();
     $('form').requestSubmit();
-  });
+  }));
 
   // ---------- Fenêtre « Déployer sur MetaTrader 5 » ----------
   let deployed = null; // { code, fileName }
@@ -1450,7 +1452,8 @@
   });
 
   // ---------- Import d'un EA Forexia ----------
-  function importEA(parsed, fileName) {
+  function importEA(parsed, fileName) { undoable('Import de « ' + fileName + ' »', () => importEAInner(parsed, fileName)); }
+  function importEAInner(parsed, fileName) {
     const { strategy, config } = parsed;
     const s = Object.assign({ style: 'none' }, strategy);
     if (!s.frenchText) s.frenchText = F.french.toFrench(s) || '';
@@ -1609,6 +1612,7 @@
     if (e.target.closest('[data-close]')) return closeEvaluation();
     const re = e.target.closest('[data-reload]');
     if (re) {
+      pushUndo('Rechargement depuis l\'évaluation');
       const entry = evalList()[+re.dataset.reload];
       loadStrategy(entry.strategy); applyConfig(entry.config);
       $('preset').value = 'mine'; $('deleteStrat').hidden = true;
@@ -1618,6 +1622,8 @@
     }
     const del = e.target.closest('[data-del]');
     if (del) {
+      pushUndo('Suppression d\'une simulation');
+      toast('Simulation retirée du tableau.', true);
       const list = evalList();
       const [gone] = list.splice(+del.dataset.del, 1);
       evalSave(list);
@@ -1629,6 +1635,8 @@
   $('evalClear').addEventListener('click', () => { $('evalConfirmN').textContent = evalList().length; $('evalConfirm').hidden = false; });
   $('evalClearCancel').addEventListener('click', () => { $('evalConfirm').hidden = true; });
   $('evalClearGo').addEventListener('click', () => {
+    pushUndo('Effacement du tableau d\'évaluation');
+    toast('Tableau d\'évaluation effacé.', true);
     const n = evalList().length;
     evalSave([]);
     dbPush('simulations/clear', {});
@@ -1662,6 +1670,112 @@
   // Au chargement : connexion silencieuse à la base si la passerelle tourne déjà.
   if (bridgeToken) fetch(BRIDGE_URL + '/ping').then(() => dbConnect()).catch(() => {});
 
+  // ---------- Annuler / rétablir (Ctrl+Z, Ctrl+Y) ----------
+  // Chaque action enregistre l'état d'avant : formulaire (stratégie + réglages), stratégies enregistrées,
+  // tableau d'évaluation. Annuler remet cet état et reporte les différences dans la base du PC et le compte en ligne.
+  const undoStack = [], redoStack = [];
+  let formState = null, restoring = false;
+  const clone = (x) => JSON.parse(JSON.stringify(x));
+  function captureForm() {
+    return { strat: currentStrategy(), config: currentConfig(), preset: $('preset').value, desc: $('presetDesc').textContent, style: $('style').value };
+  }
+  function capture(label, form) { return { label: label, form: clone(form || captureForm()), strategies: clone(storage.get()), evaluations: clone(evalList()) }; }
+  function syncFormState() { formState = captureForm(); }
+  function pushUndo(label, form) {
+    undoStack.push(capture(label, form));
+    if (undoStack.length > 60) undoStack.shift();
+    redoStack.length = 0;
+  }
+  // Action programmée : état d'avant enregistré, action exécutée, nouvel état retenu.
+  function undoable(label, fn) {
+    if (restoring) return fn();
+    pushUndo(label);
+    const r = fn();
+    if (r && typeof r.then === 'function') return r.finally(syncFormState);
+    syncFormState();
+    return r;
+  }
+  function restoreData(snap) {
+    // Stratégies
+    const cur = storage.get(), tgt = snap.strategies;
+    for (const t of tgt) {
+      const c = cur.find((x) => x.name === t.name);
+      if (!c || JSON.stringify(c) !== JSON.stringify(t)) { dbPush('strategies/put', { name: t.name, data: t, updatedAt: t.savedAt }); cloudPush(() => C.putStrategy(t)); }
+    }
+    for (const c of cur) if (!tgt.some((t) => t.name === c.name)) { dbPush('strategies/delete', { name: c.name }); cloudPush(() => C.deleteStrategy(c.name)); }
+    storage.set(tgt);
+    // Évaluation
+    const ce = evalList(), te = snap.evaluations;
+    const back = te.filter((t) => t.key && !ce.some((c) => c.key === t.key));
+    if (back.length) { dbPush('simulations/put', { items: back }); cloudPush(() => C.putSimulations(back)); }
+    for (const c of ce) if (c.key && !te.some((t) => t.key === c.key)) { dbPush('simulations/delete', { key: c.key }); cloudPush(() => C.deleteSimulation(c.key)); }
+    evalSave(te);
+    if (!$('evalModal').hidden) renderEvaluation();
+  }
+  function restore(snap) {
+    restoring = true;
+    try {
+      restoreData(snap);
+      const f = snap.form;
+      refreshPresetSelect('mine');
+      loadStrategy(f.strat);
+      applyConfig(f.config);
+      $('style').value = f.style;
+      appliedStyle = f.strat.style || 'none';
+      $('preset').value = [...$('preset').options].some((o) => o.value === f.preset) ? f.preset : 'mine';
+      $('deleteStrat').hidden = !$('preset').value.startsWith('saved:');
+      $('presetDesc').textContent = f.desc;
+      updateStyleHint();
+      updateWithdrawUI();
+      syncFormState();
+    } finally { restoring = false; }
+  }
+  function undo() {
+    const snap = undoStack.pop();
+    if (!snap) return toast('Rien à annuler.');
+    redoStack.push(capture(snap.label));
+    restore(snap);
+    toast('Annulé : ' + snap.label + ' — Ctrl+Y pour rétablir.');
+  }
+  function redo() {
+    const snap = redoStack.pop();
+    if (!snap) return toast('Rien à rétablir.');
+    undoStack.push(capture(snap.label));
+    restore(snap);
+    toast('Rétabli : ' + snap.label + '.');
+  }
+  // Changements faits à la main dans le formulaire (listes, cases, champs) : l'état d'avant est celui retenu en dernier.
+  function fieldLabel(el) {
+    const lab = el.closest('label');
+    const txt = lab ? (lab.querySelector('span b, span') ? lab.querySelector('span b, span').textContent : lab.childNodes[0].textContent) : el.name || el.id;
+    return String(txt).replace(/\s+/g, ' ').trim().slice(0, 50);
+  }
+  $('form').addEventListener('change', (e) => {
+    if (restoring || e.target.type === 'file' || !formState) return;
+    pushUndo('Modification « ' + fieldLabel(e.target) + ' »', formState);
+    setTimeout(syncFormState, 0); // après les réactions à ce changement (chargement de modèle…)
+  });
+  document.addEventListener('keydown', (e) => {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+    const k = e.key.toLowerCase();
+    if (k !== 'z' && k !== 'y') return;
+    const t = document.activeElement;
+    // Dans une zone de saisie, Ctrl+Z garde son rôle habituel (annuler la frappe).
+    if (t && (t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && /^(text|search|number|password|email)$/.test(t.type)))) return;
+    if (!$('authGate').hidden) return;
+    e.preventDefault();
+    if (k === 'y' || e.shiftKey) redo(); else undo();
+  });
+  let toastTimer = null;
+  function toast(msg, withUndo) {
+    $('toastMsg').textContent = msg;
+    $('toastUndo').hidden = !withUndo;
+    $('toast').hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { $('toast').hidden = true; }, withUndo ? 7000 : 3500);
+  }
+  $('toastUndo').addEventListener('click', () => { $('toast').hidden = true; undo(); });
+
   // ---------- Thème ----------
   $('themeToggle').addEventListener('click', () => {
     const rootEl = document.documentElement;
@@ -1674,4 +1788,5 @@
   refreshPresetSelect('preset:' + F.presets.list[0].id);
   applyPresetSelection();
   updateStyleHint();
+  syncFormState();
 })();

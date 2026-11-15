@@ -82,6 +82,10 @@ capital, rapporté à la durée réelle de la période), le montant retiré en m
 et le pire mois, un graphique en barres mois par mois (étoile jaune les mois avec retrait) et le détail par mois. Le gain
 d'un mois est la variation de « compte + retraits » sur ce mois. L'évaluation a une colonne « Par mois ».
 
+**Annuler / rétablir** : Ctrl+Z annule la dernière action (changement de réglage, modèle chargé, stratégie aléatoire,
+améliorations, import, enregistrement ou suppression de stratégie, suppression de simulations), Ctrl+Y ou Ctrl+Maj+Z la
+rétablit. Dans une zone de texte, Ctrl+Z annule la frappe. Les annulations sont reportées dans la base du PC et le compte.
+
 **Évaluation** (bouton en haut de page) : tableau de toutes les simulations lancées (stratégie, paire, période,
 données, levier, capital, résultat, gain moyen, trades, % gagnants, drawdown), **filtrable** par stratégie, recherche,
 paire, source de données et résultat, avec une ligne de moyenne calculée sur les lignes affichées
