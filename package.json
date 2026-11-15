@@ -1,0 +1,10 @@
+{
+  "name": "forexia-trading",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Backtesting de stratégies Forex (RSI, MACD, stochastique, moyennes mobiles) dans le navigateur",
+  "scripts": {
+    "test": "node tests/run-tests.js",
+    "start": "npx --yes http-server -c-1 -p 8080 ."
+  }
+}
