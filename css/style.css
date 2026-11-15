@@ -3,7 +3,7 @@
   --accent: #2563eb; --accent-ink: #ffffff; --accent-soft: #dbeafe;
   --up: #059669; --up-soft: #d1fae5; --down: #dc2626; --down-soft: #fee2e2; --warn: #b45309; --warn-soft: #fef3c7;
   --s1: #2563eb; --s2: #d97706; --s3: #7c3aed; --s4: #0891b2; --s5: #db2777;
-  --price: #334155; --grid: #eef2f7;
+  --price: #334155; --grid: #eef2f7; --star: #facc15; --star-edge: #a16207;
   --radius: 12px; --shadow: 0 1px 2px rgba(15, 23, 42, .05), 0 4px 16px rgba(15, 23, 42, .04);
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color-scheme: light;
@@ -13,14 +13,14 @@
     --bg: #0b1120; --panel: #111827; --panel-2: #0f172a; --text: #e5e7eb; --muted: #94a3b8; --border: #1f2a3c;
     --accent: #3b82f6; --accent-soft: #1e3a8a55; --up: #34d399; --up-soft: #064e3b66; --down: #f87171; --down-soft: #7f1d1d55;
     --warn: #fbbf24; --warn-soft: #78350f55; --s1: #60a5fa; --s2: #fbbf24; --s3: #a78bfa; --s4: #22d3ee; --s5: #f472b6;
-    --price: #cbd5e1; --grid: #1a2335; color-scheme: dark;
+    --price: #cbd5e1; --grid: #1a2335; --star: #fde047; --star-edge: #713f12; color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --bg: #0b1120; --panel: #111827; --panel-2: #0f172a; --text: #e5e7eb; --muted: #94a3b8; --border: #1f2a3c;
   --accent: #3b82f6; --accent-soft: #1e3a8a55; --up: #34d399; --up-soft: #064e3b66; --down: #f87171; --down-soft: #7f1d1d55;
   --warn: #fbbf24; --warn-soft: #78350f55; --s1: #60a5fa; --s2: #fbbf24; --s3: #a78bfa; --s4: #22d3ee; --s5: #f472b6;
-  --price: #cbd5e1; --grid: #1a2335; color-scheme: dark;
+  --price: #cbd5e1; --grid: #1a2335; --star: #fde047; --star-edge: #713f12; color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -351,3 +351,6 @@ button.link { background: none; border: 0; padding: 0; color: var(--accent); fon
 @media (max-width: 700px) { .user-chip #userName, .user-chip .sync { display: none; } .brand small { display: none; } }
 
 #authError.info { color: var(--muted); }
+
+.chart .marker.star { stroke: var(--star-edge); stroke-width: 1; stroke-linejoin: round; }
+.legend .star-ico { width: 12px; height: 12px; background: var(--star) !important; clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%); border-radius: 0; }

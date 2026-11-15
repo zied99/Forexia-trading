@@ -98,6 +98,19 @@
       for (const mk of p.markers || []) {
         const cx = x(mk.i), cy = y(mk.value);
         let shape;
+        if (mk.shape === 'star') {
+          // étoile à 5 branches centrée sur le point
+          let d = '';
+          for (let k = 0; k < 10; k++) {
+            const r = k % 2 ? 3.6 : 8.5, a = -Math.PI / 2 + (k * Math.PI) / 5;
+            d += (k ? 'L' : 'M') + (cx + r * Math.cos(a)).toFixed(1) + ' ' + (cy + r * Math.sin(a)).toFixed(1);
+          }
+          shape = el('path', { d: d + 'Z' }, g);
+          shape.setAttribute('class', 'marker star');
+          shape.setAttribute('style', 'fill:' + mk.color);
+          if (mk.title) { const ti = el('title', {}, shape); ti.textContent = mk.title; }
+          continue;
+        }
         if (mk.shape === 'up') shape = el('path', { d: 'M' + cx + ' ' + (cy + 3) + 'l-5 9h10z' }, g);
         else if (mk.shape === 'down') shape = el('path', { d: 'M' + cx + ' ' + (cy - 3) + 'l-5 -9h10z' }, g);
         else shape = el('circle', { cx: cx, cy: cy, r: 3.5 }, g);

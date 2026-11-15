@@ -639,7 +639,7 @@
     const avg = averageGain(result.wealth || result.equity, settings.capital);
     html += '<div class="panel card"><div class="card-head"><h3>Évolution du capital</h3>' +
       '<div class="legend"><span><i style="background:var(--s1)"></i>' + (hasW ? 'Compte de trading' : 'Capital') + '</span>' +
-      (hasW ? '<span><i style="background:var(--up)"></i>Compte + retraits</span><span><i class="dot" style="background:var(--up)"></i>Retrait</span>' : '') + '<span><i style="background:var(--s2)"></i>Moyenne : ' +
+      (hasW ? '<span><i style="background:var(--up)"></i>Compte + retraits</span><span><i class="star-ico"></i>Retrait</span>' : '') + '<span><i style="background:var(--s2)"></i>Moyenne : ' +
       money.format(avg.mean) + ' (<span class="' + cls(avg.pct) + '">' + signed(avg.pct, num1) + ' %</span>)</span>' +
       '<span><i style="background:var(--muted)"></i>Capital initial</span></div></div><div id="equityChart"></div></div>';
 
@@ -660,7 +660,11 @@
       row('Meilleur trade', signed(s.bestTrade, money), cls(s.bestTrade)) +
       row('Pire trade', signed(s.worstTrade, money), cls(s.worstTrade)) +
       row('Frais de spread payés', money.format(s.totalCosts)) +
-      (settings.withdrawPct ? row('Retraits fictifs (seuil +' + settings.withdrawPct + ' %)', s.withdrawals + ' · ' + money.format(s.totalWithdrawn), s.totalWithdrawn > 0 ? 'pos' : '') : '') +
+      (settings.withdrawPct
+        ? row('Total retiré', money.format(s.totalWithdrawn || 0), s.totalWithdrawn > 0 ? 'pos' : '') +
+          row('Nombre de retraits (seuil +' + settings.withdrawPct + ' %)', String(s.withdrawals || 0)) +
+          row('Solde final du compte de trading', money.format(s.finalAccount))
+        : '') +
       '</dl></div></div>';
 
     html += '<div class="panel card"><div class="card-head"><h3>Historique des trades (' + result.trades.length + ')</h3>' +
@@ -685,7 +689,8 @@
         height: 220, format: (v, full) => (full ? money.format(v) : compact(v)),
         series: [{ name: hasW ? 'Compte' : 'Capital', values: result.equity, color: 'var(--s1)', width: 2, fill: true }]
           .concat(hasW ? [{ name: 'Compte + retraits', values: result.wealth, color: 'var(--up)', width: 1.8, dash: '5 3' }] : []),
-        markers: (result.withdrawals || []).map((w) => ({ i: w.index - result.startIndex, value: w.accountAfter, shape: 'dot', color: 'var(--up)',
+        // étoile jaune au sommet de la courbe, au moment du retrait
+        markers: (result.withdrawals || []).map((w) => ({ i: w.index - result.startIndex, value: w.accountAfter + w.amount, shape: 'star', color: 'var(--star)',
           title: 'Retrait du ' + frDate(w.date) + ' : ' + money.format(w.amount) + ' (total ' + money.format(w.total) + ')' })),
         refLines: [{ value: settings.capital, color: 'var(--muted)' },
           { value: avg.mean, color: 'var(--s2)', strong: true, label: 'Moyenne ' + signed(avg.pct, num1) + ' %' }],

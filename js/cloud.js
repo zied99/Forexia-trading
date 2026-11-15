@@ -47,7 +47,10 @@
     if (code === 'weak_password' || /password should be at least/i.test(msg)) return 'Mot de passe trop court (6 caractères minimum).';
     if (code === 'email_not_confirmed' || /not confirmed/i.test(msg)) return 'Compte non confirmé : dans Supabase, désactivez « Confirm email » (Authentication → Sign In / Providers).';
     if (code === 'signup_disabled' || /signups not allowed/i.test(msg)) return 'La création de comptes est désactivée dans Supabase.';
-    if (status === 429) return 'Trop de tentatives : patientez un instant.';
+    if (code === 'over_email_send_rate_limit' || /email rate limit/i.test(msg) || code === 'email_address_not_authorized' || /not authorized/i.test(msg)) {
+      return 'Supabase essaie d\'envoyer un e-mail de confirmation et le refuse. Dans Supabase : Authentication → Sign In / Providers → Email, désactivez « Confirm email », enregistrez, puis réessayez.';
+    }
+    if (status === 429) return 'Supabase limite les tentatives (' + (code || 'trop de requêtes') + '). Si « Confirm email » est encore activé dans Supabase, désactivez-le (Authentication → Sign In / Providers → Email), puis réessayez dans une minute.';
     return msg || 'Erreur de connexion (' + status + ').';
   }
 
