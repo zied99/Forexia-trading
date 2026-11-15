@@ -107,6 +107,33 @@ CLOSE < BB_LOWER(20, 2) OR RSI(14) < 25
 - Les données BCE n'ont qu'un cours par jour : ouverture = clôture de la veille, pas de mèches.
   Pour un test plus fin des stops, importez un CSV OHLC.
 
+## Réalisme : se rapprocher de MetaTrader 5
+
+Les cours BCE n'ont qu'**un prix par jour** (14 h 15), sans plus haut ni plus bas. Sans correction, un stop-loss
+n'est touché que si l'écart d'un jour à l'autre le dépasse : les stops serrés semblent « gratuits » et les
+résultats sont beaucoup trop optimistes.
+
+- **Mèches estimées** (activé par défaut avec les cours BCE) : chaque bougie reçoit une amplitude égale à
+  2 fois la variation moyenne des 20 dernières clôtures (valeur théorique d'une marche aléatoire, mesurée à
+  1,9 à 2,0 sur de vraies bougies EUR/USD H1 et D1).
+- Mesure sur 5 000 vraies bougies EUR/USD H1 et 200 stratégies avec stop-loss (`tests/realism-check.js`) :
+
+  | Données | Écart de rendement | Écart du nombre de trades | Bon sens (gain/perte) |
+  |---|---|---|---|
+  | Un prix par bougie (BCE brut) | 87 pts | 19 % | 54 % |
+  | Avec mèches estimées | 14 pts | 4 % | 83 % |
+
+- **Le plus fiable : importer les bougies de votre courtier** (MT5 : *Affichage → Symboles → Barres →
+  Exporter des barres*). Forexia lit directement ce format, reprend le spread médian et détecte l'unité de
+  temps, qui est aussi reprise par l'EA.
+- Spread par défaut adapté à chaque paire ; avertissement au-delà du levier 1:30 (plafond européen).
+- « Améliorer » revérifie chaque suggestion sur la **période précédente** de même durée, pour écarter les
+  améliorations dues au hasard.
+- Vérifier le réalisme sur vos propres données : `node tests/realism-check.js export_mt5.csv GBP/USD`.
+
+Restent des écarts inévitables : heure de clôture (14 h 15 BCE contre minuit chez le courtier), swap,
+glissement à l'exécution.
+
 ## Structure
 
 ```
@@ -124,6 +151,7 @@ js/chart.js         graphiques SVG
 js/app.js           contrôleur de l'interface
 tests/run-tests.js  tests du moteur : npm test
 tests/mql5-check.js signaux de l'EA (compilés en C++) = signaux du backtest
+tests/realism-check.js écart entre Forexia et de vraies bougies (export MT5…)
 ```
 
 > Outil éducatif : les performances passées ne préjugent pas des performances futures.

@@ -254,6 +254,18 @@
       detail: 'Sécurise les gains à un objectif fixe.', apply: S((s) => Object.assign({}, s, { takeProfitPips: v })),
     })).concat(curTp ? [{ id: 'tp-0', title: 'Retirer le take-profit (' + curTp + ' pips)', detail: 'Laisse courir les trades gagnants.', apply: S((s) => Object.assign({}, s, { takeProfitPips: 0 })) }] : []));
 
+    // Contrôle hors échantillon : la période de même durée juste avant la période testée.
+    const st0 = settings.startIndex, len = bars.length - st0, vStart = st0 - len;
+    const vBars = vStart >= 250 ? bars.slice(0, st0) : null;
+    const vSet = vBars ? Object.assign({}, settings, { startIndex: vStart }) : null;
+    const vBase = vBars ? run(vBars, strat, vSet) : null;
+    function validate(sg) {
+      if (!vBase) return null;
+      const r = sg.apply({ strat: strat, settings: vSet });
+      const stats = run(vBars, r.strat, r.settings);
+      return stats ? { stats: stats, base: vBase, confirmed: score(stats) > score(vBase) } : null;
+    }
+
     // Pour chaque groupe, on garde la meilleure variante si elle améliore le résultat.
     const suggestions = [];
     for (const g of groups) {
@@ -283,8 +295,10 @@
         });
       }
     }
-    suggestions.sort((a, b) => (b.risk ? 1 : 0) - (a.risk ? 1 : 0) || b.score - a.score);
-    return { base: base, suggestions: suggestions };
+    for (const sg of suggestions) sg.validation = validate(sg);
+    const conf = (sg) => (sg.validation && sg.validation.confirmed ? 1 : 0);
+    suggestions.sort((a, b) => (b.risk ? 1 : 0) - (a.risk ? 1 : 0) || conf(b) - conf(a) || b.score - a.score);
+    return { base: base, suggestions: suggestions, validation: vBars ? { bars: vBars, settings: vSet, base: vBase } : null };
   }
 
   // Ordre d'application : réglages, seuils, filtres, sorties, sens, stop/objectif, levier.

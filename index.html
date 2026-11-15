@@ -182,8 +182,24 @@
           <label class="radio"><input type="radio" name="source" value="synthetic">
             <span><b>Données simulées</b><br><small>Marche aléatoire, pour tester hors ligne</small></span></label>
         </fieldset>
-        <label class="field" id="csvField" hidden>Fichier CSV
-          <input id="csvFile" type="file" accept=".csv,.txt,text/csv">
+        <div id="csvField" hidden>
+          <label class="field">Fichier CSV
+            <input id="csvFile" type="file" accept=".csv,.txt,text/csv">
+          </label>
+          <p class="notice" id="csvInfo"></p>
+          <details class="help">
+            <summary>Exporter les bougies de MetaTrader 5</summary>
+            <ol class="steps">
+              <li>Dans MT5 : menu <i>Affichage → Symboles</i> (<kbd>Ctrl+U</kbd>), onglet <i>Barres</i>.</li>
+              <li>Choisissez le symbole (ex. GBPUSD), l'unité de temps (D1, H1…) et une période qui commence <b>au moins un an avant</b> la période à tester (historique des indicateurs), puis <i>Demander</i>.</li>
+              <li><i>Exporter des barres</i> : enregistrez le fichier CSV et chargez-le ici. Choisissez la même paire dans « Paire de devises ».</li>
+            </ol>
+            <p class="hint">Forexia utilise alors exactement les bougies de votre courtier (plus hauts, plus bas, spread) : c'est le moyen le plus fiable d'obtenir les mêmes résultats que le testeur de MT5.</p>
+          </details>
+        </div>
+        <label class="check" id="wicksField">
+          <input type="checkbox" id="estimateWicks" checked>
+          <span>Estimer les mèches des bougies <small>(recommandé : les cours BCE n'ont pas de plus haut ni de plus bas, les stop-loss seraient sous-estimés)</small></span>
         </label>
       </section>
 

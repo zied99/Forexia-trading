@@ -73,6 +73,7 @@
       pair: $('pair').value, leverage: Number($('leverage').value), capital: Number($('capital').value),
       exposurePct: Number($('exposure').value), spreadPips: Number($('spread').value) || 0,
       period: periodValue(), dateFrom: $('dateFrom').value, dateTo: $('dateTo').value, source: sourceValue(),
+      estimateWicks: $('estimateWicks').checked,
     };
   }
   function applyConfig(c) {
@@ -88,6 +89,8 @@
     // Le fichier CSV n'est pas conservé par le navigateur : on ne restaure que les autres sources.
     const src = c.source !== 'csv' && document.querySelector('input[name=source][value="' + c.source + '"]');
     if (src) { src.checked = true; $('csvField').hidden = true; }
+    if (c.estimateWicks !== undefined) $('estimateWicks').checked = c.estimateWicks;
+    updateWicksField();
   }
   function describeConfig(c) {
     if (!c) return '';
@@ -310,16 +313,36 @@
     return F.data.periodRange(periodKey, defaultEnd);
   }
   document.querySelectorAll('input[name=source]').forEach((r) => r.addEventListener('change', () => { $('csvField').hidden = sourceValue() !== 'csv'; }));
+  let csvMeta = null; // { timeframe, real, spreadPips }
   $('csvFile').addEventListener('change', async () => {
     const file = $('csvFile').files[0];
-    csvBars = null;
-    if (!file) return;
+    csvBars = null; csvMeta = null;
+    $('csvInfo').textContent = '';
+    if (!file) { updateWicksField(); return; }
     try {
       csvBars = F.data.parseCSV(await file.text());
       csvName = file.name;
+      const spreads = csvBars.map((b) => b.spreadPoints).filter((x) => Number.isFinite(x) && x > 0).sort((a, b) => a - b);
+      // MT5 exporte le spread en points ; 1 pip = 10 points chez les courtiers à 5 (ou 3) décimales.
+      const spreadPips = spreads.length ? spreads[Math.floor(spreads.length / 2)] / 10 : null;
+      csvMeta = { timeframe: F.data.detectTimeframe(csvBars), real: F.data.hasRealRange(csvBars), spreadPips: spreadPips };
+      if (spreadPips) $('spread').value = +spreadPips.toFixed(1);
+      $('csvInfo').textContent = csvBars.length.toLocaleString('fr-FR') + ' bougies ' + csvMeta.timeframe + ' du ' + frDate(csvBars[0].date.slice(0, 10)) +
+        ' au ' + frDate(csvBars[csvBars.length - 1].date.slice(0, 10)) + (csvMeta.real ? ', avec plus hauts / plus bas' : ', sans plus hauts / plus bas') +
+        (spreadPips ? ', spread médian ' + num1.format(spreadPips) + ' pip (repris dans « Spread »)' : '') + '.';
       $('formError').textContent = '';
     } catch (e) { $('formError').textContent = 'CSV : ' + e.message; }
+    updateWicksField();
   });
+  function updateWicksField() {
+    const src = sourceValue();
+    $('wicksField').hidden = !(src === 'online' || (src === 'csv' && csvMeta && !csvMeta.real));
+  }
+  document.querySelectorAll('input[name=source]').forEach((r) => r.addEventListener('change', updateWicksField));
+  $('pair').addEventListener('change', () => {
+    if (!(sourceValue() === 'csv' && csvMeta && csvMeta.spreadPips)) $('spread').value = F.data.TYPICAL_SPREAD[$('pair').value] || 1.5;
+  });
+  updateWicksField();
 
   async function loadBars(pair, periodKey) {
     const src = sourceValue();
@@ -327,7 +350,9 @@
       if (!csvBars) throw new Error('Choisissez un fichier CSV valide.');
       const last = new Date(csvBars[csvBars.length - 1].date.slice(0, 10) + 'T00:00:00Z');
       const range = rangeFor(periodKey, last);
-      return { bars: csvBars, range: range, source: 'Fichier « ' + csvName + ' »' };
+      const est = !csvMeta.real && $('estimateWicks').checked;
+      return { bars: est ? F.data.estimateWicks(csvBars) : csvBars, range: range, timeframe: csvMeta.timeframe,
+        source: 'Fichier « ' + csvName + ' » (' + csvMeta.timeframe + (est ? ', mèches estimées' : '') + ')' };
     }
     const today = new Date(F.data.iso(new Date()) + 'T00:00:00Z');
     const range = rangeFor(periodKey, today);
@@ -337,15 +362,22 @@
       const key = pair + '|' + F.data.iso(range.fetchStart) + '|' + F.data.iso(range.end);
       try {
         if (!onlineCache.has(key)) onlineCache.set(key, await F.data.fetchFrankfurter(pair, range.fetchStart, range.end));
-        return { bars: onlineCache.get(key), range: range, source: 'Cours BCE journaliers (Frankfurter)' };
+        const est = $('estimateWicks').checked;
+        return {
+          bars: est ? F.data.estimateWicks(onlineCache.get(key)) : onlineCache.get(key), range: range, timeframe: 'D1',
+          source: 'Cours BCE journaliers' + (est ? ' + mèches estimées' : ''),
+          info: 'Cours de référence BCE : un prix par jour (14 h 15), différent des bougies de votre courtier (clôture à minuit, vrais plus hauts / plus bas, spread). ' +
+            (est ? 'Les mèches sont estimées pour que les stop-loss soient réalistes. ' : '<b>Mèches non estimées : les stop-loss et take-profit sont sous-estimés.</b> ') +
+            'Pour un résultat au plus près de MetaTrader 5, importez l\'export des bougies de votre courtier (source « Mon fichier CSV »).',
+        };
       } catch (e) {
         return {
-          bars: F.data.generateSynthetic(pair, range.fetchStart, range.end), range: range, source: 'Données simulées',
+          bars: F.data.generateSynthetic(pair, range.fetchStart, range.end), range: range, source: 'Données simulées', timeframe: 'D1',
           warning: e.message + '. Le backtest a été lancé sur des <b>données simulées</b> : les résultats ne reflètent pas le marché réel.',
         };
       }
     }
-    return { bars: F.data.generateSynthetic(pair, range.fetchStart, range.end), range: range, source: 'Données simulées (marche aléatoire)' };
+    return { bars: F.data.generateSynthetic(pair, range.fetchStart, range.end), range: range, timeframe: 'D1', source: 'Données simulées (marche aléatoire)' };
   }
 
   // ---------- Lancement ----------
@@ -380,13 +412,15 @@
       const result = F.backtest.runBacktest(bars, strat, settings);
       const warnings = [];
       if (loaded.warning) warnings.push(loaded.warning);
+      if (loaded.info) warnings.push({ info: true, html: loaded.info });
+      if (leverage > 30) warnings.push({ info: true, html: 'Levier 1:' + leverage + ' : en Europe, le levier est plafonné à 1:30 sur les grandes paires pour un particulier. Vérifiez le levier réel de votre compte.' });
       if (startIndex < 200) warnings.push('Historique antérieur limité (' + startIndex + ' bougies) : les indicateurs à longue période (ex. EMA 200) peuvent être indisponibles en début de test.');
       if (strat.style === 'scalping' && sourceValue() !== 'csv') {
         warnings.push('<b>Scalping sur données journalières</b> : le scalping se joue sur des bougies de quelques minutes. Pour un test réaliste, importez un CSV en M1 à M15 (source « Mon fichier CSV »).');
       }
       if (result.ruined) warnings.push('<b>Compte liquidé</b> : le capital a été entièrement perdu. Réduisez le levier ou l\'exposition.');
       const config = currentConfig();
-      lastRunCtx = { bars, strat, settings, config };
+      lastRunCtx = { bars, strat, settings, config, timeframe: loaded.timeframe || 'D1' };
       lastRun = { key: JSON.stringify([strat.longEntry, strat.longExit, strat.shortEntry, strat.shortExit, strat.stopLossPips, strat.takeProfitPips, config]), stats: result.stats };
       render({ bars, strat, settings, result, loaded, periodKey, warnings, config });
     } catch (err) {
@@ -417,7 +451,7 @@
     const pfmt = (v) => v.toFixed(dec);
 
     let html = '';
-    for (const w of warnings) html += '<div class="banner warn">' + w + '</div>';
+    for (const w of warnings) html += '<div class="banner ' + (w.info ? 'info' : 'warn') + '">' + (w.info ? w.html : w) + '</div>';
     html += '<div class="panel card save-card"><div><b>Cette stratégie vous plaît ?</b> <span class="hint">Sinon, « Améliorer » propose des réglages testés.</span><div class="hint">' + esc(strat.frenchText || strat.longEntry || strat.shortEntry).replace(/\n/g, '<br>') + '</div>' +
       '<div class="hint save-config">Configuration enregistrée avec : ' + esc(describeConfig(config)) + '</div>' +
       '</div><div class="save-actions">' +
@@ -596,14 +630,20 @@
         const d = sg.stats.returnPct - base.returnPct;
         return '<label class="sugg"><input type="checkbox" data-i="' + i + '"><div>' +
           '<div class="grp' + (sg.risk ? ' risk' : '') + '">' + esc(sg.group) + '</div><b>' + esc(sg.title) + '</b><p>' + esc(sg.detail) + '</p>' +
-          '<div class="res">Seule : ' + statLine(sg.stats) + ' <span class="delta ' + cls(d) + '">' + signed(d, num1) + ' pts</span></div></div></label>';
+          '<div class="res">Seule : ' + statLine(sg.stats) + ' <span class="delta ' + cls(d) + '">' + signed(d, num1) + ' pts</span></div>' + validationLine(sg.validation) + '</div></label>';
       }).join('');
       if (enh.suggestions.length) {
+        if (enh.validation) html += '<p class="modal-note">Chaque suggestion est aussi testée sur la <b>période précédente</b> de même durée, qui n\'a pas servi à la choisir. Privilégiez les suggestions « confirmées ».</p>';
         html += '<p class="modal-note">Ces améliorations sont calculées sur la période testée. Plus vous en cumulez, plus le risque de « sur-optimisation » est grand : la stratégie colle au passé sans être meilleure à l\'avenir. Vérifiez ensuite le résultat sur une autre période (bouton « Dates »).</p>';
       }
       $('enhanceBody').innerHTML = html;
       updateCombined();
     }, 30);
+  }
+  function validationLine(v) {
+    if (!v) return '';
+    return '<div class="val ' + (v.confirmed ? 'ok' : 'ko') + '">Période précédente : ' + pct(v.stats.returnPct) + ' au lieu de ' + pct(v.base.returnPct) +
+      (v.confirmed ? ' : confirmée' : ' : non confirmée, peut-être un hasard') + '</div>';
   }
   function selectedSuggestions() {
     return [...$('enhanceBody').querySelectorAll('input[type=checkbox]:checked')].map((c) => enh.suggestions[+c.dataset.i]);
@@ -615,8 +655,13 @@
     const { bars, strat, settings } = lastRunCtx;
     const c = E.combine(strat, settings, sel);
     const st = E.run(bars, c.strat, c.settings);
-    $('enhanceCombined').innerHTML = st ? '<b>Avec ' + (sel.length > 1 ? 'ces ' + sel.length + ' améliorations' : 'cette amélioration') + ' :</b> ' + statLine(st) +
+    let html = st ? '<b>Avec ' + (sel.length > 1 ? 'ces ' + sel.length + ' améliorations' : 'cette amélioration') + ' :</b> ' + statLine(st) +
       ' <span class="hint">(au lieu de ' + pct(enh.base.returnPct) + ')</span>' : '';
+    if (st && enh.validation) {
+      const v = enh.validation, cv = E.combine(strat, v.settings, sel), vs = E.run(v.bars, cv.strat, cv.settings);
+      if (vs) html += '<div class="val ' + (E.score(vs) > E.score(v.base) ? 'ok' : 'ko') + '">Sur la période précédente : ' + pct(vs.returnPct) + ' au lieu de ' + pct(v.base.returnPct) + '</div>';
+    }
+    $('enhanceCombined').innerHTML = html;
   }
   $('enhanceBody').addEventListener('change', updateCombined);
   function closeEnhancer() { $('enhanceModal').hidden = true; document.body.style.overflow = ''; }
@@ -683,7 +728,7 @@
     const { strat, settings } = lastRunCtx;
     $('deploySub').textContent = '« ' + strat.name + ' » sur ' + settings.pair + ' : un Expert Advisor qui applique ces règles sur votre compte MT5.';
     document.querySelectorAll('.dep-pair').forEach((e) => { e.textContent = settings.pair.replace('/', ''); });
-    $('depTimeframe').value = strat.style === 'scalping' ? 'PERIOD_M5' : 'PERIOD_D1';
+    $('depTimeframe').value = 'PERIOD_' + (lastRunCtx.timeframe || 'D1');
     $('depNotice').textContent = '';
     refreshDeploy();
     $('deployModal').hidden = false;

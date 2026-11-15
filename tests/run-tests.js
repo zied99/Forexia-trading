@@ -247,6 +247,47 @@ test('« Ne prendre que les achats » garde une sortie', () => {
   if (dir) { const o = dir.apply({ strat: macd, settings: base }).strat; if (!o.longExit && !o.shortExit) throw new Error('pas de sortie'); }
 });
 
+console.log('Réalisme des données');
+test('Mèches estimées : amplitude ≈ 2 × variation moyenne, corps conservé', () => {
+  const rg = D.periodRange('1y', new Date('2025-06-30'));
+  const real = D.generateSynthetic('EUR/USD', rg.fetchStart, rg.end);
+  const co = D.barsFromCloses(real.map((b) => ({ date: b.date, close: b.close })));
+  eq(D.hasRealRange(real), true); eq(D.hasRealRange(co), false);
+  const est = D.estimateWicks(co);
+  eq(D.hasRealRange(est), true);
+  let r = 0, d = 0;
+  for (let i = 30; i < est.length; i++) {
+    r += est[i].high - est[i].low; d += Math.abs(est[i].close - est[i - 1].close);
+    if (est[i].open !== co[i].open || est[i].close !== co[i].close) throw new Error('corps modifié');
+  }
+  near(r / d, 2, 0.25, 'rapport amplitude / variation');
+});
+test('Mèches estimées : un stop serré est touché plus souvent', () => {
+  const rg = D.periodRange('1y', new Date('2025-06-30'));
+  const co = D.barsFromCloses(D.generateSynthetic('GBP/USD', rg.fetchStart, rg.end).map((b) => ({ date: b.date, close: b.close })));
+  const s = { longEntry: 'CROSS_UP(SMA(5), SMA(20))', shortEntry: 'CROSS_DOWN(SMA(5), SMA(20))', stopLossPips: 20 };
+  const set = Object.assign({}, base, { pair: 'GBP/USD', startIndex: D.indexFrom(co, rg.start) });
+  const sl = (bars) => B.runBacktest(bars, s, set).trades.filter((t) => t.reason === 'Stop-loss').length;
+  if (!(sl(D.estimateWicks(co)) > sl(co))) throw new Error('pas plus de stops');
+});
+test('Export MT5 : colonnes, spread et unité de temps reconnus', () => {
+  const d1 = ['<DATE>\t<OPEN>\t<HIGH>\t<LOW>\t<CLOSE>\t<TICKVOL>\t<VOL>\t<SPREAD>'];
+  for (let i = 0; i < 40; i++) { const d = new Date(Date.UTC(2024, 0, 1 + i)); d1.push(D.iso(d).replace(/-/g, '.') + '\t1.27000\t1.27800\t1.26500\t1.27300\t52000\t0\t' + (12 + (i % 3))); }
+  const b = D.parseCSV(d1.join('\r\n'));
+  eq(b.length, 40); eq(b[0].date, '2024-01-01'); eq(b[0].high, 1.278); eq(b[0].spreadPoints, 12); eq(D.detectTimeframe(b), 'D1'); eq(D.hasRealRange(b), true);
+  const h1 = ['<DATE>\t<TIME>\t<OPEN>\t<HIGH>\t<LOW>\t<CLOSE>\t<TICKVOL>\t<VOL>\t<SPREAD>'];
+  for (let i = 0; i < 40; i++) h1.push('2024.01.0' + (2 + Math.floor(i / 24)) + '\t' + String(i % 24).padStart(2, '0') + ':00:00\t1.1\t1.2\t1.0\t1.15\t10\t0\t7');
+  const c = D.parseCSV(h1.join('\n'));
+  eq(c[0].date, '2024-01-02 00:00:00'); eq(D.detectTimeframe(c), 'H1');
+});
+test('Améliorer : contrôle sur la période précédente', () => {
+  const rg = D.periodRange('1y', new Date('2025-06-30'));
+  const bars = D.generateSynthetic('EUR/USD', rg.fetchStart, rg.end);
+  const r = E.suggest(bars, P.list[2], Object.assign({}, base, { leverage: 20, startIndex: D.indexFrom(bars, rg.start) }), 'none');
+  if (!r.validation) throw new Error('pas de période de contrôle');
+  for (const sg of r.suggestions) if (!sg.validation || typeof sg.validation.confirmed !== 'boolean') throw new Error('suggestion non contrôlée : ' + sg.title);
+});
+
 console.log('Expert Advisor MT5');
 test('EA généré pour chaque modèle : paramètres repris de la stratégie', () => {
   for (const p of P.list) {
