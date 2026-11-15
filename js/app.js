@@ -38,13 +38,13 @@
     const saved = storage.get();
     let html = '<optgroup label="Modèles">' + F.presets.list.map((p) => '<option value="preset:' + p.id + '">' + esc(p.name) + '</option>').join('') + '</optgroup>';
     if (saved.length) html += '<optgroup label="Mes stratégies">' + saved.map((s, i) => '<option value="saved:' + i + '">' + esc(s.name) + '</option>').join('') + '</optgroup>';
-    html += '<option value="custom">Stratégie vierge…</option>';
+    html += '<option value="custom">Stratégie vierge…</option><option value="mine" hidden>Ma stratégie (non enregistrée)</option>';
     $('preset').innerHTML = html;
     if (selected) $('preset').value = selected;
   }
 
   function currentStrategy() {
-    const s = { name: $('stratName').value.trim() || 'Ma stratégie', plots: $('plots').value.trim() };
+    const s = { name: $('stratName').value.trim() || 'Ma stratégie', plots: $('plots').value.trim(), frenchText: $('frenchText').value.trim() };
     for (const f of RULE_FIELDS) s[f] = $(f).value.trim();
     s.stopLossPips = Number($('stopLoss').value) || 0;
     s.takeProfitPips = Number($('takeProfit').value) || 0;
@@ -56,7 +56,10 @@
     $('stopLoss').value = s.stopLossPips || '';
     $('takeProfit').value = s.takeProfitPips || '';
     $('plots').value = s.plots || '';
+    $('frenchText').value = s.frenchText || '';
     $('presetDesc').textContent = s.description || '';
+    frenchDirty = false;
+    renderTranslation(s.frenchText ? F.french.parse(s.frenchText) : null);
     validateAll();
   }
   function applyPresetSelection() {
@@ -68,18 +71,27 @@
   }
   $('preset').addEventListener('change', applyPresetSelection);
 
-  $('saveStrat').addEventListener('click', () => {
-    const s = currentStrategy();
-    if (!validateAll()) return;
+  // Enregistre la stratégie du formulaire (ou celle du dernier backtest) dans le navigateur.
+  function saveStrategy(strat) {
+    const s = Object.assign({}, strat || currentStrategy());
+    if (!strat && frenchDirty && s.frenchText) { translateFrench(); Object.assign(s, currentStrategy()); }
+    if (!strat && !validateAll()) { $('formError').textContent = 'Corrigez les règles en rouge avant d\'enregistrer.'; return null; }
+    if (!s.longEntry && !s.shortEntry) { $('formError').textContent = 'Rien à enregistrer : aucune règle d\'entrée.'; return null; }
     const list = storage.get();
     const idx = list.findIndex((x) => x.name === s.name);
-    s.description = 'Stratégie enregistrée.';
+    s.description = 'Stratégie enregistrée le ' + new Date().toLocaleDateString('fr-FR') + '.';
     if (idx >= 0) list[idx] = s; else list.push(s);
-    if (!storage.set(list)) { $('formError').textContent = 'Impossible d\'enregistrer (stockage du navigateur indisponible).'; return; }
-    refreshPresetSelect('saved:' + (idx >= 0 ? idx : list.length - 1));
-    $('deleteStrat').hidden = false;
-    $('presetDesc').textContent = '« ' + s.name + ' » enregistrée dans ce navigateur.';
-  });
+    if (!storage.set(list)) { $('formError').textContent = 'Impossible d\'enregistrer : le stockage du navigateur est bloqué (navigation privée ?).'; return null; }
+    if ($('stratName').value.trim() === s.name || !$('stratName').value.trim()) {
+      refreshPresetSelect('saved:' + (idx >= 0 ? idx : list.length - 1));
+      $('deleteStrat').hidden = false;
+      $('presetDesc').textContent = '« ' + s.name + ' » est enregistrée. Retrouvez-la dans Modèle → Mes stratégies.';
+    } else {
+      refreshPresetSelect($('preset').value);
+    }
+    return s;
+  }
+  $('saveStrat').addEventListener('click', () => { $('formError').textContent = ''; saveStrategy(); });
   $('deleteStrat').addEventListener('click', () => {
     const v = $('preset').value;
     if (!v.startsWith('saved:')) return;
@@ -101,9 +113,55 @@
   function validateAll() { RULE_FIELDS.forEach((f) => autoGrow($(f))); return RULE_FIELDS.map(validateField).every(Boolean); }
   function autoGrow(ta) { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 2 + 'px'; }
   for (const f of RULE_FIELDS) {
-    $(f).addEventListener('input', () => { autoGrow($(f)); validateField(f); if (!$('preset').value.startsWith('saved:')) $('presetDesc').textContent = ''; });
+    $(f).addEventListener('input', () => { autoGrow($(f)); validateField(f); markCustom(); });
     $(f).addEventListener('focus', () => { lastFocusedRule = $(f); });
   }
+
+  function markCustom() {
+    if ($('preset').value !== 'mine' && !$('preset').value.startsWith('saved:')) { $('preset').value = 'mine'; $('presetDesc').textContent = ''; }
+  }
+
+  // ---------- Stratégie en français ----------
+  let frenchDirty = false;
+  const KEY_CLASS = { longEntry: 'long', longExit: 'long', shortEntry: 'short', shortExit: 'short' };
+  function renderTranslation(r) {
+    const box = $('frenchResult');
+    if (!r) { box.innerHTML = ''; return; }
+    let html = '';
+    if (r.understood.length) {
+      html += '<div class="tr-head">Ce que j\'ai compris</div>';
+      html += r.understood.map((u) => '<div class="tr-row"><b class="' + (KEY_CLASS[u.key] || '') + '">' + esc(u.label) + '</b><code>' + esc(u.rule) + '</code></div>').join('');
+    }
+    html += r.warnings.map((w) => '<div class="tr-warn">' + esc(w) + '</div>').join('');
+    box.innerHTML = html;
+  }
+  function translateFrench() {
+    const text = $('frenchText').value.trim();
+    frenchDirty = false;
+    if (!text) { renderTranslation(null); return null; }
+    const r = F.french.parse(text);
+    renderTranslation(r);
+    if (r.longEntry || r.shortEntry) {
+      for (const f of RULE_FIELDS) $(f).value = r[f];
+      $('stopLoss').value = r.stopLossPips || '';
+      $('takeProfit').value = r.takeProfitPips || '';
+      $('plots').value = r.plots;
+      validateAll();
+    }
+    return r;
+  }
+  $('frenchText').addEventListener('input', () => { frenchDirty = true; markCustom(); });
+  $('translateBtn').addEventListener('click', () => { $('formError').textContent = ''; translateFrench(); });
+
+  // ---------- Stratégie aléatoire ----------
+  $('randomBtn').addEventListener('click', () => {
+    const s = F.french.randomStrategy();
+    loadStrategy(s);
+    $('preset').value = 'mine';
+    $('deleteStrat').hidden = true;
+    $('presetDesc').textContent = s.description;
+    $('form').requestSubmit();
+  });
 
   // ---------- Aide : éléments insérables ----------
   const CHIPS = [
@@ -174,8 +232,12 @@
   $('form').addEventListener('submit', async (e) => {
     e.preventDefault();
     $('formError').textContent = '';
+    if (frenchDirty && $('frenchText').value.trim()) {
+      const r = translateFrench();
+      if (!r.longEntry && !r.shortEntry) { $('formError').textContent = 'Je n\'ai pas compris votre stratégie en français : voir les remarques sous le texte.'; return; }
+    }
     const strat = currentStrategy();
-    if (!validateAll()) { $('formError').textContent = 'Corrigez les règles en rouge.'; return; }
+    if (!validateAll()) { $('rulesDetails').open = true; $('formError').textContent = 'Corrigez les règles en rouge.'; return; }
     if (!strat.longEntry && !strat.shortEntry) { $('formError').textContent = 'Indiquez au moins une règle d\'entrée (achat ou vente).'; return; }
     const capital = Number($('capital').value), exposure = Number($('exposure').value), spread = Number($('spread').value) || 0;
     if (!(capital >= 100)) { $('formError').textContent = 'Le capital doit être d\'au moins 100.'; return; }
@@ -226,6 +288,8 @@
 
     let html = '';
     for (const w of warnings) html += '<div class="banner warn">' + w + '</div>';
+    html += '<div class="panel card save-card"><div><b>Cette stratégie vous plaît ?</b><div class="hint">' + esc(strat.frenchText || strat.longEntry || strat.shortEntry).replace(/\n/g, '<br>') + '</div></div>' +
+      '<button type="button" class="primary inline-save" id="saveFromResults">Enregistrer</button></div>';
     html += '<div class="summary-head"><h2>' + esc(strat.name) + ' · ' + esc(settings.pair) + '</h2>' +
       '<span class="meta">' + PERIOD_LABEL[periodKey] + ' · du ' + frDate(dates[0]) + ' au ' + frDate(dates[dates.length - 1]) +
       ' · levier 1:' + settings.leverage + ' · ' + esc(loaded.source) + ' · ' + view.length + ' bougies</span></div>';
@@ -340,6 +404,10 @@
       overlays.map((o) => '<span><i style="background:' + o.color + '"></i>' + esc(o.name) + '</span>').join('') +
       '<span><i class="tri-up"></i>Achat</span><span><i class="tri-dn"></i>Vente</span><span><i class="dot" style="background:var(--muted)"></i>Sortie</span>';
 
+    $('saveFromResults').addEventListener('click', () => {
+      const saved = saveStrategy(strat);
+      if (saved) { $('saveFromResults').textContent = 'Enregistrée ✓'; $('saveFromResults').disabled = true; }
+    });
     const exp = $('exportCsv');
     if (exp) exp.addEventListener('click', () => exportTrades(result.trades, strat, settings));
     if (window.matchMedia('(max-width: 900px)').matches) $('results').scrollIntoView({ behavior: 'smooth' });

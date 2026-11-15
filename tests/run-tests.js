@@ -1,8 +1,8 @@
 /* Tests du moteur : node tests/run-tests.js */
 'use strict';
 const path = require('path');
-for (const f of ['indicators', 'expr', 'backtest', 'data', 'presets']) require(path.join(__dirname, '..', 'js', f + '.js'));
-const { indicators: I, rules: R, backtest: B, data: D, presets: P } = globalThis.Forexia;
+for (const f of ['indicators', 'expr', 'backtest', 'data', 'presets', 'french']) require(path.join(__dirname, '..', 'js', f + '.js'));
+const { indicators: I, rules: R, backtest: B, data: D, presets: P, french: FR } = globalThis.Forexia;
 
 let failed = 0, passed = 0;
 function test(name, fn) {
@@ -128,6 +128,58 @@ test('CSV MT4 avec en-tête', () => {
 test('CSV sans en-tête, séparateur ; et virgule décimale', () => {
   const rows = []; for (let i = 1; i <= 31; i++) rows.push('2024-01-' + String(i).padStart(2, '0') + ';1,1;1,2;1,0;1,15');
   eq(D.parseCSV(rows.join('\n'))[3].high, 1.2);
+});
+
+console.log('Stratégies en français');
+const PHRASES = [
+  ["J'achète lorsque le RSI est inférieur à 30", { longEntry: 'RSI(14) < 30' }],
+  ['Achat si RSI(14) < 25 et prix > MM200', { longEntry: 'RSI(14) < 25 AND CLOSE > SMA(200)' }],
+  ['Je vends quand le RSI 9 est supérieur à 75. Je sors quand le RSI repasse sous 50',
+    { shortEntry: 'RSI(9) > 75', shortExit: 'CROSS_DOWN(RSI(9), 50)', longExit: 'CROSS_DOWN(RSI(9), 50)' }],
+  ["Acheter dès que la MME 9 croise à la hausse la MME 21. Vendre à l'inverse. Objectif 120 pips, stop à 60 pips",
+    { longEntry: 'CROSS_UP(EMA(9), EMA(21))', shortEntry: 'CROSS_DOWN(EMA(9), EMA(21))', stopLossPips: 60, takeProfitPips: 120 }],
+  ["Entrer à l'achat quand le prix casse la bande de Bollinger haute", { longEntry: 'CROSS_UP(CLOSE, BB_UPPER(20,2))' }],
+  ['Position longue quand le RSI est entre 40 et 60 et que le MACD est positif', { longEntry: 'RSI(14) > 40 AND RSI(14) < 60 AND MACD(12,26,9) > 0' }],
+  ['Vendre quand le stochastique sort de la zone de surachat', { shortEntry: 'CROSS_DOWN(STOCH_K(14,3,3), 80)' }],
+  ['Acheter quand le RSI sort de la zone de survente', { longEntry: 'CROSS_UP(RSI(14), 30)' }],
+  ['Achète si le MACD croise sa ligne de signal à la hausse ou si le RSI est en zone de survente',
+    { longEntry: 'CROSS_UP(MACD(12,26,9), MACD_SIGNAL(12,26,9)) OR RSI(14) < 30' }],
+  ['Acheter quand le RSI 7 passe au-dessus de 20. Vendre dans le cas inverse',
+    { longEntry: 'CROSS_UP(RSI(7), 20)', shortEntry: 'CROSS_DOWN(RSI(7), 80)' }],
+  ['Acheter quand le prix passe sous la bande de Bollinger basse. Vendre à l\'inverse',
+    { longEntry: 'CROSS_DOWN(CLOSE, BB_LOWER(20,2))', shortEntry: 'CROSS_UP(CLOSE, BB_UPPER(20,2))' }],
+  ['Achat quand la moyenne mobile 50 est haussière', { longEntry: 'SMA(50) > PREV(SMA(50), 1)' }],
+];
+for (const [text, expected] of PHRASES) {
+  test('« ' + text.slice(0, 60) + (text.length > 60 ? '…' : '') + ' »', () => {
+    const r = FR.parse(text);
+    if (r.warnings.length) throw new Error('avertissements : ' + r.warnings.join(' | '));
+    for (const k in expected) eq(r[k], expected[k], k);
+  });
+}
+test('Texte incompréhensible : avertissement, aucune règle', () => {
+  const r = FR.parse('Acheter quand la lune est pleine');
+  eq(r.longEntry, ''); if (!r.warnings.length) throw new Error('aucun avertissement');
+});
+test('La description française de chaque modèle donne exactement ses règles', () => {
+  for (const p of P.list) {
+    const r = FR.parse(p.frenchText);
+    if (r.warnings.length) throw new Error(p.id + ' : ' + r.warnings.join(' | '));
+    for (const k of ['longEntry', 'longExit', 'shortEntry', 'shortExit', 'stopLossPips', 'takeProfitPips']) eq(r[k] || 0, p[k] || 0, p.id + '.' + k);
+  }
+});
+test('500 stratégies aléatoires : toutes valides et testables', () => {
+  let seed = 42;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  const to = new Date('2025-06-30'), rg = D.periodRange('1y', to);
+  const bars = D.generateSynthetic('GBP/USD', rg.fetchStart, rg.end);
+  for (let i = 0; i < 500; i++) {
+    const s = FR.randomStrategy(rnd);
+    if (s.warnings.length) throw new Error(s.frenchText + ' → ' + s.warnings.join(' | '));
+    if (!s.longEntry && !s.shortEntry) throw new Error('pas d\'entrée : ' + s.frenchText);
+    for (const k of ['longEntry', 'longExit', 'shortEntry', 'shortExit']) { const e = R.validate(s[k]); if (e) throw new Error(s[k] + ' : ' + e); }
+    if (i % 25 === 0) B.runBacktest(bars, s, Object.assign({}, base, { pair: 'GBP/USD', startIndex: D.indexFrom(bars, rg.start) }));
+  }
 });
 
 console.log('\n' + passed + ' réussis, ' + failed + ' échoués');

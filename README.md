@@ -6,15 +6,19 @@ pas d'installation.
 
 ## Lancer
 
-- **Le plus simple** : ouvrir `index.html` dans le navigateur (double-clic).
+- **En ligne (GitHub Pages)** : https://zied99.github.io/Forexia-trading/
+- **En local** : ouvrir `index.html` dans le navigateur (double-clic).
 - Ou servir le dossier : `npm start` puis http://localhost:8080
-- Ou publier le dépôt avec **GitHub Pages** (Settings → Pages → branche, dossier `/`).
 
 ## Utilisation
 
-1. **Stratégie** : choisir un modèle (RSI, MACD, croisement de moyennes, stochastique + EMA 200,
-   Bollinger, combinée) ou écrire ses propres règles, plus un stop-loss / take-profit en pips.
-   Les stratégies peuvent être enregistrées dans le navigateur.
+1. **Stratégie** :
+   - **écrire sa stratégie en français** dans la zone de texte, puis « Traduire en règles » (ou lancer
+     directement le backtest, la traduction est automatique) ;
+   - ou choisir un modèle (RSI, MACD, croisement de moyennes, stochastique + EMA 200, Bollinger, combinée) ;
+   - ou cliquer sur **« Stratégie aléatoire »** : une stratégie est tirée au hasard et testée aussitôt.
+     Si elle vous plaît, cliquez sur **« Enregistrer »** (en haut des résultats).
+   Les stratégies enregistrées sont dans Modèle → *Mes stratégies* (stockées dans ce navigateur).
 2. **Marché et capital** : paire de devises, levier (1:1 à 1:500), capital, exposition, spread,
    période (**6 mois, 1 an, 2 ans**).
 3. **Données** :
@@ -30,7 +34,27 @@ Résultats : capital final, profit net, nombre de trades et taux de réussite, p
 ratio de Sharpe, courbe du capital, cours avec les points d'entrée/sortie et les indicateurs,
 statistiques détaillées et historique des trades (export CSV).
 
-## Écrire une règle
+## Écrire sa stratégie en français
+
+```
+Acheter quand le RSI 14 passe au-dessus de 30 et que le prix est au-dessus de la moyenne mobile 200.
+Vendre dans le cas inverse.
+Sortir de l'achat quand le RSI dépasse 70.
+Stop loss 50 pips, take profit 100 pips.
+```
+
+- **Actions** : acheter / achat / position longue, vendre / vente / short, sortir / fermer / clôturer
+  (de l'achat, de la vente, ou les deux), « dans le cas inverse » pour la règle symétrique.
+- **Indicateurs** : RSI, MACD, ligne de signal, histogramme du MACD, stochastique (%K, %D), moyenne mobile
+  (simple, exponentielle, MM 50, MME 21), bandes de Bollinger (haute, basse, médiane), CCI, Williams %R, prix.
+- **Conditions** : passe au-dessus / en dessous de, croise à la hausse / à la baisse, casse, est supérieur /
+  inférieur à, est entre 40 et 60, zone de survente / surachat, sort de la zone de survente,
+  positif / négatif, haussier / baissier ; reliées par « et » / « ou ».
+- **Risque** : stop loss N pips, take profit / objectif N pips.
+
+La page affiche « Ce que j'ai compris » et signale chaque phrase non comprise.
+
+## Écrire une règle technique
 
 ```
 CROSS_UP(RSI(14), 30)
@@ -74,6 +98,7 @@ js/expr.js          langage de règles (analyse + évaluation)
 js/backtest.js      moteur de simulation et statistiques
 js/data.js          sources de données (API, CSV, simulation)
 js/presets.js       modèles de stratégies
+js/french.js        stratégies en français + stratégie aléatoire
 js/chart.js         graphiques SVG
 js/app.js           contrôleur de l'interface
 tests/run-tests.js  tests du moteur : npm test
