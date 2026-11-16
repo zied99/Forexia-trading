@@ -413,6 +413,33 @@
     updateStyleHint();
   }));
   $('preset').addEventListener('change', applyPresetSelection);
+  // Stratégie choisie dans la liste : sa dernière simulation (même période, capital, levier, source…) s'affiche tout de suite.
+  $('preset').addEventListener('change', () => {
+    const v = $('preset').value;
+    if (!v.startsWith('saved:') && !v.startsWith('preset:')) return;
+    showLastSimulation(false);
+  });
+  /** Affiche la dernière simulation de la stratégie du formulaire (atStart : à l'ouverture de la page, sans message d'erreur). */
+  function showLastSimulation(atStart) {
+    const name = currentStrategy().name;
+    const last = evalList().filter((e) => e.name === name && e.config).sort((a, b) => (a.at < b.at ? 1 : -1))[0];
+    if (!last) return;
+    const c = last.config, okD = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d || '');
+    const from = okD(c.dateFrom) ? c.dateFrom : last.from, to = okD(c.dateTo) ? c.dateTo : last.to;
+    restoring = true; // pas d'étape d'annulation séparée : fait partie du choix de la stratégie
+    try {
+      applyConfig(Object.assign({}, c, { period: 'custom', dateFrom: from, dateTo: to }));
+      document.querySelector('input[name=period][value=custom]').checked = true;
+      syncPeriodUI(); $('dateFrom').value = from; $('dateTo').value = to;
+    } finally { restoring = false; }
+    if (atStart && c.source === 'broker' && !bridgeToken) return;
+    evalNoRecord = true; // déjà dans le tableau d'évaluation
+    runFromForm().then((ok) => {
+      if (!ok && atStart) { $('formError').textContent = ''; return; }
+      $('presetDesc').textContent = (ok ? 'Dernière simulation affichée : ' : 'Dernière simulation : ') + frDate(from) + ' → ' + frDate(to) + ' · ' + esc(c.pair || '') +
+        ' · capital ' + money.format(c.capital || 0) + ' · levier 1:' + (c.leverage || '?') + ' · lancée le ' + new Date(last.at).toLocaleDateString('fr-FR') + ' (' + signed(last.returnPct, num1) + ' %).';
+    }).finally(() => { evalNoRecord = false; syncFormState(); });
+  }
 
   function runKey(s, config) {
     return JSON.stringify([s.longEntry, s.longExit, s.shortEntry, s.shortExit, s.stopLossPips, s.takeProfitPips].concat(TM_FIELDS.map((f) => s[f] || 0), [config]));
@@ -3641,4 +3668,6 @@
   applyPresetSelection();
   updateStyleHint();
   syncFormState();
+  // à l'ouverture : la dernière simulation de la stratégie affichée, s'il y en a une
+  setTimeout(() => { try { if (!lastRunCtx) showLastSimulation(true); } catch (e) { /* ignoré */ } }, 400);
 })();
