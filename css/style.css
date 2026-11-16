@@ -503,3 +503,5 @@ a.btn-link:hover { border-color: var(--accent); color: var(--accent); }
 .imp-btn { white-space: nowrap; }
 .bar-panel .bp-mix { border-top: 1px solid var(--border); padding-top: 8px; }
 .bar-panel button.primary.small { width: auto; margin: 0; padding: 7px 16px; font-size: 13px; }
+.improve-out .row.buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.improve-out .row.buttons button { flex: 0 0 auto; width: auto; margin: 0; }

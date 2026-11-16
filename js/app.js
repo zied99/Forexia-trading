@@ -2385,6 +2385,7 @@
         else if (ev && ev.shiftKey && barLast >= 0) { for (let j = Math.min(barLast, i); j <= Math.max(barLast, i); j++) barSel.add(list[j].key); }
         else barSel = barSel.size === 1 && barSel.has(k) ? new Set() : new Set([k]);
         barLast = i;
+        if (improveWhere === 'panel') { improveHtml = ''; improveCtx = null; }
         renderEvaluation();
         if (barSel.size && $('barPanel')) $('barPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       },
@@ -2410,7 +2411,7 @@
     return parts.join(', ') || 'relancée';
   }
   // ---------- Vérifier long terme / court terme sur les simulations affichées ----------
-  let evalNoRecord = false, improveHtml = '';
+  let evalNoRecord = false, improveHtml = '', improveWhere = 'report'; // résultat d'amélioration : sous le rapport, ou dans le panneau de la sélection
   let evalTag = '', evalReplaceKey = '', checkRunning = '', checkStop = false, checkReport = '', checkStatusText = '', checkCurrentKey = '';
   const MONTH_CHOICES = [[1, '1 mois'], [2, '2 mois'], [3, '3 mois'], [6, '6 mois'], [12, '1 an'], [24, '2 ans']];
   // choix gardés quand le graphique se redessine (pendant une vérification)
@@ -2445,6 +2446,9 @@
       (barOpt.capMode === 'none' ? '' : '<input id="bpCapValue" type="number" min="1" step="any" value="' + esc(barOpt.capValue) + '" aria-label="Montant ou pourcentage">' +
         '<button type="button" class="secondary small" id="bpCap"' + (busy ? ' disabled' : '') + '>' + (barOpt.capMode === 'set' ? 'Changer' : 'Augmenter') + ' et simuler</button>') + '</div>' +
       '<div class="bp-row bp-mix"><button type="button" class="primary small" id="bpMix"' + (busy ? ' disabled' : '') + '>▶ Resimuler</button><span class="hint">' + esc(mixSummary(many ? chosen.length : 1)) + '</span></div>' +
+      '<div class="bp-row bp-mix"><button type="button" class="primary small bp-improve" id="bpImprove"' + (busy ? ' disabled' : '') + '>✨ Améliorer et simuler</button><span class="hint">Cherche ce qui améliore ' +
+      (many ? 'ces simulations' : 'cette simulation') + ' sans dégrader les autres simulations de la stratégie, puis la resimule. Si le résultat vous convient, vous l\'ajoutez à la stratégie en cours.</span></div>' +
+      improveInPanel() +
       '<p class="hint">' + (many ? 'Ces ' + chosen.length + ' simulations sont modifiées' : 'La simulation #' + idx + ' est modifiée') + ' sur place (mêmes numéros) ; Ctrl+Z pour revenir en arrière. Glisser ou Ctrl+clic pour changer la sélection.</p></div>';
   }
   function mixSummary(n) {
@@ -2474,6 +2478,7 @@
     if (id === 'bpClose') { barSel = new Set(); renderEvaluation(); }
     if (id === 'bpDurRun') runChecks('ext', { keys: [...barSel], months: +barOpt.dur, sign: barOpt.durDir === 'shorter' ? -1 : 1 });
     if (id === 'bpCap') runChecks('cap', { keys: [...barSel], capMode: barOpt.capMode, capVal: barOpt.capValue });
+    if (id === 'bpImprove') improveSelection([...barSel]);
     if (id === 'bpMix') runChecks('mix', { keys: [...barSel], months: barOpt.durDir === 'none' ? 0 : +barOpt.dur, sign: barOpt.durDir === 'shorter' ? -1 : 1, capMode: barOpt.capMode, capVal: barOpt.capValue });
   });
   function checkToolsHtml(list) {
@@ -2495,7 +2500,7 @@
       '<span class="hint">Même période, autre capital de départ : chaque simulation est <b>modifiée</b> (même numéro), nouveau résultat en pointillé. Avec une taille en % du capital, le résultat en % change peu ; ' +
       'il change surtout en lots fixes, avec les minimums de lots du courtier, les retraits en somme fixe ou la commission.</span></div>' +
       '<p class="hint" id="checkStatus">' + esc(checkStatusText) + '</p>' + (checkReport ? '<div class="check-report">' + checkReport + '</div>' : '') +
-      (improveHtml ? '<div class="improve-out" id="improveOut">' + improveHtml + '</div>' : '') + '</div>';
+      (improveHtml && improveWhere === 'report' ? '<div class="improve-out" id="improveOut">' + improveHtml + '</div>' : '') + '</div>';
   }
   function monthsValue(id) {
     const v = $(id).value;
@@ -2669,7 +2674,7 @@
     const e = evalList().find((x) => x.key === btn.dataset.imp);
     if (!e || !e.strategy) return;
     const saved = captureForm();
-    checkRunning = 'imp';
+    checkRunning = 'imp'; improveWhere = 'report';
     improveHtml = '<div class="modal-loading"><span class="spinner"></span>Analyse de #' + (evalList().findIndex((x) => x.key === e.key) + 1) + ' : recherche des améliorations…</div>';
     renderEvaluation();
     setRunLabel('Analyse');
@@ -2726,6 +2731,130 @@
     if (res) { improveCtx = res; improveHtml = improveReportHtml(res); }
     renderEvaluation();
     if ($('improveOut')) $('improveOut').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  // ---------- « ✨ Améliorer » depuis la sélection du graphique ----------
+  // Analyse « croisée » : les améliorations sont cherchées sur la ou les simulations choisies, puis vérifiées sur les autres
+  // simulations affichées de la stratégie ; on ne garde que celles qui aident sans dégrader le reste.
+  const datesOf = (e) => { const c = e.config || {}, ok = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d || ''); return { from: dateOf(ok(c.dateFrom) ? c.dateFrom : e.from), to: dateOf(ok(c.dateTo) ? c.dateTo : e.to) }; };
+  async function ctxOf(e) {
+    const d = datesOf(e);
+    evalNoRecord = true;
+    try { const st = await rerunEntry(e, d.from, d.to, '', false, null); return st && lastRunCtx ? { e: e, bars: lastRunCtx.bars, strat: lastRunCtx.strat, settings: lastRunCtx.settings, config: lastRunCtx.config, d: d } : null; }
+    finally { evalNoRecord = false; }
+  }
+  async function improveSelection(keys) {
+    if (checkRunning || !keys.length) return;
+    const shown = evalFiltered(evalList()).map((x) => x.e).filter((e) => e.strategy && e.config && !e.tag);
+    const targets = shown.filter((e) => keys.includes(e.key));
+    if (!targets.length) return;
+    // autres simulations de la même stratégie (8 au plus, les plus récentes) pour vérifier qu'on ne les dégrade pas
+    const others = shown.filter((e) => !keys.includes(e.key) && e.name === targets[0].name).slice(-8);
+    const saved = captureForm();
+    checkRunning = 'imp'; checkStop = false; improveWhere = 'panel';
+    const step = (t) => { improveHtml = '<div class="modal-loading"><span class="spinner"></span>' + t + '</div>'; renderEvaluation(); };
+    let res = null;
+    try {
+      step('Chargement de ' + targets.length + ' simulation(s) à améliorer et de ' + others.length + ' autre(s) pour contrôle…');
+      const T = [], O = [];
+      for (const e of targets) { setRunLabel('Analyse ' + (T.length + 1) + ' / ' + (targets.length + others.length)); const c = await ctxOf(e); if (c) T.push(c); }
+      for (const e of others) { if (checkStop) break; setRunLabel('Analyse ' + (T.length + O.length + 1) + ' / ' + (targets.length + others.length)); const c = await ctxOf(e); if (c) O.push(c); }
+      if (!T.length) throw new Error($('formError').textContent || 'simulation impossible');
+      step('Recherche des améliorations…');
+      await new Promise((r) => setTimeout(r, 20));
+      // candidats : suggestions trouvées sur chaque simulation à améliorer (hors levier), dédoublonnées
+      const cand = new Map();
+      for (const c of T) for (const x of E.suggest(c.bars, c.strat, c.settings, c.strat.style || 'none').suggestions) {
+        if (x.risk || x.group === 'Combinaison recommandée' || cand.has(x.id)) continue;
+        cand.set(x.id, x);
+      }
+      const runOn = (c, pick) => { const k = E.combine(c.strat, c.settings, pick); return E.run(c.bars, k.strat, k.settings); };
+      const base = (c) => (c.base = c.base || E.run(c.bars, c.strat, c.settings));
+      const evalPick = (pick) => {
+        const t = T.map((c) => ({ b: base(c), a: runOn(c, pick) })), o = O.map((c) => ({ b: base(c), a: runOn(c, pick) }));
+        const d = (x) => E.score(x.a) - E.score(x.b);
+        return { t: t, o: o, tGain: mean(t.map(d)), oGain: o.length ? mean(o.map(d)) : 0, oBetter: o.filter((x) => d(x) > 0).length, oWorse: o.filter((x) => d(x) < -0.5).length };
+      };
+      // chaque candidat, seul : effet sur la cible et sur les autres
+      const rated = [...cand.values()].map((x) => Object.assign({ s: x }, evalPick([x]))).sort((a, b) => (b.tGain + 0.5 * b.oGain) - (a.tGain + 0.5 * a.oGain));
+      // cumul glouton : on garde un candidat s'il aide la cible sans faire baisser la moyenne des autres
+      let pick = [], cur = { tGain: 0, oGain: 0 };
+      for (const r of rated.slice(0, 8)) {
+        if (r.tGain <= 0 || pick.some((y) => y.group === r.s.group)) continue;
+        const trial = evalPick(pick.concat([r.s]));
+        if (trial.tGain > cur.tGain + 0.5 && trial.oGain >= Math.min(0, cur.oGain) - 0.5) { pick.push(r.s); cur = trial; }
+      }
+      res = { kind: 'sel', T: T, O: O, rated: rated.slice(0, 6), pick: pick, eval: pick.length ? cur : null, e: T[0].e, strat: T[0].strat, settings: T[0].settings, config: T[0].config };
+      // nouvelle simulation réelle de la (des) simulation(s) avec la stratégie améliorée
+      if (pick.length) {
+        res.after = [];
+        for (const c of T) {
+          step('Nouvelle simulation avec la stratégie améliorée…');
+          const imp = improvedVersion(Object.assign({}, res, { e: c.e, strat: c.strat, settings: c.settings, config: c.config }));
+          loadStrategy(imp.strat); applyConfig(imp.config);
+          document.querySelector('input[name=period][value=custom]').checked = true;
+          $('dateFrom').value = isoD(c.d.from); $('dateTo').value = isoD(c.d.to);
+          evalNoRecord = true;
+          const ok = await runFromForm();
+          evalNoRecord = false;
+          res.after.push(ok && lastRun ? lastRun.stats : runOn(c, pick));
+        }
+      }
+    } catch (err) {
+      improveHtml = '<p class="val ko">Analyse impossible : ' + esc(err.message) + '</p>';
+    } finally {
+      evalNoRecord = false; checkRunning = ''; setRunLabel('');
+      restoring = true;
+      try { loadStrategy(saved.strat); applyConfig(saved.config); $('style').value = saved.style; $('preset').value = [...$('preset').options].some((o) => o.value === saved.preset) ? saved.preset : 'mine'; $('presetDesc').textContent = saved.desc; updateWithdrawUI(); syncFormState(); }
+      finally { restoring = false; }
+    }
+    if (res) { improveCtx = res; improveHtml = selectionImproveHtml(res); }
+    renderEvaluation();
+    if ($('improveOut')) $('improveOut').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  function selectionImproveHtml(r) {
+    const p = pctFine, num = (e) => '#' + (evalList().findIndex((x) => x.key === e.key) + 1);
+    const who = r.T.map((c) => num(c.e)).join(', ');
+    let h = '<h4>✨ Améliorer ' + who + ' · ' + esc(r.e.name) + '</h4><p class="hint">Améliorations cherchées sur ' + who + ', puis vérifiées sur ' + r.O.length + ' autre' + (r.O.length > 1 ? 's' : '') +
+      ' simulation' + (r.O.length > 1 ? 's' : '') + ' de la stratégie' + (r.O.length ? ' (' + r.O.map((c) => num(c.e)).join(', ') + ')' : '') + '.</p>';
+    if (!r.rated.length) return h + '<p class="val ko">Aucune modification testée n\'améliore cette simulation.</p>';
+    const base0 = r.T[0].base;
+    h += '<p><b>Ce qui est améliorable :</b></p><ul class="imp-list">' + r.rated.map((x) => '<li><span class="grp">' + esc(x.s.group) + '</span> ' + esc(x.s.title) + ' → ' +
+      (r.T.length === 1 ? p(x.t[0].a.returnPct) + ' <span class="hint">(au lieu de ' + p(base0.returnPct) + ')</span>' : 'note ' + signed(x.tGain, num1) + ' pts') +
+      (r.O.length ? ' · autres simulations : <span class="' + (x.oWorse > x.oBetter ? 'neg' : 'pos') + '">' + x.oBetter + ' meilleure' + (x.oBetter > 1 ? 's' : '') + ', ' + x.oWorse + ' moins bonne' + (x.oWorse > 1 ? 's' : '') + '</span>' : '') + '</li>').join('') + '</ul>';
+    if (!r.pick.length || !r.after) return h + '<p class="val ko">Aucune combinaison n\'améliore ' + who + ' sans dégrader les autres simulations : la stratégie est déjà au mieux pour ces modifications.</p>';
+    const ev = r.eval, good = r.after.every((st) => st.returnPct > 0) || r.after.every((st, k) => st.returnPct > r.T[k].base.returnPct);
+    h += '<div class="imp-proposal"><p><b>Amélioration retenue :</b> ' + esc(r.pick.map((x) => x.title).join(' + ')) + '.</p>' +
+      r.T.map((c, k) => '<p class="val ' + (r.after[k].returnPct > 0 ? 'ok' : 'ko') + '"><b>Nouvelle simulation ' + num(c.e) + '</b> (' + frDate(isoD(c.d.from)) + ' → ' + frDate(isoD(c.d.to)) + ') : ' + p(r.after[k].returnPct) +
+        ' au lieu de ' + p(c.base.returnPct) + ', drawdown −' + num1.format(r.after[k].maxDrawdownPct) + ' % (au lieu de −' + num1.format(c.base.maxDrawdownPct) + ' %), ' + r.after[k].trades + ' trades.</p>').join('') +
+      (r.O.length ? '<p>Sur les ' + r.O.length + ' autres simulations : ' + ev.oBetter + ' meilleure' + (ev.oBetter > 1 ? 's' : '') + ', ' + ev.oWorse + ' moins bonne' + (ev.oWorse > 1 ? 's' : '') +
+        ' ; résultat médian ' + p(ev.o.map((x) => x.b.returnPct).sort((a, b) => a - b)[ev.o.length >> 1]) + ' → ' + p(ev.o.map((x) => x.a.returnPct).sort((a, b) => a - b)[ev.o.length >> 1]) + '.</p>' : '') +
+      '<p>' + (good ? 'Le résultat vous convient ?' : 'Résultat encore perdant, mais meilleur.') + ' Ajouter ces améliorations :</p>' +
+      '<div class="row buttons"><button type="button" class="primary small" id="impApplyCurrent">Ajouter à la stratégie en cours</button>' +
+      '<button type="button" class="secondary small" id="impAsNew">Créer une nouvelle stratégie</button><button type="button" class="secondary small" id="impCancel">Ignorer</button></div>' +
+      '<p class="hint">« Ajouter à la stratégie en cours » modifie les règles de « ' + esc(r.e.name) + ' » (et l\'enregistre si elle est enregistrée) ; Ctrl+Z pour annuler. ' +
+      'Relancez ensuite un lot de tests aléatoires pour vérifier.</p></div>';
+    return h;
+  }
+  const improveInPanel = () => (improveHtml && improveWhere === 'panel' ? '<div class="improve-out" id="improveOut">' + improveHtml + '</div>' : '');
+  function applyToCurrent() {
+    const r = improveCtx; if (!r) return;
+    const name = r.e.strategy.name;
+    undoable('Améliorations ajoutées à « ' + name + ' »', () => {
+      const imp = improvedVersion(r, name);
+      const cur = captureForm();
+      // règles et gestion des trades améliorées ; la configuration du formulaire est gardée, sauf les réglages améliorés
+      loadStrategy(Object.assign({}, imp.strat, { name: name }));
+      applyConfig(Object.assign({}, cur.config, { leverage: imp.config.leverage, broker: Object.assign({}, cur.config.broker, { sizing: imp.config.broker.sizing, risk: imp.config.broker.risk }) }, imp.config.news ? { news: imp.config.news } : {}));
+      const isSaved = storage.get().some((x) => x.name === name);
+      if (isSaved) saveStrategy(Object.assign({}, imp.strat, { name: name }), currentConfig());
+      else { $('preset').value = 'mine'; }
+      $('presetDesc').textContent = 'Améliorations ajoutées : ' + r.pick.map((x) => x.title).join(' + ') + (isSaved ? ' (stratégie enregistrée).' : '. Pensez à « Enregistrer la stratégie ».');
+      logEvent('strategy.enhanced', 'Améliorations ajoutées à ' + name + ' depuis l\'évaluation : ' + r.pick.map((x) => x.title).join(' + '), { name: name });
+    });
+    improveHtml = '<p class="val ok">Améliorations ajoutées à « ' + esc(name) + ' » : ' + esc(r.pick.map((x) => x.title).join(' + ')) + '. Lancez un lot de tests aléatoires pour vérifier.</p>';
+    improveCtx = null;
+    toast('Améliorations ajoutées à « ' + name + ' ».', true);
+    renderEvaluation();
   }
   function improveReportHtml(r) {
     const idx = evalList().findIndex((x) => x.key === r.e.key) + 1;
@@ -2792,6 +2921,14 @@
     const b = ev.target.closest('.imp-btn');
     if (b) return improveFromReport(b);
     if (ev.target.id === 'impCreate') return createImproved();
+    if (ev.target.id === 'impApplyCurrent') return applyToCurrent();
+    if (ev.target.id === 'impAsNew') {
+      // même création que depuis le rapport, avec un nom proposé
+      const nm = prompt('Nom de la nouvelle stratégie :', newStratName(improveCtx.e.name));
+      if (!nm) return;
+      const box = document.createElement('input'); box.id = 'impName'; box.value = nm; box.hidden = true; $('evalBody').appendChild(box);
+      return createImproved();
+    }
     if (ev.target.id === 'impCancel') { improveHtml = ''; improveCtx = null; renderEvaluation(); }
   });
   function renderEvalReco(list, filtered) {
