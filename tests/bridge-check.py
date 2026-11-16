@@ -44,6 +44,13 @@ if "[Tester]" in ini:
     json.dump({"deposit": float(vals["Deposit"]), "profit": 42.5, "trades": 7, "profitTrades": 3, "profitFactor": 1.3,
                "maxDrawdownPct": 12.0, "sharpe": 0.5, "symbol": vals["Symbol"], "period": "PERIOD_" + vals["Period"],
                "ini": vals, "deals": []}, open(os.path.join(common, "Forexia", name + ".json"), "w"))
+elif vals.get("Script") == "Forexia\\ForexiaCalendar":
+    assert vals.get("ShutdownTerminal") == "1"
+    os.makedirs(os.path.join(common, "Forexia"), exist_ok=True)
+    rows = ["time;currency;importance;event", "1717763400;USD;3;Nonfarm Payrolls", "1717680600;EUR;3;ECB Interest Rate Decision",
+            "1717750000;JPY;2;Household Spending", "1717600000;GBP;2;Construction PMI"]
+    open(os.path.join(common, "Forexia", "calendar.csv"), "w", encoding="latin-1").write("\r\n".join(rows) + "\r\n")
+    open(os.path.join(common, "Forexia", "calendar.done"), "w").write("4;4")
 else:
     open(os.path.join(os.path.dirname(cfg), "startup_seen.txt"), "w").write(json.dumps(vals))
 '''
@@ -181,6 +188,21 @@ def main():
     check("conversion USD -> EUR via EURUSD", (js.get("conv") or {}).get("symbol") == "EURUSD" and js["conv"]["divide"] is True and len(js["conv"]["rates"]) == 730, js.get("conv", {}).get("symbol"))
     st, js, _ = call("POST", "/bars", {"terminalId": tid, "symbol": "XAUUSD", "timeframe": "D1", "from": "2023-01-01", "to": "2024-12-31"})
     check("symbole absent : symboles proches proposés", js.get("ok") is False and "GBPUSD.m" in js.get("message", ""), js)
+
+    st, js, _ = call("GET", "/calendar?from=0&to=9999999999")
+    check("calendrier pas encore exporté", js.get("ok") is False and js.get("missing") is True, js)
+    open(flag, "w").close()
+    st, js, _ = call("POST", "/calendar/export", {"terminalId": tid})
+    check("export du calendrier : MT5 ouvert, demande de fermeture", js.get("needClose") is True, js)
+    st, js, _ = call("POST", "/calendar/export", {"terminalId": tid, "closeTerminal": True})
+    script = os.path.join(data, "MQL5", "Scripts", "Forexia", "ForexiaCalendar.mq5")
+    check("script MQL5 du calendrier compilé et lancé", js.get("ok") and js.get("count") == 4 and os.path.exists(script[:-4] + ".ex5")
+          and "CalendarValueHistory" in open(script, encoding="utf-8-sig").read(), js)
+    st, js, _ = call("GET", "/calendar?from=1717650000&to=1717800000")
+    check("annonces filtrées par dates", js.get("ok") and sorted(e["currency"] for e in js["events"]) == ["EUR", "JPY", "USD"]
+          and all(set(e) == {"t", "currency", "importance"} for e in js["events"]), js)
+    st, js, _ = call("GET", "/calendar", token_="XXXX-XXXX")
+    check("calendrier : code requis", st == 401, st)
 
     st, js, _ = call("POST", "/experts", {"terminalId": tid})
     names = [x["fileName"] for x in js.get("experts", [])]

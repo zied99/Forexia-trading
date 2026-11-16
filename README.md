@@ -1,4 +1,4 @@
-# Forexia — Backtest de stratégies Forex
+# Forexia 1.2 — Backtest de stratégies Forex
 
 Page web qui simule (*backtest*) une stratégie de trading Forex fondée sur des indicateurs techniques
 (RSI, MACD, stochastique, moyennes mobiles, Bollinger…). Tout tourne dans le navigateur : pas de serveur,
@@ -117,7 +117,11 @@ Stop loss 50 pips, take profit 100 pips.
 - **Conditions** : passe au-dessus / en dessous de, croise à la hausse / à la baisse, casse, est supérieur /
   inférieur à, est entre 40 et 60, zone de survente / surachat, sort de la zone de survente,
   positif / négatif, haussier / baissier ; reliées par « et » / « ou ».
-- **Risque** : stop loss N pips, take profit / objectif N pips.
+- **Risque** : stop loss N pips, take profit / objectif N pips ; (1.2) « stop loss 2 ATR », « stop suiveur 30 pips » ou « 2 ATR »,
+  « stop au prix d'entrée après 1 ATR », « fermer après 10 bougies », « pause de 5 bougies après 3 pertes de suite ».
+- **(1.2)** ADX, +DI / -DI, SAR parabolique, SuperTrend, Donchian haut / bas, Keltner, point pivot, R1 / S1, Tenkan / Kijun,
+  Heikin Ashi, englobante haussière / baissière, marteau, étoile filante, divergence haussière du RSI, « la pente de la moyenne
+  mobile 50 est positive », et une unité de temps après un indicateur : « la moyenne mobile 50 en H4 », « le prix en hebdomadaire ».
 
 La page affiche « Ce que j'ai compris » et signale chaque phrase non comprise.
 
@@ -140,20 +144,59 @@ CLOSE < BB_LOWER(20, 2) OR RSI(14) < 25
 | Stochastique | `STOCH_K(k,d,lissage)`, `STOCH_D(k,d,lissage)` |
 | Bollinger | `BB_UPPER(n,k)`, `BB_MIDDLE(n,k)`, `BB_LOWER(n,k)` |
 | Autres oscillateurs | `CCI(n)`, `WILLR(n)`, `MOM(n)`, `ROC(n)`, `ATR(n)` |
-| Outils | `CROSS_UP(a,b)`, `CROSS_DOWN(a,b)`, `PREV(x,n)`, `HIGHEST(x,n)`, `LOWEST(x,n)` |
+| Outils | `CROSS_UP(a,b)`, `CROSS_DOWN(a,b)`, `PREV(x,n)`, `HIGHEST(x,n)`, `LOWEST(x,n)`, `SLOPE(x,n)` (pente sur n bougies) |
+| Tendance (1.2) | `ADX(n)`, `PLUS_DI(n)`, `MINUS_DI(n)`, `PSAR(pas,max)`, `SUPERTREND(n,mult)`, `SUPERTREND_DIR(n,mult)` (1 / −1) |
+| Ichimoku (1.2) | `TENKAN(9)`, `KIJUN(26)`, `SENKOU_A(9,26)`, `SENKOU_B(52,26)` (nuage décalé, sans regarder le futur) |
+| Canaux (1.2) | `DONCHIAN_UPPER/MIDDLE/LOWER(n)`, `KELTNER_UPPER/MIDDLE/LOWER(n,mult,atr)` |
+| Pivots (1.2) | `PIVOT`, `PIVOT_R1`, `PIVOT_R2`, `PIVOT_S1`, `PIVOT_S2` (journée précédente) |
+| Bougies (1.2) | `HA_OPEN/HIGH/LOW/CLOSE` (Heikin-Ashi), `BULL_ENGULF`, `BEAR_ENGULF`, `HAMMER`, `SHOOTING_STAR` (1 si la figure apparaît) |
+| Divergences (1.2) | `BULL_DIV(RSI(14), 14)`, `BEAR_DIV(osc, n)` |
+| Temps (1.2) | `HOUR`, `MINUTE`, `WEEKDAY` (1 = lundi … 7), `DAY`, `MONTH` |
+| Unité de temps supérieure (1.2) | `X@H4`, `EMA(50)@D1`, `CLOSE@W1` : calcul sur les bougies H4 / D1 / W1 **closes** (pas de biais d'anticipation) |
+| Seuils relatifs (1.2) | `CLOSE - PREV(CLOSE, 1) > 1.5 * ATR(14)` |
 | Opérateurs | `> < >= <= == != + - * /`, `AND` `OR` `NOT` (ou `ET` `OU` `NON`) |
 
 ## Hypothèses de simulation
 
 - Signal calculé à la clôture d'une bougie, exécuté à l'**ouverture de la suivante** (pas de biais d'anticipation).
 - Une position à la fois ; un signal d'entrée inverse ferme la position et la retourne.
-- Taille de position : `capital × exposition % × levier` (les gains sont réinvestis).
+- Taille de position : `capital × exposition % × levier` (les gains sont réinvestis), ou (1.2) lots fixes, ou % du capital risqué jusqu'au stop.
+- **Gestion des trades (1.2)** : stop-loss / take-profit en pips ou en multiples d'ATR (ATR de la bougie qui précède l'entrée),
+  stop suiveur et passage à l'équilibre mis à jour avec le meilleur prix de chaque bougie (de chaque bougie M1 avec les données
+  du courtier ; à chaque tick dans l'EA), fermeture après N bougies, pause après N pertes consécutives, commission par lot.
+- **Calendrier économique (1.2)** : entrées bloquées (ou positions fermées) de X minutes avant à Y minutes après une annonce
+  à fort impact d'une des deux devises de la paire.
 - Stop-loss / take-profit testés sur le plus haut / plus bas de la bougie ; si les deux sont touchés, le stop est retenu.
 - **Margin call** : clôture forcée quand les fonds propres tombent sous 50 % de la marge utilisée (règle ESMA).
 - Spread payé à chaque ouverture. Pas de swap / frais de financement overnight.
 - Le P&L est calculé en rendement relatif du notionnel (approximation de la conversion de devise du compte).
 - Les données BCE n'ont qu'un cours par jour : ouverture = clôture de la veille, pas de mèches.
   Pour un test plus fin des stops, importez un CSV OHLC.
+
+## Améliorer (1.2)
+
+Chaque suggestion est backtestée avant d'être proposée, puis contrôlée sur **jusqu'à 3 périodes précédentes** de même durée
+qui n'ont pas servi à la choisir (contrôle « walk-forward ») ; elle est « confirmée » si elle gagne sur la majorité d'entre elles.
+
+- **Note** : rendement − ½ drawdown, + régularité (part des mois gagnants), + facteur de profit, − pénalité sous 10 trades.
+- **Tendance** : prix au-dessus d'une moyenne, pente de la moyenne, alignement EMA 20 > 50 > 200, force (ADX, DMI),
+  régime sans tendance (ADX bas) pour les stratégies de retour à la moyenne, tendance de l'unité de temps supérieure.
+- **Croisements de moyennes** : comme entrée supplémentaire, prix / moyenne, et comme confirmation avec une **grille de périodes**
+  choisie de façon robuste (la moins bonne note entre la période testée et la précédente).
+- **Gestion des trades** : stops en ATR, stop suiveur, passage à l'équilibre, durée maximale, filtre de volatilité,
+  jours et heures, pause après des pertes, taille au risque, annonces économiques (si le calendrier MT5 est disponible).
+- **Combinaison recommandée** : les suggestions confirmées cumulées une par une, gardées seulement si elles progressent ensemble.
+- **Robustesse** : la stratégie (avec les améliorations cochées) testée sur 8 grandes paires, même période.
+
+## Calendrier économique (1.2)
+
+Le calendrier vient de **MetaTrader 5** : la passerelle (1.5 ou plus) compile et lance un petit script MQL5 (`ForexiaCalendar`)
+qui l'exporte dans `…\MetaQuotes\Terminal\Common\Files\Forexia\calendar.csv` (heure du serveur ; devise ; importance ; nom).
+Bouton **« Mettre à jour le calendrier depuis MT5 »** sous la case « Éviter les annonces économiques » (MT5 est fermé puis relancé brièvement).
+
+- Forexia lit ce fichier pour ses simulations ; l'EA aussi **dans le testeur de stratégie** (qui n'a pas accès au calendrier).
+- En compte démo ou réel, l'EA interroge directement le calendrier de MT5 (`CalendarValueHistory`).
+- Avec des bougies journalières, une annonce bloque toute la journée.
 
 ## Passerelle MetaTrader 5 (déploiement direct)
 
@@ -227,6 +270,7 @@ css/style.css       styles (thème clair / sombre)
 js/indicators.js    calcul des indicateurs
 js/expr.js          langage de règles (analyse + évaluation)
 js/backtest.js      moteur de simulation et statistiques
+js/trade.js         gestion des trades commune aux moteurs (ATR, stop suiveur, pause, annonces)
 js/data.js          sources de données (API, CSV, simulation)
 js/presets.js       modèles de stratégies
 js/french.js        stratégies en français + stratégie aléatoire
@@ -245,3 +289,16 @@ bridge/             passerelle locale Forexia <-> MetaTrader 5
 ```
 
 > Outil éducatif : les performances passées ne préjugent pas des performances futures.
+
+## Historique des versions
+
+### 1.2 (novembre 2026)
+- Indicateurs : ADX / DMI, SAR parabolique, SuperTrend, Ichimoku, Donchian, Keltner, pivots, Heikin-Ashi, figures de bougies,
+  divergences, pente, variables de temps, règles multi-unités de temps (`X@H4`), seuils relatifs à l'ATR.
+- Gestion des trades : stops / objectifs en ATR, stop suiveur, passage à l'équilibre, durée maximale, pause après des pertes,
+  commission par lot, taille au risque ou en lots fixes dans le moteur standard — identiques dans l'EA MT5.
+- Calendrier économique de MT5 (via la passerelle 1.5) : bloquer les entrées ou fermer les positions autour des annonces.
+- Améliorer : tendance (pente, alignement, ADX, unité supérieure), croisements de moyennes (entrée, confirmation, grille robuste),
+  gestion des trades, régime de marché, note fondée sur la régularité, combinaison recommandée, contrôle sur 3 périodes,
+  test sur d'autres paires.
+- 3 nouveaux modèles : SuperTrend + ADX, cassure de Donchian, Ichimoku Tenkan / Kijun.

@@ -27,7 +27,7 @@
 
   let lastFocusedRule = $('longEntry');
   const BRIDGE_URL = 'http://127.0.0.1:8787';
-  const BRIDGE_MIN = '1.2'; // version minimale de la passerelle attendue par cette page
+  const BRIDGE_MIN = '1.5'; // version minimale de la passerelle attendue par cette page
   let bridgeToken = '';
   try { bridgeToken = localStorage.getItem('forexia.bridgeToken') || ''; } catch (e) { /* ignoré */ }
   let csvBars = null, csvName = '';
@@ -169,6 +169,42 @@
       return r.events || [];
     } catch (e) { return null; }
   }
+  async function refreshNewsStatus() {
+    if (!bridgeToken) { $('newsStatus').textContent = 'Passerelle MT5 non connectée : connectez-la (source « Mon courtier » ou fenêtre « Déployer ») pour utiliser le calendrier.'; return; }
+    try {
+      const r = await bridgeCall('GET', '/calendar');
+      if (r && r.ok) {
+        const lo = r.events.reduce((m, e) => Math.min(m, e.t), Infinity), hi = r.events.reduce((m, e) => Math.max(m, e.t), 0);
+        const day = (t) => frDate(new Date(t * 1000).toISOString().slice(0, 10));
+        $('newsStatus').textContent = 'Calendrier MT5 : ' + r.events.length.toLocaleString('fr-FR') + ' annonces (impact moyen et fort)' +
+          (r.events.length ? ', du ' + day(lo) + ' au ' + day(hi) : '') + ', exporté le ' + new Date(r.updated * 1000).toLocaleDateString('fr-FR') + '.';
+      } else if (r && r.missing) $('newsStatus').textContent = 'Calendrier pas encore exporté : cliquez sur « Mettre à jour le calendrier depuis MT5 ».';
+      else $('newsStatus').textContent = 'Passerelle à mettre à jour (version 1.5 ou plus) pour le calendrier économique.';
+    } catch (e) { $('newsStatus').textContent = 'Passerelle MT5 injoignable : lancez-la sur votre PC.'; }
+  }
+  $('newsOn').addEventListener('change', () => { if ($('newsOn').checked) refreshNewsStatus(); });
+  $('newsExport').addEventListener('click', async () => {
+    if (!bridgeToken) { refreshNewsStatus(); return; }
+    const btn = $('newsExport');
+    btn.disabled = true; $('newsStatus').textContent = 'Export du calendrier par MetaTrader 5… (jusqu\'à quelques minutes)';
+    try {
+      const st = await bridgeCall('GET', '/status');
+      const term = (st.terminals || [])[0];
+      if (!term) throw new Error('MT5 introuvable sur ce PC.');
+      const body = { terminalId: term.id, symbol: ($('brokerSymbol').value || $('pair').value.replace('/', '')) };
+      let r = await bridgeCall('POST', '/calendar/export', body);
+      if (r.needClose) {
+        if (!confirm('MetaTrader 5 est ouvert : il va être fermé, puis relancé brièvement pour exporter le calendrier économique. Continuer ?')) { $('newsStatus').textContent = 'Export annulé.'; return; }
+        r = await bridgeCall('POST', '/calendar/export', Object.assign(body, { closeTerminal: true }));
+      }
+      if (!r.ok) throw new Error(r.message || 'export impossible');
+      calendarCache.clear();
+      logEvent('calendar.exported', 'Calendrier économique exporté depuis MT5 : ' + r.count + ' annonces', { count: r.count });
+      await refreshNewsStatus();
+    } catch (e) {
+      $('newsStatus').textContent = e.code === 401 ? 'Code de la passerelle incorrect : reconnectez-la.' : 'Échec : ' + e.message;
+    } finally { btn.disabled = false; }
+  });
   function newsTimes(events, pair, impact) {
     const cur = pair.split('/'), min = impact === 'medium' ? 2 : 3;
     return events.filter((e) => cur.includes(e.currency) && e.importance >= min).map((e) => e.t).sort((a, b) => a - b);
@@ -668,7 +704,7 @@
       } else if (settings.news) {
         warnings.push({ info: true, html: 'Calendrier économique : ' + settings.news.times.length + ' annonces de ' + settings.newsCurrencies + ' sur la période' +
           (result.diag && result.diag.newsBlocked ? ', ' + result.diag.newsBlocked + ' entrée(s) évitée(s)' : '') + '.' +
-          (loaded.broker ? '' : ' Heures du calendrier = heure du serveur MT5 ; les cours BCE sont journaliers, le filtre bloque donc toute la journée de l\'annonce.') });
+          ((loaded.timeframe || 'D1') === 'D1' ? ' Heures du calendrier = heure du serveur MT5 ; avec des bougies journalières, le filtre couvre toute la journée de l\'annonce.' : '') });
       }
       if (result.diag && result.diag.paused) warnings.push({ info: true, html: 'Pause après des pertes : ' + result.diag.paused + ' entrée(s) évitée(s).' });
       if (settings.sizing === 'risk' && !(strat.stopLossPips > 0 || strat.stopAtr > 0)) warnings.push({ info: true, html: 'Taille « % du capital risqué » sans stop-loss : ' + (loaded.broker ? 'lots fixes utilisés.' : 'taille « capital × exposition × levier » utilisée.') });
@@ -990,7 +1026,7 @@
         '<button type="button" class="secondary" id="customTest">Tester</button></div><p class="err" id="customError"></p><p class="hint" id="customNotes"></p></div>' +
         '<div id="suggList"></div>' +
         '<div class="custom-box"><b>Robustesse : tester sur d\'autres paires</b><p class="hint">Une bonne stratégie gagne aussi sur des paires proches, pas seulement sur celle qui a servi à la régler. ' +
-        'Même période, cours BCE (les améliorations cochées sont incluses).</p><div class="row buttons"><button type="button" class="secondary" id="robustTest">Tester sur d\'autres paires</button></div><div id="robustOut"></div></div>';
+        'Même période, cours BCE (ou données simulées si c\'est la source choisie) ; les améliorations cochées sont incluses.</p><div class="row buttons"><button type="button" class="secondary" id="robustTest">Tester sur d\'autres paires</button></div><div id="robustOut"></div></div>';
       if (enh.suggestions.length) {
         if (enh.validation) html += '<p class="modal-note">Chaque suggestion est aussi testée sur ' + (enh.folds.length > 1 ? 'les <b>' + enh.folds.length + ' périodes précédentes</b>' : 'la <b>période précédente</b>') +
           ' de même durée, qui n\'ont pas servi à la choisir (contrôle « walk-forward »). Privilégiez les suggestions « confirmées ». La note tient compte du rendement, du drawdown, de la régularité (mois gagnants), du facteur de profit et du nombre de trades.</p>';
@@ -1033,9 +1069,11 @@
     if (!v) return '';
     // Mes améliorations peuvent être moins bonnes que l'actuel sur la période testée : on le dit.
     const worseNow = sg && sg.custom && sg.score <= E.score(enh.base);
-    const verdict = worseNow ? (v.confirmed ? ' : moins bonne sur la période testée, meilleure sur la précédente' : ' : moins bonne sur les deux périodes')
+    let verdict = worseNow ? (v.confirmed ? ' : moins bonne sur la période testée, meilleure sur la précédente' : ' : moins bonne sur les deux périodes')
       : v.confirmed ? ' : confirmée' : ' : non confirmée, peut-être un hasard';
     const many = v.total > 1;
+    // « confirmée » se juge sur la note (rendement, drawdown, régularité…), pas sur le seul rendement
+    if (v.confirmed && !worseNow && v.stats.returnPct < v.base.returnPct) verdict += ' (gain plus faible, mais drawdown plus faible : −' + num1.format(v.stats.maxDrawdownPct) + ' % au lieu de −' + num1.format(v.base.maxDrawdownPct) + ' %)';
     return '<div class="val ' + (v.confirmed && !worseNow ? 'ok' : 'ko') + '">' + (many ? 'Meilleure sur ' + v.wins + ' période(s) de contrôle sur ' + v.total + ' · ' : '') +
       'période précédente : ' + pct(v.stats.returnPct) + ' au lieu de ' + pct(v.base.returnPct) + (many ? verdict.replace('les deux périodes', 'la période testée et les contrôles').replace('la précédente', 'les contrôles') : verdict) + '</div>';
   }
@@ -1051,9 +1089,13 @@
     const runs = [];
     for (const p of pairs) {
       try {
-        const key = p + '|' + F.data.iso(from) + '|' + F.data.iso(to);
-        if (!onlineCache.has(key)) onlineCache.set(key, await F.data.fetchFrankfurter(p, from, to));
-        const b = F.data.estimateWicks(onlineCache.get(key));
+        let b;
+        if (lastRunCtx.config.source === 'synthetic') b = F.data.generateSynthetic(p, from, to);
+        else {
+          const key = p + '|' + F.data.iso(from) + '|' + F.data.iso(to);
+          if (!onlineCache.has(key)) onlineCache.set(key, await F.data.fetchFrankfurter(p, from, to));
+          b = F.data.estimateWicks(onlineCache.get(key));
+        }
         const se = Object.assign({}, c.settings, { pair: p, startIndex: F.data.indexFrom(b, start), timeframe: 'D1', pipSize: undefined });
         delete se.broker; delete se.news; delete se.newsCalendar;
         if (se.sizing === 'fixed') se.sizing = 'backtest';

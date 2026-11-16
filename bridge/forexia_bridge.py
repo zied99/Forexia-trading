@@ -26,9 +26,9 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
-VERSION = "1.4"
+VERSION = "1.5"
 DEFAULT_PORT = 8787
 PAGE_ORIGIN = "https://zied99.github.io"
 FILE_RE = re.compile(r"^Forexia_[A-Za-z0-9_]{1,60}\.mq5$")
@@ -414,6 +414,122 @@ def attach(args, term, body):
     return {"ok": True, "message": "MetaTrader 5 redémarre avec l'EA sur un graphique %s %s." % (symbol, period)}
 
 
+# ---------------------------------------------------------------- calendrier économique (Forexia 1.2)
+# Le module Python MetaTrader5 n'a pas de calendrier : un petit script MQL5 l'exporte depuis le terminal
+# dans Common\Files\Forexia\calendar.csv (heure du serveur ; devise ; importance 1-3 ; nom).
+# Ce fichier sert aussi aux EA Forexia dans le testeur de stratégie, qui n'a pas accès au calendrier.
+CALENDAR_SCRIPT = r"""//+------------------------------------------------------------------+
+//| ForexiaCalendar : export du calendrier économique pour Forexia    |
+//+------------------------------------------------------------------+
+#property script_show_inputs false
+void OnStart()
+  {
+   datetime from = D'2010.01.01';
+   datetime to = TimeTradeServer() + 60 * 86400;
+   MqlCalendarValue v[];
+   int n = CalendarValueHistory(v, from, to);
+   int fh = FileOpen("Forexia\\calendar.tmp", FILE_WRITE | FILE_TXT | FILE_ANSI | FILE_COMMON);
+   if(fh == INVALID_HANDLE) { Print("Forexia : calendrier non écrit (", GetLastError(), ")"); return; }
+   FileWriteString(fh, "time;currency;importance;event\r\n");
+   int kept = 0;
+   ulong lastId = 0;
+   MqlCalendarEvent ev;
+   MqlCalendarCountry co;
+   bool ok = false;
+   for(int i = 0; i < n; i++)
+     {
+      if(v[i].event_id != lastId)
+        {
+         lastId = v[i].event_id;
+         ok = CalendarEventById(v[i].event_id, ev) && CalendarCountryById(ev.country_id, co);
+        }
+      if(!ok || ev.importance < CALENDAR_IMPORTANCE_MODERATE) continue;
+      string name = ev.name;
+      StringReplace(name, ";", ",");
+      FileWriteString(fh, IntegerToString((long)v[i].time) + ";" + co.currency + ";" + IntegerToString((int)ev.importance) + ";" + name + "\r\n");
+      kept++;
+     }
+   FileClose(fh);
+   FileDelete("Forexia\\calendar.csv", FILE_COMMON);
+   FileMove("Forexia\\calendar.tmp", FILE_COMMON, "Forexia\\calendar.csv", FILE_COMMON | FILE_REWRITE);
+   int fd = FileOpen("Forexia\\calendar.done", FILE_WRITE | FILE_TXT | FILE_ANSI | FILE_COMMON);
+   if(fd != INVALID_HANDLE) { FileWriteString(fd, IntegerToString(kept) + ";" + IntegerToString(n)); FileClose(fd); }
+   PrintFormat("Forexia : %d annonces exportées (%d au total).", kept, n);
+  }
+"""
+
+
+def _compile(term, src):
+    ex5, log = src[:-4] + ".ex5", src[:-4] + ".log"
+    for p in (ex5, log):
+        if os.path.exists(p):
+            os.remove(p)
+    started = time.time()
+    run_program(term["metaeditor"], ['/compile:"%s"' % src, '/log:"%s"' % log,
+                                     '/inc:"%s"' % os.path.join(term["dataDir"], "MQL5")], timeout=180)
+    text = read_text(log) if os.path.exists(log) else ""
+    errors = [l.strip() for l in text.splitlines() if re.search(r":\s*(error|erreur)\s*\d*\s*:", l, re.I)]
+    return os.path.exists(ex5) and os.path.getmtime(ex5) >= started - 2 and not errors, errors
+
+
+def calendar_file(args):
+    return os.path.join(common_files(args), "Forexia", "calendar.csv")
+
+
+def read_calendar(args, t_from=None, t_to=None):
+    path = calendar_file(args)
+    if not os.path.exists(path):
+        return None
+    events = []
+    with open(path, "r", encoding="latin-1", errors="replace") as f:
+        for line in f:
+            parts = line.rstrip("\r\n").split(";")
+            if len(parts) < 3 or not parts[0].isdigit():
+                continue
+            t = int(parts[0])
+            if (t_from is not None and t < t_from) or (t_to is not None and t > t_to):
+                continue
+            events.append({"t": t, "currency": parts[1].upper()[:3], "importance": int(parts[2]) if parts[2].isdigit() else 0})
+    return {"events": events, "updated": int(os.path.getmtime(path))}
+
+
+def calendar_export(args, term, body):
+    if not term["metaeditor"] or not term["terminal"]:
+        raise ValueError("MetaEditor ou le terminal MT5 introuvable dans " + (term["installDir"] or "?"))
+    folder = os.path.join(term["dataDir"], "MQL5", "Scripts", "Forexia")
+    os.makedirs(folder, exist_ok=True)
+    src = os.path.join(folder, "ForexiaCalendar.mq5")
+    with open(src, "wb") as f:
+        f.write(b"\xef\xbb\xbf" + CALENDAR_SCRIPT.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8"))
+    compiled, errors = _compile(term, src)
+    if not compiled:
+        return {"ok": False, "message": "Le script d'export du calendrier ne compile pas : " + "; ".join(errors[:3])}
+    blocked = _ensure_closed(term, body)
+    if blocked:
+        return blocked
+    done = os.path.join(common_files(args), "Forexia", "calendar.done")
+    os.makedirs(os.path.dirname(done), exist_ok=True)
+    if os.path.exists(done):
+        os.remove(done)
+    symbol = str(body.get("symbol") or "EURUSD")
+    if not SYMBOL_RE.match(symbol):
+        symbol = "EURUSD"
+    ini = os.path.join(term["dataDir"], "Forexia", "calendar.ini")
+    write_ini(ini, "\n".join(["[StartUp]", "Script=Forexia\\ForexiaCalendar", "Symbol=" + symbol, "Period=H1", "ShutdownTerminal=1", ""]))
+    run_program(term["terminal"], ['/config:"%s"' % ini], timeout=0, wait=False)
+    for _ in range(int(args.test_timeout)):
+        if os.path.exists(done):
+            break
+        time.sleep(1)
+    if not os.path.exists(done):
+        return {"ok": False, "message": "MT5 n'a pas exporté le calendrier à temps. Ouvrez MT5 : le compte est-il connecté ? "
+                                        "(onglet Calendrier visible dans la Boîte à outils)"}
+    cal = read_calendar(args) or {"events": []}
+    ev = cal["events"]
+    ts = [e["t"] for e in ev]
+    return {"ok": True, "count": len(ev), "from": min(ts) if ts else None, "to": max(ts) if ts else None, "updated": cal.get("updated")}
+
+
 # ---------------------------------------------------------------- base de données (SQLite)
 DB_LOCK = threading.Lock()
 SCHEMA = """
@@ -594,6 +710,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"ok": True, "version": VERSION, "terminals": [
                 dict({k: t[k] for k in ("id", "name", "installDir", "dataDir")}, metaeditor=bool(t["metaeditor"]), terminal=bool(t["terminal"]))
                 for t in terms]})
+        if path == "/calendar":
+            if not self._authorized():
+                return
+            q = parse_qs(urlparse(self.path).query)
+            try:
+                t_from = int(q.get("from", ["0"])[0])
+                t_to = int(q.get("to", [str(2 ** 40)])[0])
+            except ValueError:
+                return self._send(200, {"ok": False, "message": "Dates invalides."})
+            cal = read_calendar(self.server.args, t_from, t_to)
+            if cal is None:
+                return self._send(200, {"ok": False, "missing": True, "message": "Calendrier pas encore exporté depuis MT5."})
+            return self._send(200, dict(ok=True, **cal))
         self._send(404, {"ok": False, "message": "Inconnu."})
 
     def do_POST(self):
@@ -609,7 +738,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, db_action(self.server.args, path[4:], body))
             except (ValueError, sqlite3.Error, OSError) as e:
                 return self._send(200, {"ok": False, "message": str(e)})
-        actions = {"/deploy": deploy, "/test": run_test, "/attach": attach, "/bars": broker_bars, "/experts": list_experts}
+        actions = {"/deploy": deploy, "/test": run_test, "/attach": attach, "/bars": broker_bars, "/experts": list_experts, "/calendar/export": calendar_export}
         if path not in actions:
             return self._send(404, {"ok": False, "message": "Inconnu."})
         if not self._authorized():
@@ -632,6 +761,7 @@ class Handler(BaseHTTPRequestHandler):
             log = {"/deploy": ("mt5.compile", lambda r: ("Compilé : " if r.get("compiled") else "Échec de compilation : ") + str(body.get("fileName"))),
                    "/test": ("mt5.test", lambda r: "Test MT5 %s %s %s → %s" % (body.get("fileName"), body.get("symbol"), body.get("period"),
                              "%.2f %%" % (100.0 * r["result"]["profit"] / r["result"]["deposit"]) if r.get("ok") and r["result"].get("deposit") else (r.get("message") or "en attente"))),
+                   "/calendar/export": ("mt5.calendar", lambda r: "Calendrier économique exporté : %s annonces" % r.get("count") if r.get("ok") else "Export du calendrier : " + str(r.get("message"))),
                    "/attach": ("mt5.attach", lambda r: "EA ouvert sur un graphique : %s %s %s" % (body.get("fileName"), body.get("symbol"), body.get("period")))}.get(path)
             if log and not result.get("needClose"):
                 light = {k: v for k, v in result.items() if k != "result"} if path == "/test" else result

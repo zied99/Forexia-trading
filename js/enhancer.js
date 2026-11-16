@@ -467,7 +467,8 @@
     const res = [];
     for (const f of folds) {
       const r = apply({ strat: strat, settings: f.settings }), stats = run(f.bars, r.strat, r.settings);
-      if (stats) res.push({ stats: stats, base: f.base, better: score(stats) > score(f.base) });
+      // meilleure : note supérieure, sans payer un gain plus faible par un risque plus élevé
+      if (stats) res.push({ stats: stats, base: f.base, better: score(stats) > score(f.base) && (stats.returnPct >= f.base.returnPct || stats.maxDrawdownPct < f.base.maxDrawdownPct) });
     }
     if (!res.length) return null;
     const wins = res.filter((x) => x.better).length;
