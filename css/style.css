@@ -473,3 +473,4 @@ a.btn-link:hover { border-color: var(--accent); color: var(--accent); }
 .chart .pending { fill: var(--accent); opacity: .12; animation: fx-pulse 1s ease-in-out infinite alternate; }
 @keyframes fx-pulse { from { opacity: .06; } to { opacity: .22; } }
 .lg-up { color: var(--up); font-weight: 600; } .lg-blue { color: #2563eb; font-weight: 600; }
+.chart .bar-top { font-size: 10.5px; fill: var(--muted); font-weight: 600; pointer-events: auto; }

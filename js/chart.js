@@ -283,6 +283,14 @@
         const gr = el('rect', { x: cx - bw / 2 - 1, y: gt, width: bw + 2, height: Math.max(1, gb - gt), rx: 2, class: 'ghost ' + gh.kind }, svg);
         if (opts.titles) { const ti = el('title', {}, gr); ti.textContent = opts.titles[i]; }
       }
+      // petit texte au-dessus de la barre (ex. durée de la période testée)
+      if (opts.topLabels && opts.topLabels[i]) {
+        const gTop = gh ? y(Math.max(0, gh.value)) : top;
+        const ty = Math.min(top, gTop, y(0)) - 4;
+        const tl = el('text', { x: cx, y: Math.max(10, ty), class: 'bar-top', 'text-anchor': 'middle' }, svg);
+        tl.textContent = slot < 34 ? opts.topLabels[i].short : opts.topLabels[i].long;
+        if (opts.titles) { const ti = el('title', {}, tl); ti.textContent = opts.titles[i]; }
+      }
       if (opts.pending === i) el('rect', { x: cx - bw / 2 - 4, y: m.t, width: bw + 8, height: innerH, rx: 3, class: 'pending' }, svg);
       if (stars.has(i)) {
         const sy = top - 9;

@@ -2368,6 +2368,8 @@
       labels: list.map((e, i) => '#' + (i + 1)), values: list.map((e) => clip(e.extended ? e.extended.returnPct : e.returnPct)), format: (v) => num1.format(v) + ' %', height: 200,
       ghosts: list.map((e, i) => (e.extended ? { i: i, value: clip(e.returnPct), kind: e.returnPct > 0 ? 'up' : 'blue' } : null)).filter(Boolean),
       pending: list.findIndex((e) => e.key === checkCurrentKey),
+      // nombre de mois de test au-dessus de chaque barre
+      topLabels: list.map((e) => { const m = Math.max(1, Math.round(durationDays(e.from, e.to) / 30.4375)); return { long: m + ' mois', short: m + 'm' }; }),
       titles: list.map((e, i) => '#' + (i + 1) + ' ' + e.name + ' · ' + e.pair + ' · ' + (e.extended ? 'origine ' + frDate(e.extended.from) + ' → ' + frDate(e.extended.to) + ' : ' + pctTxt(e.extended.returnPct) + ' ; prolongée jusqu\'au ' + frDate(e.to) + ' : ' : frDate(e.from) + ' → ' + frDate(e.to) + ' : ') +
         pctTxt(e.returnPct) + ', drawdown −' + num1.format(e.maxDrawdownPct) + ' %'),
       ariaLabel: 'Résultat de chaque simulation',
