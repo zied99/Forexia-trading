@@ -53,6 +53,103 @@
     html += '<option value="custom">Stratégie vierge…</option><option value="mine" hidden>Ma stratégie (non enregistrée)</option>';
     $('preset').innerHTML = html;
     if (selected) $('preset').value = selected;
+    renderPresetPick();
+  }
+
+  // ---------- Liste « Modèle » personnalisée : choisir, renommer ✏️ ou supprimer 🗑 une stratégie enregistrée ----------
+  // (une liste déroulante native ne peut pas contenir de boutons ; la <select> cachée reste la source de vérité)
+  (function () {
+    const sel = $('preset'), proto = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+    Object.defineProperty(sel, 'value', { get() { return proto.get.call(this); }, set(v) { proto.set.call(this, v); renderPresetPick(); } });
+  })();
+  function renderPresetPick() {
+    const sel = $('preset'), opt = sel.selectedOptions[0];
+    $('presetBtn').textContent = opt ? opt.textContent : 'Choisir…';
+    if ($('presetList').hidden) return;
+    let html = '';
+    const item = (o) => {
+      const saved = o.value.startsWith('saved:');
+      return '<div class="pick-item' + (o.value === sel.value ? ' on' : '') + '" role="option" aria-selected="' + (o.value === sel.value) + '">' +
+        (saved ? '<button type="button" class="pick-ico" data-del="' + o.value + '" title="Supprimer « ' + esc(o.textContent) + ' »" aria-label="Supprimer « ' + esc(o.textContent) + ' »">🗑</button>' +
+          '<button type="button" class="pick-ico" data-ren="' + o.value + '" title="Renommer « ' + esc(o.textContent) + ' »" aria-label="Renommer « ' + esc(o.textContent) + ' »">✏️</button>' : '') +
+        '<button type="button" class="pick-name" data-val="' + esc(o.value) + '">' + esc(o.textContent) + '</button></div>';
+    };
+    for (const ch of sel.children) {
+      if (ch.tagName === 'OPTGROUP') html += '<div class="pick-group">' + esc(ch.label) + '</div>' + [...ch.children].map(item).join('');
+      else if (!ch.hidden) html += item(ch);
+    }
+    $('presetList').innerHTML = html;
+  }
+  function openPresetPick(open) {
+    $('presetList').hidden = !open;
+    $('presetBtn').setAttribute('aria-expanded', String(open));
+    if (open) {
+      renderPresetPick();
+      const on = $('presetList').querySelector('.pick-item.on .pick-name') || $('presetList').querySelector('.pick-name');
+      if (on) { on.scrollIntoView({ block: 'nearest' }); on.focus(); }
+    }
+  }
+  $('presetBtn').addEventListener('click', () => openPresetPick($('presetList').hidden));
+  // (un bouton redessiné pendant le clic n'est plus dans la page : ce n'est pas un clic « en dehors »)
+  document.addEventListener('click', (e) => { if (!$('presetList').hidden && e.target.isConnected && !e.target.closest('#presetPick')) openPresetPick(false); });
+  $('presetList').addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { openPresetPick(false); $('presetBtn').focus(); }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      const names = [...$('presetList').querySelectorAll('.pick-name')], k = names.indexOf(document.activeElement);
+      const n = names[Math.max(0, Math.min(names.length - 1, k + (e.key === 'ArrowDown' ? 1 : -1)))];
+      if (n) n.focus(); e.preventDefault();
+    }
+  });
+  $('presetList').addEventListener('click', (e) => {
+    const pick = e.target.closest('[data-val]'), del = e.target.closest('[data-del]'), ren = e.target.closest('[data-ren]');
+    if (pick) {
+      openPresetPick(false);
+      $('preset').value = pick.dataset.val;
+      $('preset').dispatchEvent(new Event('change'));
+      $('presetBtn').focus();
+    } else if (del) deleteSavedStrategy(+del.dataset.del.slice(6));
+    else if (ren) renameSavedStrategy(+ren.dataset.ren.slice(6));
+  });
+  function deleteSavedStrategy(i) {
+    const list = storage.get(), s = list[i];
+    if (!s || !confirm('Supprimer la stratégie « ' + s.name + ' » ? (Ctrl+Z juste après pour annuler)')) return;
+    undoable('Suppression de « ' + s.name + ' »', () => {
+      const cur = $('preset').value, wasSelected = cur === 'saved:' + i;
+      list.splice(i, 1);
+      storage.set(list);
+      dbPush('strategies/delete', { name: s.name }); cloudPush(() => C.deleteStrategy(s.name));
+      logEvent('strategy.deleted', 'Stratégie supprimée : ' + s.name, { strategy: s });
+      if (wasSelected) { refreshPresetSelect('preset:' + F.presets.list[0].id); applyPresetSelection(); $('presetDesc').textContent = '« ' + s.name + ' » supprimée.'; }
+      else {
+        const k = cur.startsWith('saved:') ? +cur.slice(6) : -1;
+        refreshPresetSelect(k > i ? 'saved:' + (k - 1) : cur);
+      }
+    });
+    toast('« ' + s.name + ' » supprimée.', true);
+    openPresetPick(true);
+  }
+  function renameSavedStrategy(i) {
+    const list = storage.get(), s = list[i];
+    if (!s) return;
+    const nm = (prompt('Nouveau nom de la stratégie :', s.name) || '').trim().slice(0, 80);
+    if (!nm || nm === s.name) return;
+    if (list.some((x, k) => k !== i && x.name === nm)) { alert('Une stratégie « ' + nm + ' » existe déjà.'); return; }
+    const old = s.name;
+    undoable('Renommage de « ' + old + ' »', () => {
+      s.name = nm;
+      storage.set(list);
+      dbPush('strategies/delete', { name: old }); dbPush('strategies/put', { name: nm, data: s, updatedAt: s.savedAt });
+      cloudPush(() => C.deleteStrategy(old)); cloudPush(() => C.putStrategy(s));
+      // les simulations de cette stratégie suivent le nouveau nom
+      const ev = evalList(), moved = [];
+      for (const e of ev) if (e.name === old) { e.name = nm; if (e.strategy) e.strategy = Object.assign({}, e.strategy, { name: nm }); moved.push(e); }
+      if (moved.length) { evalSave(ev); dbPush('simulations/put', { items: moved }); cloudPush(() => C.putSimulations(moved)); }
+      if ($('stratName').value.trim() === old) $('stratName').value = nm;
+      logEvent('strategy.renamed', 'Stratégie renommée : ' + old + ' → ' + nm, { from: old, to: nm });
+      refreshPresetSelect($('preset').value);
+    });
+    toast('« ' + old + ' » renommée en « ' + nm + ' ».', true);
+    openPresetPick(true);
   }
 
   const E = F.enhancer;
