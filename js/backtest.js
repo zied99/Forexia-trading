@@ -107,9 +107,12 @@
     let barsInMarket = 0;
     for (let i = start; i < n; i++) {
       const bar = bars[i];
+      // 0) retrait régulier (mensuel / tous les N jours)
+      if (!ruined) wd.tick(i, cash, pos ? pos.margin : 0, (amount) => { cash -= amount; });
       // 1) ordres en attente à l'ouverture
       if (pending && !ruined) {
         if (pending.exit && pos) close(i, bar.open, pending.reason || 'Signal');
+        if (!pos && !ruined) wd.tick(i, cash, 0, (amount) => { cash -= amount; });
         if (pending.enter && !pos && !ruined) open(pending.enter, i);
         pending = null;
       }
@@ -184,23 +187,53 @@
    * Les statistiques portent alors sur « compte + retraits ».
    */
   function makeWithdrawals(settings, bars) {
-    const threshold = settings.withdrawPct > 0 ? settings.withdrawPct / 100 : 0;
+    const threshold = settings.withdrawMode !== 'periodic' && settings.withdrawPct > 0 ? settings.withdrawPct / 100 : 0;
     const share = Math.min(100, Math.max(1, settings.withdrawShare == null ? 100 : settings.withdrawShare)) / 100;
     const base = settings.capital;
     // « Dès le seuil » : la position est clôturée quand le compte atteint le seuil (sinon : au prochain trade clôturé).
     const immediate = !!threshold && settings.withdrawWhen === 'immediate';
     let total = 0;
     const list = [], wealth = [];
+    // Retraits réguliers : chaque mois (1er jour de cotation du mois) ou tous les N jours (15 minimum),
+    // un % du compte, une somme fixe, ou une part de l'excédent sur le capital de départ.
+    const periodic = settings.withdrawMode === 'periodic' && settings.withdrawValue > 0;
+    const every = settings.withdrawEvery === 'days' ? Math.max(15, Math.round(settings.withdrawDays || 30)) : 0;
+    const tOf = (d) => Date.parse(String(d).slice(0, 10) + 'T00:00:00Z') / 1000;
+    let lastT = null, owed = 0, dueBar = -1;
+    const record = (i, account, amount, take) => {
+      take(amount);
+      total += amount;
+      list.push({ index: i, date: bars[i].date, amount: amount, accountAfter: account - amount, total: total });
+    };
     return {
-      immediate: immediate, target: base * (1 + threshold),
+      immediate: immediate, target: base * (1 + threshold), periodic: periodic,
+      /** À l'ouverture de la bougie i : retrait régulier si l'échéance est atteinte. locked = marge des positions ouvertes. */
+      // Appelé à l'ouverture de chaque bougie, puis de nouveau entre une sortie et une nouvelle entrée sur la même bougie.
+      // Comme chez un courtier, seule la marge libre peut être retirée : sinon le retrait attend (prochaine clôture).
+      tick(i, account, locked, take) {
+        if (!periodic) return;
+        if (dueBar !== i) {
+          dueBar = i;
+          const t = tOf(bars[i].date);
+          if (lastT === null) { lastT = t; return; } // première bougie testée : pas de retrait
+          let due = false;
+          if (every) { if (t - lastT >= every * 86400 - 1) { due = true; lastT = t; } }
+          else if (String(bars[i].date).slice(0, 7) !== String(bars[i - 1].date).slice(0, 7)) due = true;
+          if (due) {
+            const v = settings.withdrawValue;
+            owed += settings.withdrawType === 'fixed' ? v : settings.withdrawType === 'excess' ? Math.max(0, account - base) * Math.min(100, v) / 100 : account * Math.min(100, v) / 100;
+          }
+        }
+        if (owed <= 0.005) { owed = 0; return; }
+        const amount = Math.min(owed, Math.max(0, account - (locked || 0)));
+        if (amount > 0.005) { owed -= amount; record(i, account, amount, take); }
+      },
       check(i, account, take) {
         // tolérance d'arrondi : une position clôturée pile au seuil donne 101,9999999… pour 102
         if (!threshold || account < base * (1 + threshold) - 1e-7 * base) return;
         const amount = (account - base) * share;
         if (amount <= 0) return;
-        take(amount);
-        total += amount;
-        list.push({ index: i, date: bars[i].date, amount: amount, accountAfter: account - amount, total: total });
+        record(i, account, amount, take);
       },
       mark() { wealth.push(NaN); }, // complété dans finish()
       finish(res, barsInMarket) {

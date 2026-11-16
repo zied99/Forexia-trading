@@ -90,7 +90,8 @@
       exposurePct: Number($('exposure').value), spreadPips: Number($('spread').value) || 0,
       period: periodValue(), dateFrom: $('dateFrom').value, dateTo: $('dateTo').value, source: sourceValue(),
       estimateWicks: $('estimateWicks').checked,
-      withdraw: { on: $('withdrawOn').checked, pct: $('withdrawPct').value, share: $('withdrawShare').value, when: $('withdrawWhen').value },
+      withdraw: { on: $('withdrawOn').checked, pct: $('withdrawPct').value, share: $('withdrawShare').value, when: $('withdrawWhen').value,
+        mode: $('withdrawMode').value, every: $('withdrawEvery').value, days: $('withdrawDays').value, type: $('withdrawType').value, value: $('withdrawValue').value },
       spreadMode: $('spreadMode').value, commission: Number($('commission').value) || 0,
       news: { on: $('newsOn').checked, mode: $('newsMode').value, impact: $('newsImpact').value, before: Number($('newsBefore').value) || 0, after: Number($('newsAfter').value) || 0 },
       broker: { symbol: $('brokerSymbol').value, tf: $('brokerTf').value, sizing: $('brokerSizing').value, lots: $('brokerLots').value,
@@ -121,6 +122,8 @@
     if (c.withdraw) {
       $('withdrawOn').checked = !!c.withdraw.on; $('withdrawPct').value = c.withdraw.pct; $('withdrawShare').value = c.withdraw.share;
       $('withdrawWhen').value = c.withdraw.when || 'close';
+      $('withdrawMode').value = c.withdraw.mode || 'threshold'; $('withdrawEvery').value = c.withdraw.every || 'month';
+      $('withdrawDays').value = c.withdraw.days || 30; $('withdrawType').value = c.withdraw.type || 'pct'; $('withdrawValue').value = c.withdraw.value || 5;
       updateWithdrawUI();
     }
     if (c.broker) {
@@ -133,9 +136,24 @@
     updateWicksField();
   }
   function updateWithdrawUI() {
-    const on = $('withdrawOn').checked;
-    $('withdrawFields').hidden = $('withdrawHint').hidden = $('withdrawWhenField').hidden = !on;
+    const on = $('withdrawOn').checked, periodic = $('withdrawMode').value === 'periodic';
+    $('withdrawModeField').hidden = $('withdrawHint').hidden = !on;
+    $('withdrawFields').hidden = $('withdrawWhenField').hidden = !on || periodic;
+    $('withdrawPeriodic').hidden = !on || !periodic;
+    $('withdrawDaysField').hidden = $('withdrawEvery').value !== 'days';
+    const type = $('withdrawType').value;
+    $('withdrawValueLabel').textContent = type === 'fixed' ? 'Somme (devise du compte)' : type === 'excess' ? 'Part de l\'excédent (%)' : 'Pourcentage du compte (%)';
     const cap = Number($('capital').value) || 0, pct = Number($('withdrawPct').value) || 0, share = Number($('withdrawShare').value) || 100;
+    if (on && periodic) {
+      const v = Number($('withdrawValue').value) || 0, days = Math.max(15, Number($('withdrawDays').value) || 30);
+      const when = $('withdrawEvery').value === 'days' ? 'Tous les ' + days + ' jours' : 'Chaque mois (premier jour de cotation)';
+      const what = type === 'fixed' ? money.format(v) + ' sont retirés, quel que soit le résultat'
+        : type === 'excess' ? v + ' % de ce qui dépasse le capital de départ (' + money.format(cap) + ') est retiré ; rien si le compte est en dessous'
+        : v + ' % du capital du compte est retiré, quel que soit le résultat (avec ' + money.format(cap) + ' : ' + money.format(cap * v / 100) + ' la première fois)';
+      $('withdrawHint').textContent = when + ', ' + what + '. Comme chez un courtier, seule la marge libre peut être retirée : si une position bloque la marge, le retrait attend sa clôture. ' +
+        'Chaque retrait est marqué d\'une étoile jaune sur les courbes.';
+      return;
+    }
     const now = $('withdrawWhen').value === 'immediate', target = money.format(cap * (1 + pct / 100));
     $('withdrawHint').textContent = !on ? '' : now
       ? 'Exemple : avec ' + money.format(cap) + ', dès que le compte touche ' + target + ', la position est clôturée et ' +
@@ -143,7 +161,7 @@
       : 'Exemple : avec ' + money.format(cap) + ', quand un trade se clôture avec le compte à ' + target + ' ou plus, ' +
         (share >= 100 ? 'tout le gain est retiré' : share + ' % du gain est retiré') + '. Le gain peut alors dépasser le seuil, car le trade continue jusqu\'à sa propre sortie.';
   }
-  ['withdrawOn', 'withdrawPct', 'withdrawShare', 'withdrawWhen', 'capital'].forEach((id) => { $(id).addEventListener('input', updateWithdrawUI); $(id).addEventListener('change', updateWithdrawUI); });
+  ['withdrawOn', 'withdrawPct', 'withdrawShare', 'withdrawWhen', 'capital', 'withdrawMode', 'withdrawEvery', 'withdrawDays', 'withdrawType', 'withdrawValue'].forEach((id) => { $(id).addEventListener('input', updateWithdrawUI); $(id).addEventListener('change', updateWithdrawUI); });
   updateWithdrawUI();
   function updateNewsUI() {
     $('newsFields').hidden = !$('newsOn').checked;
@@ -668,7 +686,14 @@
       if ($('newsOn').checked) {
         if (cal) settings.news = { times: settings.newsCalendar, before: Number($('newsBefore').value) || 0, after: Number($('newsAfter').value) || 0, mode: $('newsMode').value };
       }
-      if ($('withdrawOn').checked) {
+      if ($('withdrawOn').checked && $('withdrawMode').value === 'periodic') {
+        settings.withdrawMode = 'periodic';
+        settings.withdrawEvery = $('withdrawEvery').value;
+        settings.withdrawDays = Math.max(15, Number($('withdrawDays').value) || 30);
+        settings.withdrawType = $('withdrawType').value;
+        settings.withdrawValue = Number($('withdrawValue').value) || 0;
+        if (!(settings.withdrawValue > 0)) throw new Error('Indiquez le montant du retrait régulier.');
+      } else if ($('withdrawOn').checked) {
         settings.withdrawPct = Number($('withdrawPct').value) || 0;
         settings.withdrawShare = Number($('withdrawShare').value) || 100;
         settings.withdrawWhen = $('withdrawWhen').value;
@@ -762,7 +787,7 @@
     const kpi = (label, value, sub, c) => '<div class="panel kpi"><div class="label">' + label + '</div><div class="value ' + (c || '') + '">' + value + '</div><div class="sub">' + (sub || '&nbsp;') + '</div></div>';
     // Rentabilité mensuelle (indicateur + fenêtre de détail)
     const ms = monthlyStats(result, settings.capital);
-    const hasWd = ms.totalWithdrawn > 0, wdOn = !!settings.withdrawPct;
+    const hasWd = ms.totalWithdrawn > 0, wdOn = !!settings.withdrawPct || settings.withdrawMode === 'periodic';
     // Avec les retraits : le profit est ce qui a été retiré ; le résultat global (avec le capital restant) reste indiqué.
     const perMonth = wdOn ? ms.avgWithdrawn : ms.avg;
     html += '<div class="kpis">' +
@@ -823,9 +848,9 @@
       row('Meilleur trade', signed(s.bestTrade, money), cls(s.bestTrade)) +
       row('Pire trade', signed(s.worstTrade, money), cls(s.worstTrade)) +
       row('Frais de spread payés', money.format(s.totalCosts)) +
-      (settings.withdrawPct
+      (wdOn
         ? row('Total retiré', money.format(s.totalWithdrawn || 0), s.totalWithdrawn > 0 ? 'pos' : '') +
-          row('Nombre de retraits (seuil +' + settings.withdrawPct + ' %, ' + (settings.withdrawWhen === 'immediate' ? 'dès le seuil' : 'à la clôture') + ')', String(s.withdrawals || 0)) +
+          row('Nombre de retraits (' + withdrawLabel(settings) + ')', String(s.withdrawals || 0)) +
           row('Solde final du compte de trading', money.format(s.finalAccount))
         : '') +
       '</dl></div></div>';
@@ -973,6 +998,11 @@
   $('monthlyModal').addEventListener('click', (e) => { if (e.target.closest('[data-close]')) closeMonthly(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('monthlyModal').hidden) closeMonthly(); });
 
+  function withdrawLabel(se) {
+    if (se.withdrawMode !== 'periodic') return 'seuil +' + se.withdrawPct + ' %, ' + (se.withdrawWhen === 'immediate' ? 'dès le seuil' : 'à la clôture');
+    const v = se.withdrawType === 'fixed' ? money.format(se.withdrawValue) : se.withdrawValue + ' %' + (se.withdrawType === 'excess' ? ' de l\'excédent' : ' du compte');
+    return v + (se.withdrawEvery === 'days' ? ' tous les ' + se.withdrawDays + ' jours' : ' chaque mois');
+  }
   /** Capital moyen sur la période et gain moyen correspondant (en % du capital de départ). */
   function averageGain(equity, capital) {
     const mean = equity.length ? equity.reduce((a, b) => a + b, 0) / equity.length : capital;

@@ -307,6 +307,33 @@ test('Commission par lot et taille au risque (moteur standard)', () => {
   near(rb.trades[0].pnl, -202.8, 1e-6);
 });
 
+test('Retrait régulier : mensuel, tous les X jours, % / somme / excédent', () => {
+  // 90 jours plats à 1 : aucun trade, compte constant 10 000
+  const bars = []; for (let i = 0; i < 92; i++) { const d = new Date(Date.UTC(2024, 0, 1 + i)).toISOString().slice(0, 10); bars.push({ date: d, open: 1, high: 1, low: 1, close: 1 }); }
+  const run = (x) => B.runBacktest(bars, { longEntry: 'CLOSE > 2' }, Object.assign({}, base, { startIndex: 0, withdrawMode: 'periodic' }, x));
+  const m = run({ withdrawEvery: 'month', withdrawType: 'fixed', withdrawValue: 500 });
+  eq(m.withdrawals.length, 3); eq(m.withdrawals[0].date, '2024-02-01'); near(m.stats.totalWithdrawn, 1500, 1e-9); near(m.stats.finalAccount, 8500, 1e-9);
+  near(m.stats.finalEquity, 10000, 1e-9); // compte + retraits
+  const p = run({ withdrawEvery: 'month', withdrawType: 'pct', withdrawValue: 10 });
+  near(p.withdrawals[1].amount, 900, 1e-9);
+  const d = run({ withdrawEvery: 'days', withdrawDays: 5, withdrawType: 'fixed', withdrawValue: 100 }); // 5 -> 15 jours minimum
+  eq(d.withdrawals.length, 6); eq(d.withdrawals[0].date, '2024-01-17'); // départ le 02/01 (première bougie testée)
+  eq(run({ withdrawEvery: 'month', withdrawType: 'excess', withdrawValue: 50 }).withdrawals.length, 0); // pas d'excédent
+  // excédent : +10 % puis retrait de la moitié du gain au 1er du mois
+  const up = bars.map((b, i) => Object.assign({}, b, { open: i > 20 ? 1.01 : 1, high: i > 20 ? 1.01 : 1, close: i >= 20 ? 1.01 : 1 }));
+  const e = B.runBacktest(up, { longEntry: 'DAY == 2 AND MONTH == 1', longExit: 'DAY == 25' }, Object.assign({}, base, { startIndex: 0, withdrawMode: 'periodic', withdrawEvery: 'month', withdrawType: 'excess', withdrawValue: 50 }));
+  near(e.withdrawals[0].amount, 500, 1e-6); eq(e.withdrawals[0].date, '2024-02-01');
+  // marge entièrement bloquée (exposition 100 %) : le retrait du 1er février attend la clôture du 10 février
+  const held = B.runBacktest(bars, { longEntry: 'DAY == 20 AND MONTH == 1', longExit: 'DAY == 9 AND MONTH == 2' }, Object.assign({}, base, { startIndex: 0, withdrawMode: 'periodic', withdrawEvery: 'month', withdrawType: 'fixed', withdrawValue: 300 }));
+  eq(held.withdrawals[0].date, '2024-02-10'); near(held.withdrawals[0].amount, 300, 1e-9);
+  // moteur courtier : marge bloquée non retirée
+  const bb = bars.map((b) => Object.assign({}, b, { t: Date.parse(b.date + 'T00:00:00Z') / 1000, spread: 0 }));
+  const spec = { digits: 5, point: 0.00001, contract: 100000, volumeMin: 1e-9, volumeStep: 1e-9, volumeMax: 1e9, swapMode: 0 };
+  const rb = BK.runBrokerBacktest(bb, { longEntry: 'CLOSE > 2' }, { capital: 10000, leverage: 10, sizing: 'fixed', fixedLots: 0.1, maxLots: 1, maxSpreadPips: 0, startIndex: 1,
+    withdrawMode: 'periodic', withdrawEvery: 'month', withdrawType: 'pct', withdrawValue: 100 }, { spec });
+  near(rb.withdrawals[0].amount, 10000, 1e-6);
+});
+
 console.log('Données');
 test('CSV MT4 avec en-tête', () => {
   const rows = ['<DATE>,<TIME>,<OPEN>,<HIGH>,<LOW>,<CLOSE>'];

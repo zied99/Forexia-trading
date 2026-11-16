@@ -171,10 +171,12 @@
       }
       if (!subs.length) subs.push(bar);
       chargeSwap(bar.t);
+      if (!ruined) wd.tick(i, balance, pos ? pos.margin : 0, (amount) => { balance -= amount; });
       const first = subs[0], spread0 = sp(first);
       let fromK = 0;
       if (pending && !ruined) {
         if (pending.exit && pos) close(i, pos.dir > 0 ? first.open : roundTo(first.open + spread0, spec.digits), pending.reason || 'Signal', bar.t);
+        if (!pos && !ruined) wd.tick(i, balance, 0, (amount) => { balance -= amount; });
         if (pending.enter && !pos && !ruined) diag.signals++;
         if (pending.enter && !pos && !ruined && news.active && news.hits(bar.t, bar.t + span(i))) { diag.newsBlocked++; pending.enter = 0; }
         if (pending.enter && !pos && !ruined) {

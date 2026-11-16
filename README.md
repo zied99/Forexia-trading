@@ -164,6 +164,9 @@ CLOSE < BB_LOWER(20, 2) OR RSI(14) < 25
 - **Gestion des trades (1.2)** : stop-loss / take-profit en pips ou en multiples d'ATR (ATR de la bougie qui précède l'entrée),
   stop suiveur et passage à l'équilibre mis à jour avec le meilleur prix de chaque bougie (de chaque bougie M1 avec les données
   du courtier ; à chaque tick dans l'EA), fermeture après N bougies, pause après N pertes consécutives, commission par lot.
+- **Retrait fictif** : quand le gain atteint un seuil, ou **régulier** (chaque mois ou tous les X jours, 15 minimum) :
+  un % du compte, une somme fixe, ou une part de l'excédent sur le capital de départ. Seule la marge libre est retirée :
+  si une position bloque la marge, le retrait attend sa clôture. Chaque retrait est une étoile jaune sur les courbes.
 - **Calendrier économique (1.2)** : entrées bloquées (ou positions fermées) de X minutes avant à Y minutes après une annonce
   à fort impact d'une des deux devises de la paire.
 - Stop-loss / take-profit testés sur le plus haut / plus bas de la bougie ; si les deux sont touchés, le stop est retenu.
@@ -302,3 +305,4 @@ bridge/             passerelle locale Forexia <-> MetaTrader 5
   gestion des trades, régime de marché, note fondée sur la régularité, combinaison recommandée, contrôle sur 3 périodes,
   test sur d'autres paires.
 - 3 nouveaux modèles : SuperTrend + ADX, cassure de Donchian, Ichimoku Tenkan / Kijun.
+- Retraits réguliers : chaque mois ou tous les X jours, en %, en somme fixe ou sur l'excédent.
