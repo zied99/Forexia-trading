@@ -2228,6 +2228,7 @@
       entry.key = old.key; entry.at = old.at;
       entry.extended = old.extended || { from: old.from, to: old.to, returnPct: old.returnPct, maxDrawdownPct: old.maxDrawdownPct, trades: old.trades, capital: old.capital };
       if (old.tag) entry.tag = old.tag;
+      if (evalMarkImproved || old.improved) entry.improved = true;
       list[ri] = entry;
       evalSave(list);
       const fullR = Object.assign({}, entry, { tradeList: c.result.trades.map((t) => ({
@@ -2375,7 +2376,12 @@
     // simulation prolongée : barre pleine = résultat d'origine, pointillé = résultat après prolongation (vert rattrapé, bleu non)
     F.chart.mountBars($('evalRunsChart'), {
       labels: list.map((e, i) => '#' + (i + 1)), values: list.map((e) => clip(e.extended ? e.extended.returnPct : e.returnPct)), format: (v) => num1.format(v) + ' %', height: 200,
-      ghosts: list.map((e, i) => (e.extended ? { i: i, value: clip(e.returnPct), kind: e.returnPct > 0 ? 'up' : 'blue' } : null)).filter(Boolean),
+      ghosts: list.map((e, i) => {
+        // aperçu d'une amélioration pas encore ajoutée : pointillé sur la barre ciblée
+        const pv = improveCtx && improveCtx.kind === 'sel' && improveCtx.after ? improveCtx.T.findIndex((c) => c.e.key === e.key) : -1;
+        if (pv >= 0) { const v = improveCtx.after[pv].returnPct; return { i: i, value: clip(v), kind: (v > 0 ? 'up' : 'blue') + ' preview' }; }
+        return e.extended ? { i: i, value: clip(e.returnPct), kind: e.returnPct > 0 ? 'up' : 'blue' } : null;
+      }).filter(Boolean),
       pending: list.findIndex((e) => e.key === checkCurrentKey),
       selected: list.map((e, i) => (barSel.has(e.key) ? i : -1)).filter((i) => i >= 0),
       // clic : une simulation ; Ctrl / Cmd + clic : ajouter ou retirer ; Maj + clic ou glisser : une plage
@@ -2408,9 +2414,11 @@
     const x = e.extended, parts = [];
     if (x.from !== e.from || x.to !== e.to) parts.push(e.to < x.to ? 'raccourcie' : 'prolongée');
     if (x.capital && x.capital !== e.capital) parts.push('capital ' + money.format(x.capital) + ' → ' + money.format(e.capital));
+    if (e.improved) parts.push('stratégie améliorée');
     return parts.join(', ') || 'relancée';
   }
   // ---------- Vérifier long terme / court terme sur les simulations affichées ----------
+  let evalMarkImproved = false;
   let evalNoRecord = false, improveHtml = '', improveWhere = 'report'; // résultat d'amélioration : sous le rapport, ou dans le panneau de la sélection
   let evalTag = '', evalReplaceKey = '', checkRunning = '', checkStop = false, checkReport = '', checkStatusText = '', checkCurrentKey = '';
   const MONTH_CHOICES = [[1, '1 mois'], [2, '2 mois'], [3, '3 mois'], [6, '6 mois'], [12, '1 an'], [24, '2 ans']];
@@ -2516,8 +2524,8 @@
   $('evalBody').addEventListener('input', (ev) => { if (ev.target.id === 'capValue') checkSel.capValue = ev.target.value; });
   const isoD = (d) => F.data.iso(d), dateOf = (s) => new Date(s.slice(0, 10) + 'T00:00:00Z');
   /** Relance une simulation de l'historique (même stratégie, mêmes réglages) sur d'autres dates ; renvoie ses statistiques. */
-  async function rerunEntry(e, from, to, tag, replace, extra) {
-    loadStrategy(e.strategy);
+  async function rerunEntry(e, from, to, tag, replace, extra, stratOverride) {
+    loadStrategy(stratOverride || e.strategy);
     applyConfig(Object.assign({}, e.config, { period: 'custom', dateFrom: isoD(from), dateTo: isoD(to) }, extra || {}));
     document.querySelector('input[name=period][value=custom]').checked = true;
     $('dateFrom').value = isoD(from); $('dateTo').value = isoD(to);
@@ -2851,10 +2859,46 @@
       $('presetDesc').textContent = 'Améliorations ajoutées : ' + r.pick.map((x) => x.title).join(' + ') + (isSaved ? ' (stratégie enregistrée).' : '. Pensez à « Enregistrer la stratégie ».');
       logEvent('strategy.enhanced', 'Améliorations ajoutées à ' + name + ' depuis l\'évaluation : ' + r.pick.map((x) => x.title).join(' + '), { name: name });
     });
-    improveHtml = '<p class="val ok">Améliorations ajoutées à « ' + esc(name) + ' » : ' + esc(r.pick.map((x) => x.title).join(' + ')) + '. Lancez un lot de tests aléatoires pour vérifier.</p>';
     improveCtx = null;
     toast('Améliorations ajoutées à « ' + name + ' ».', true);
-    renderEvaluation();
+    // les barres ciblées sont relancées avec la stratégie améliorée (mêmes numéros)
+    const improved = currentStrategy();
+    const targetKeys = (r.T || [{ e: r.e }]).map((c) => c.e.key);
+    pushUndo('Simulations relancées avec « ' + name + ' » améliorée');
+    improveHtml = '<div class="modal-loading"><span class="spinner"></span>Nouvelle simulation avec la version améliorée…</div>'; improveWhere = 'panel';
+    rerunWithStrategy(targetKeys, improved).then(() => {
+      const others = evalList().filter((e) => e.name === name && !e.tag && !targetKeys.includes(e.key)).map((e) => e.key);
+      improveHtml = '<p class="val ok">Améliorations ajoutées à « ' + esc(name) + ' » : ' + esc(r.pick.map((x) => x.title).join(' + ')) + '. ' +
+        (targetKeys.length > 1 ? 'Les simulations choisies ont' : 'La simulation choisie a') + ' été relancée' + (targetKeys.length > 1 ? 's' : '') + ' avec la nouvelle version.</p>' +
+        (others.length ? '<p>Les ' + others.length + ' autres simulations de la stratégie portent encore sur l\'ancienne version.</p><div class="row buttons"><button type="button" class="primary small" id="impRerunOthers" data-keys="' +
+          esc(others.join('\n')) + '">Resimuler les ' + others.length + ' autres avec la version améliorée</button></div>' : '');
+      improveWhere = 'panel';
+      renderEvaluation();
+    });
+  }
+  /** Relance des simulations (mêmes dates, même capital) avec une autre version de la stratégie ; elles sont modifiées sur place. */
+  async function rerunWithStrategy(keys, strat) {
+    if (checkRunning) return;
+    const saved = captureForm();
+    checkRunning = 'upd'; checkStop = false;
+    try {
+      for (let k = 0; k < keys.length && !checkStop; k++) {
+        const e = evalList().find((x) => x.key === keys[k]);
+        if (!e) continue;
+        checkCurrentKey = e.key; setRunLabel('Simulation ' + (k + 1) + ' / ' + keys.length);
+        if (!$('evalModal').hidden && evalView === 'charts') renderEvaluation();
+        const d = datesOf(e);
+        evalMarkImproved = true;
+        try { await rerunEntry(e, d.from, d.to, '', true, null, Object.assign({}, strat, { name: e.name })); } finally { evalMarkImproved = false; }
+        if (!$('evalModal').hidden && evalView === 'charts') renderEvaluation();
+        await new Promise((res) => setTimeout(res, 120));
+      }
+    } finally {
+      checkRunning = ''; checkCurrentKey = ''; setRunLabel('');
+      restoring = true;
+      try { loadStrategy(saved.strat); applyConfig(saved.config); $('style').value = saved.style; $('preset').value = [...$('preset').options].some((o) => o.value === saved.preset) ? saved.preset : 'mine'; $('presetDesc').textContent = saved.desc; updateWithdrawUI(); syncFormState(); }
+      finally { restoring = false; }
+    }
   }
   function improveReportHtml(r) {
     const idx = evalList().findIndex((x) => x.key === r.e.key) + 1;
@@ -2922,6 +2966,15 @@
     if (b) return improveFromReport(b);
     if (ev.target.id === 'impCreate') return createImproved();
     if (ev.target.id === 'impApplyCurrent') return applyToCurrent();
+    if (ev.target.id === 'impRerunOthers') {
+      const keys = ev.target.dataset.keys.split('\n');
+      pushUndo('Simulations relancées avec la version améliorée');
+      improveHtml = '';
+      return rerunWithStrategy(keys, currentStrategy()).then(() => {
+        improveHtml = '<p class="val ok">' + keys.length + ' simulations relancées avec la version améliorée (barres mises à jour, résultat d\'origine en plein, nouveau en pointillé). Ctrl+Z pour annuler.</p>';
+        improveWhere = 'panel'; renderEvaluation();
+      });
+    }
     if (ev.target.id === 'impAsNew') {
       // même création que depuis le rapport, avec un nom proposé
       const nm = prompt('Nom de la nouvelle stratégie :', newStratName(improveCtx.e.name));
