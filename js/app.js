@@ -455,7 +455,37 @@
       setDates(r.start, r.end);
     }
   }
-  document.querySelectorAll('input[name=period]').forEach((r) => r.addEventListener('change', syncPeriodUI));
+  document.querySelectorAll('input[name=period]').forEach((r) => r.addEventListener('change', () => {
+    if (periodValue() === 'random') { pickRandomPeriod(); return; }
+    $('randomPeriodNote').hidden = true;
+    syncPeriodUI();
+  }));
+  // Période aléatoire : une durée (1 mois à 2 ans) et une date de début tirées au hasard dans l'historique disponible,
+  // en gardant assez de données avant le début pour amorcer les indicateurs.
+  const RANDOM_DURATIONS = [[1, '1 mois'], [2, '2 mois'], [3, '3 mois'], [6, '6 mois'], [12, '1 an'], [24, '2 ans']];
+  function pickRandomPeriod() {
+    const day = 86400000, today = new Date(todayIso() + 'T00:00:00Z');
+    const src = sourceValue();
+    let min = new Date(src === 'broker' ? '2015-01-01T00:00:00Z' : src === 'synthetic' ? '2005-01-01T00:00:00Z' : '2001-01-01T00:00:00Z'), max = today;
+    if (src === 'csv' && csvBars && csvBars.length) {
+      min = F.data.addMonths(new Date(csvBars[0].date.slice(0, 10) + 'T00:00:00Z'), 12);
+      max = new Date(csvBars[csvBars.length - 1].date.slice(0, 10) + 'T00:00:00Z');
+    }
+    let choices = RANDOM_DURATIONS.filter(([m]) => F.data.addMonths(min, m) <= max);
+    if (!choices.length) choices = [RANDOM_DURATIONS[0]];
+    const [months, label] = choices[Math.floor(Math.random() * choices.length)];
+    const latestStart = F.data.addMonths(max, -months);
+    const span = Math.max(0, latestStart - min);
+    const start = new Date(min.getTime() + Math.floor((Math.random() * span) / day) * day);
+    let end = new Date(F.data.addMonths(start, months).getTime() - day);
+    if (end > max) end = max;
+    document.querySelector('input[name=period][value=custom]').checked = true;
+    syncPeriodUI();
+    setDates(start, end);
+    $('randomPeriodNote').hidden = false;
+    $('randomPeriodNote').textContent = '🎲 Période tirée au hasard : ' + label + ', du ' + frDate(F.data.iso(start)) + ' au ' + frDate(F.data.iso(end)) +
+      '. Cliquez de nouveau sur « Période aléatoire » pour en tirer une autre.';
+  }
   $('quickRanges').addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;

@@ -425,3 +425,4 @@ a.btn-link:hover { border-color: var(--accent); color: var(--accent); }
 .tf-bar button:last-child { border-right: 0; }
 .tf-bar button.on { background: var(--s1); color: #fff; }
 .tf-bar button:disabled { color: var(--muted); opacity: 0.45; cursor: not-allowed; }
+.segmented.periods .full { grid-column: 1 / -1; }
