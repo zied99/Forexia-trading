@@ -2423,7 +2423,7 @@
   }
   // Panneau d'une simulation choisie en cliquant sur sa barre : prolonger, raccourcir, changer le capital de départ.
   let barSel = new Set(), barLast = -1;
-  const barOpt = { dur: '6', capMode: 'pct', capValue: '100' };
+  const barOpt = { durDir: 'longer', dur: '6', capMode: 'pct', capValue: '100' };
   function barPanelHtml(list) {
     const chosen = list.filter((x) => barSel.has(x.key));
     if (!chosen.length) return '<p class="hint bar-hint">Cliquez sur une barre pour modifier cette simulation (durée ou capital de départ). Plusieurs : glissez la souris sur les barres, ou Ctrl+clic.</p>';
@@ -2439,13 +2439,24 @@
         ' · <span class="' + cls(e.returnPct) + '">' + signed(e.returnPct, num1) + ' %</span>' + (e.extended ? ' <small class="eval-tag">' + esc(changeLabel(e)) + '</small>' : '');
     return '<div class="bar-panel" id="barPanel"><div class="bp-head">' + head +
       '<button type="button" class="ghost bp-close" id="bpClose" aria-label="Fermer">✕</button></div>' +
-      '<div class="bp-row"><b>Durée</b>' + durSel + '<button type="button" class="secondary small" id="bpLonger"' + (busy ? ' disabled' : '') + '>Prolonger</button>' +
-      '<button type="button" class="secondary small" id="bpShorter"' + (busy ? ' disabled' : '') + '>Raccourcir</button></div>' +
-      '<div class="bp-row"><b>Capital de départ</b><select id="bpCapMode"><option value="set"' + (barOpt.capMode === 'set' ? ' selected' : '') + '>le porter à</option><option value="pct"' + (barOpt.capMode === 'pct' ? ' selected' : '') + '>l\'augmenter de (%)</option></select>' +
-      '<input id="bpCapValue" type="number" min="1" step="any" value="' + esc(barOpt.capValue) + '" aria-label="Montant ou pourcentage"><button type="button" class="secondary small" id="bpCap"' + (busy ? ' disabled' : '') + '>Appliquer</button></div>' +
+      '<div class="bp-row"><b>Durée</b><select id="bpDurDir">' + [['none', 'ne pas changer'], ['longer', 'prolonger de'], ['shorter', 'raccourcir de']].map(([v, l]) => '<option value="' + v + '"' + (barOpt.durDir === v ? ' selected' : '') + '>' + l + '</option>').join('') + '</select>' +
+      (barOpt.durDir === 'none' ? '' : durSel + '<button type="button" class="secondary small" id="bpDurRun"' + (busy ? ' disabled' : '') + '>' + (barOpt.durDir === 'shorter' ? 'Raccourcir' : 'Prolonger') + ' et simuler</button>') + '</div>' +
+      '<div class="bp-row"><b>Capital de départ</b><select id="bpCapMode">' + [['none', 'ne pas changer'], ['set', 'le porter à'], ['pct', 'l\'augmenter de (%)']].map(([v, l]) => '<option value="' + v + '"' + (barOpt.capMode === v ? ' selected' : '') + '>' + l + '</option>').join('') + '</select>' +
+      (barOpt.capMode === 'none' ? '' : '<input id="bpCapValue" type="number" min="1" step="any" value="' + esc(barOpt.capValue) + '" aria-label="Montant ou pourcentage">' +
+        '<button type="button" class="secondary small" id="bpCap"' + (busy ? ' disabled' : '') + '>' + (barOpt.capMode === 'set' ? 'Changer' : 'Augmenter') + ' et simuler</button>') + '</div>' +
+      '<div class="bp-row bp-mix"><button type="button" class="primary small" id="bpMix"' + (busy ? ' disabled' : '') + '>▶ Resimuler</button><span class="hint">' + esc(mixSummary(many ? chosen.length : 1)) + '</span></div>' +
       '<p class="hint">' + (many ? 'Ces ' + chosen.length + ' simulations sont modifiées' : 'La simulation #' + idx + ' est modifiée') + ' sur place (mêmes numéros) ; Ctrl+Z pour revenir en arrière. Glisser ou Ctrl+clic pour changer la sélection.</p></div>';
   }
+  function mixSummary(n) {
+    const parts = [];
+    if (barOpt.durDir !== 'none') parts.push((barOpt.durDir === 'shorter' ? 'raccourcir de ' : 'prolonger de ') + barOpt.dur + ' mois');
+    if (barOpt.capMode === 'set') parts.push('porter le capital de départ à ' + money.format(Number(barOpt.capValue) || 0));
+    if (barOpt.capMode === 'pct') parts.push('augmenter le capital de départ de ' + (Number(barOpt.capValue) || 0) + ' %');
+    const what = n > 1 ? 'les ' + n + ' simulations' : 'la simulation';
+    return parts.length ? 'Relance ' + what + ' en une fois : ' + parts.join(' et ') + '.' : 'Relance ' + what + ' telle quelle (mêmes dates, même capital).';
+  }
   $('evalBody').addEventListener('change', (ev) => {
+    if (ev.target.id === 'bpDurDir') { barOpt.durDir = ev.target.value; renderEvaluation(); }
     if (ev.target.id === 'bpDur') {
       if (ev.target.value === 'x') {
         const x = Math.round(Number(prompt('Nombre de mois :', '9')));
@@ -2453,14 +2464,17 @@
         renderEvaluation();
       } else barOpt.dur = ev.target.value;
     }
-    if (ev.target.id === 'bpCapMode') barOpt.capMode = ev.target.value;
+    if (ev.target.id === 'bpCapMode') { barOpt.capMode = ev.target.value; renderEvaluation(); }
   });
-  $('evalBody').addEventListener('input', (ev) => { if (ev.target.id === 'bpCapValue') barOpt.capValue = ev.target.value; });
+  $('evalBody').addEventListener('input', (ev) => {
+    if (ev.target.id === 'bpCapValue') { barOpt.capValue = ev.target.value; const h = document.querySelector('.bp-mix .hint'); if (h) h.textContent = mixSummary(barSel.size); }
+  });
   $('evalBody').addEventListener('click', (ev) => {
     const id = ev.target.id;
     if (id === 'bpClose') { barSel = new Set(); renderEvaluation(); }
-    if (id === 'bpLonger' || id === 'bpShorter') runChecks('ext', { keys: [...barSel], months: +barOpt.dur, sign: id === 'bpShorter' ? -1 : 1 });
+    if (id === 'bpDurRun') runChecks('ext', { keys: [...barSel], months: +barOpt.dur, sign: barOpt.durDir === 'shorter' ? -1 : 1 });
     if (id === 'bpCap') runChecks('cap', { keys: [...barSel], capMode: barOpt.capMode, capVal: barOpt.capValue });
+    if (id === 'bpMix') runChecks('mix', { keys: [...barSel], months: barOpt.durDir === 'none' ? 0 : +barOpt.dur, sign: barOpt.durDir === 'shorter' ? -1 : 1, capMode: barOpt.capMode, capVal: barOpt.capValue });
   });
   function checkToolsHtml(list) {
     const base = list.filter((e) => !e.tag); // les tranches d'un découpage ne sont pas reprises
@@ -2477,7 +2491,7 @@
       '<div class="check-row"><b>Budget ?</b> Changer le capital de départ des simulations ' + which('capWhich') + ' : ' +
       '<select id="capMode"><option value="set"' + (checkSel.capMode === 'set' ? ' selected' : '') + '>le porter à</option><option value="pct"' + (checkSel.capMode === 'pct' ? ' selected' : '') + '>l\'augmenter de (%)</option></select>' +
       '<input id="capValue" type="number" min="1" step="any" value="' + esc(checkSel.capValue) + '" aria-label="Montant ou pourcentage">' +
-      '<button type="button" class="secondary small" id="capRun">' + (checkRunning === 'cap' ? 'Arrêter' : 'Appliquer') + '</button>' +
+      '<button type="button" class="secondary small" id="capRun">' + (checkRunning === 'cap' ? 'Arrêter' : (checkSel.capMode === 'set' ? 'Changer' : 'Augmenter') + ' et simuler') + '</button>' +
       '<span class="hint">Même période, autre capital de départ : chaque simulation est <b>modifiée</b> (même numéro), nouveau résultat en pointillé. Avec une taille en % du capital, le résultat en % change peu ; ' +
       'il change surtout en lots fixes, avec les minimums de lots du courtier, les retraits en somme fixe ou la commission.</span></div>' +
       '<p class="hint" id="checkStatus">' + esc(checkStatusText) + '</p>' + (checkReport ? '<div class="check-report">' + checkReport + '</div>' : '') +
@@ -2490,7 +2504,10 @@
     if (x >= 1 && x <= 120) { checkSel[id] = String(x); return x; }
     return 0;
   }
-  $('evalBody').addEventListener('change', (ev) => { if (checkSel[ev.target.id] !== undefined && ev.target.value !== 'x') checkSel[ev.target.id] = ev.target.value; });
+  $('evalBody').addEventListener('change', (ev) => {
+    if (checkSel[ev.target.id] !== undefined && ev.target.value !== 'x') checkSel[ev.target.id] = ev.target.value;
+    if (ev.target.id === 'capMode' && $('capRun') && !checkRunning) $('capRun').textContent = (ev.target.value === 'set' ? 'Changer' : 'Augmenter') + ' et simuler';
+  });
   $('evalBody').addEventListener('input', (ev) => { if (ev.target.id === 'capValue') checkSel.capValue = ev.target.value; });
   const isoD = (d) => F.data.iso(d), dateOf = (s) => new Date(s.slice(0, 10) + 'T00:00:00Z');
   /** Relance une simulation de l'historique (même stratégie, mêmes réglages) sur d'autres dates ; renvoie ses statistiques. */
@@ -2509,12 +2526,12 @@
     const which = ov ? 'all' : $(kind === 'ext' ? 'extWhich' : kind === 'cap' ? 'capWhich' : 'cutWhich').value;
     const sel = ov ? shown.filter((e) => ov.keys.includes(e.key) && e.strategy && e.config)
       : shown.filter((e) => e.strategy && e.config && !e.tag && (which === 'all' || (which === 'red' ? e.returnPct <= 0 : e.returnPct > 0)));
-    const capMode = kind === 'cap' ? (ov ? ov.capMode : $('capMode').value) : '', capVal = kind === 'cap' ? Number(ov ? ov.capVal : $('capValue').value) : 0;
-    if (kind === 'cap' && !(capVal > 0)) { $('checkStatus').textContent = 'Indiquez un montant ou un pourcentage.'; return; }
+    const capMode = kind === 'cap' || kind === 'mix' ? (ov ? ov.capMode : $('capMode').value) : '', capVal = kind === 'cap' || kind === 'mix' ? Number(ov ? ov.capVal : $('capValue').value) : 0;
+    if ((kind === 'cap' || kind === 'mix' && capMode !== 'none') && !(capVal > 0)) { $('checkStatus').textContent = 'Indiquez un montant ou un pourcentage.'; return; }
     const newCap = (e) => Math.round((capMode === 'set' ? capVal : e.capital * (1 + capVal / 100)) * 100) / 100;
     const months = kind === 'cap' ? 1 : ov ? ov.months : monthsValue(kind === 'ext' ? 'extMonths' : 'cutMonths');
     const sign = ov && ov.sign < 0 ? -1 : 1; // -1 : raccourcir
-    if (!months) return;
+    if (!months && kind !== 'mix') return;
     if (!sel.length) { $('checkStatus').textContent = 'Aucune simulation à vérifier (les tranches issues d\'un découpage ne sont pas reprises).'; return; }
     const saved = captureForm(), today = dateOf(todayIso()), DAYMS = 864e5;
     // tâches : une prolongation par simulation, ou toutes les tranches de chaque simulation
@@ -2523,7 +2540,13 @@
       // dates demandées à l'origine (la 1re et la dernière bougie peuvent tomber un peu après / avant, ex. week-end)
       const c = e.config || {}, okD = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d || '');
       const idx = evalList().findIndex((x) => x.key === e.key) + 1, f0 = dateOf(okD(c.dateFrom) ? c.dateFrom : e.from), t0 = dateOf(okD(c.dateTo) ? c.dateTo : e.to);
-      if (kind === 'cap') {
+      if (kind === 'mix') {
+        // durée et capital ensemble (ou relance à l'identique)
+        let from = f0, to = t0;
+        if (months && sign < 0) { to = new Date(Math.max(F.data.addMonths(t0, -months).getTime(), f0.getTime() + 30 * DAYMS)); if (to >= t0) continue; }
+        else if (months) { to = F.data.addMonths(t0, months); if (to > today) { const lack = to - today; to = today; from = new Date(f0.getTime() - lack); } }
+        jobs.push({ e: e, idx: idx, from: from, to: to, cap: capMode === 'none' ? null : newCap(e) });
+      } else if (kind === 'cap') {
         jobs.push({ e: e, idx: idx, from: f0, to: t0, cap: newCap(e) });
       } else if (kind === 'ext' && sign < 0) {
         // raccourcir : même début, fin avancée (30 jours au minimum)
@@ -2546,18 +2569,19 @@
     if (jobs.length > 150 && !confirm(jobs.length + ' simulations à lancer : continuer ?')) return;
     if (kind === 'ext') pushUndo((sign < 0 ? 'Raccourcissement' : 'Prolongation') + ' de ' + sel.length + ' simulation(s)');
     if (kind === 'cap') pushUndo('Changement de capital de ' + sel.length + ' simulation(s)');
+    if (kind === 'mix') pushUndo('Nouvelle simulation de ' + sel.length + ' simulation(s)');
     checkRunning = kind; checkStop = false; checkReport = ''; improveHtml = '';
     const out = new Map();
     const live = () => { if (!$('evalModal').hidden && evalView === 'charts') renderEvaluation(); };
     try {
       for (let k = 0; k < jobs.length && !checkStop; k++) {
         const j = jobs[k];
-        const what = kind === 'ext' ? (sign < 0 ? 'Raccourcissement ' : 'Prolongation ') : kind === 'cap' ? 'Capital ' : 'Tranche ';
+        const what = kind === 'mix' ? 'Simulation ' : kind === 'ext' ? (sign < 0 ? 'Raccourcissement ' : 'Prolongation ') : kind === 'cap' ? 'Capital ' : 'Tranche ';
         checkStatusText = what + (k + 1) + ' sur ' + jobs.length + '…';
         checkCurrentKey = j.e.key;
         setRunLabel(what + (k + 1) + ' / ' + jobs.length);
         live();
-        const st = await rerunEntry(j.e, j.from, j.to, kind === 'cut' ? j.tag : '', kind !== 'cut', kind === 'cap' ? { capital: j.cap } : null);
+        const st = await rerunEntry(j.e, j.from, j.to, kind === 'cut' ? j.tag : '', kind !== 'cut', j.cap ? { capital: j.cap } : null);
         if (!out.has(j.e)) out.set(j.e, []);
         out.get(j.e).push({ from: j.from, to: j.to, st: st, cap: j.cap });
         live(); // la barre s'allonge tout de suite
@@ -2576,7 +2600,14 @@
     const diffs = [];
     for (const [e, rs] of out) {
       const idx = evalList().findIndex((x) => x.key === e.key) + 1;
-      if (kind === 'cap') {
+      if (kind === 'mix') {
+        const r = rs[0]; if (!r.st) continue; total++;
+        const ok = r.st.returnPct > 0; if (ok) good++;
+        const cap1 = r.cap || e.capital;
+        rows += '<tr><td>#' + idx + '</td><td class="l">' + frDate(e.from) + ' → ' + frDate(e.to) + '</td><td>' + money.format(e.capital) + '</td><td>' + p(e.returnPct) + '</td><td class="l">' + frDate(isoD(r.from)) + ' → ' + frDate(isoD(r.to)) +
+          '</td><td>' + money.format(cap1) + '</td><td>' + p(r.st.returnPct) + '</td><td class="l">' + (ok ? (e.returnPct <= 0 ? '✓ passe au vert' : '✓ reste gagnante') : e.returnPct > 0 ? '✗ passe au rouge' : '✗ reste perdante') + '</td>' +
+          (ok ? '<td></td>' : '<td><button type="button" class="secondary small imp-btn" data-imp="' + esc(e.key) + '" data-from="' + isoD(r.from) + '" data-to="' + isoD(r.to) + '" data-cap="' + (r.cap || '') + '">Améliorer</button></td>') + '</tr>';
+      } else if (kind === 'cap') {
         const r = rs[0]; if (!r.st) continue; total++;
         const ok = r.st.returnPct > 0; if (ok) good++;
         const g0 = e.capital * e.returnPct / 100, g1 = r.st.netProfit != null ? r.st.netProfit : r.cap * r.st.returnPct / 100;
@@ -2600,7 +2631,9 @@
     const rate = total ? Math.round((good / total) * 100) : 0;
     const capTxt = capMode === 'set' ? 'porté à ' + money.format(capVal) : 'augmenté de ' + num1.format(capVal) + ' %';
     const sameRet = diffs.length && diffs.reduce((a, b) => a + b, 0) / diffs.length < 0.5;
-    const verdict = kind === 'cap'
+    const verdict = kind === 'mix'
+      ? (total === 1 ? 'Nouvelle simulation : ' + (good ? 'gagnante.' : 'perdante.') : 'Nouvelles simulations : ' + good + ' gagnante' + (good > 1 ? 's' : '') + ' sur ' + total + '.')
+      : kind === 'cap'
       ? 'Capital de départ ' + capTxt + ' : ' + good + ' simulation' + (good > 1 ? 's' : '') + ' gagnante' + (good > 1 ? 's' : '') + ' sur ' + total + '.' +
         (sameRet ? ' Le résultat en % ne bouge presque pas (la taille des positions suit le capital) : seul le gain en argent change, dans la même proportion.' : ' Le résultat en % change avec le capital : la taille des positions ne lui est pas proportionnelle (lots fixes, minimum de lots, retraits en somme fixe, commission).')
       : kind === 'ext' && sign < 0
@@ -2613,12 +2646,13 @@
       : (rate >= 60 ? good + ' tranches gagnantes sur ' + total + ' (' + rate + ' %) : la stratégie fonctionne aussi sur des périodes <b>courtes</b>.'
         : 'Seulement ' + good + ' tranches gagnantes sur ' + total + ' (' + rate + ' %) : sur des périodes courtes, le résultat dépend beaucoup du moment ; plutôt une stratégie de long terme (ou à revoir).');
     checkReport = '<p class="val ' + (rate >= 60 || kind === 'cap' && rate >= 50 ? 'ok' : 'ko') + '">' + verdict + (checkStop ? ' (vérification arrêtée avant la fin)' : '') + '</p><div class="table-wrap"><table class="eval mini">' +
-      (kind === 'cap' ? '<thead><tr><th>#</th><th class="l">Période</th><th>Capital de départ</th><th>Résultat</th><th>Gain</th><th>Nouveau capital de départ</th><th>Résultat</th><th>Gain</th><th class="l">Verdict</th><th></th></tr></thead>'
+      (kind === 'mix' ? '<thead><tr><th>#</th><th class="l">Avant</th><th>Capital</th><th>Résultat</th><th class="l">Après</th><th>Capital</th><th>Résultat</th><th class="l">Verdict</th><th></th></tr></thead>'
+        : kind === 'cap' ? '<thead><tr><th>#</th><th class="l">Période</th><th>Capital de départ</th><th>Résultat</th><th>Gain</th><th>Nouveau capital de départ</th><th>Résultat</th><th>Gain</th><th class="l">Verdict</th><th></th></tr></thead>'
         : kind === 'ext' ? '<thead><tr><th>#</th><th class="l">Période d\'origine</th><th>Résultat</th><th class="l">Période ' + (sign < 0 ? 'raccourcie (−' : 'prolongée (+') + months + ' mois)</th><th>Résultat</th><th class="l">Verdict</th><th></th></tr></thead>'
         : '<thead><tr><th>#</th><th class="l">Période d\'origine</th><th>Résultat</th><th>Tranches de ' + months + ' mois</th><th>Gagnantes</th><th>Médiane</th></tr></thead>') +
-      '<tbody>' + rows + '</tbody></table></div><p class="hint">' + (kind === 'cap' ? 'Les simulations ont été modifiées dans le tableau (capital et résultat), sans nouvelle ligne ; leur résultat d\'origine reste en plein sur le graphique. Ctrl+Z pour annuler.' : kind === 'ext' ? 'Les simulations prolongées ont été modifiées dans le tableau (période et résultat), sans nouvelle ligne ; leur résultat d\'origine reste affiché en plein sur le graphique. Ctrl+Z pour annuler.'
+      '<tbody>' + rows + '</tbody></table></div><p class="hint">' + (kind === 'cap' || kind === 'mix' ? 'Les simulations ont été modifiées dans le tableau (capital et résultat), sans nouvelle ligne ; leur résultat d\'origine reste en plein sur le graphique. Ctrl+Z pour annuler.' : kind === 'ext' ? 'Les simulations prolongées ont été modifiées dans le tableau (période et résultat), sans nouvelle ligne ; leur résultat d\'origine reste affiché en plein sur le graphique. Ctrl+Z pour annuler.'
         : 'Les tranches sont enregistrées dans le tableau, marquées « tranche ».') + '</p>';
-    logEvent('evaluation.check', (kind === 'ext' ? 'Prolongation de ' : kind === 'cap' ? 'Changement de capital de ' : 'Découpage de ') + out.size + ' simulations : ' + good + '/' + total + ' gagnantes', { kind: kind, months: months });
+    logEvent('evaluation.check', (kind === 'mix' ? 'Nouvelle simulation de ' : kind === 'ext' ? 'Prolongation de ' : kind === 'cap' ? 'Changement de capital de ' : 'Découpage de ') + out.size + ' simulations : ' + good + '/' + total + ' gagnantes', { kind: kind, months: months });
     if (!$('evalModal').hidden) renderEvaluation();
   }
   $('evalBody').addEventListener('click', (ev) => {
