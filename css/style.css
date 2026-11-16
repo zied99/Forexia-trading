@@ -474,3 +474,4 @@ a.btn-link:hover { border-color: var(--accent); color: var(--accent); }
 @keyframes fx-pulse { from { opacity: .06; } to { opacity: .22; } }
 .lg-up { color: var(--up); font-weight: 600; } .lg-blue { color: #2563eb; font-weight: 600; }
 .chart .bar-top { font-size: 10.5px; fill: var(--muted); font-weight: 600; pointer-events: auto; }
+.check-row input#capValue { width: 110px; min-height: 32px; padding: 3px 8px; font-size: 13px; }

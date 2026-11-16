@@ -215,7 +215,8 @@ qui n'ont pas servi à la choisir (contrôle « walk-forward ») ; elle est « c
 - **Long terme ? / Court terme ?** (onglet Graphiques) : « Prolonger » modifie les simulations rouges (ou vertes, ou toutes) — même ligne, même numéro —
   avec la même date de début et une fin repoussée de 3 mois, 6 mois, 1 an, 2 ans ou x mois ; « Découper » relance chaque
   simulation en tranches de 1, 2, 3, 6 ou x mois. Un rapport dit si les pertes se rattrapent avec le temps (long terme) ou si la
-  stratégie gagne sur la plupart des tranches (court terme). Les simulations relancées sont marquées dans le tableau.
+  stratégie gagne sur la plupart des tranches (court terme). « Budget ? » relance les simulations avec un autre capital de
+  départ (montant fixe ou +x %), modifiées sur place comme « Prolonger ».
 - **Recommandations** : meilleure stratégie, meilleure paire, court ou long terme, quel retrait (au seuil, régulier, aucun),
   quel levier, avec un niveau de confiance selon le nombre de simulations. Calcul local et transparent (médiane, part de
   simulations gagnantes, drawdown, moins de poids aux groupes peu testés), pas un modèle d'IA externe ni une garantie.
