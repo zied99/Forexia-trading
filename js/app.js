@@ -2210,6 +2210,7 @@
       rules: [c.strat.longEntry, c.strat.longExit, c.strat.shortEntry, c.strat.shortExit, c.strat.stopLossPips, c.strat.takeProfitPips].concat(TM_FIELDS.map((f) => c.strat[f] || 0)).join('|'),
       strategy: c.strat, config: c.config,
     };
+    if (evalNoRecord) return; // simulation d'analyse (« Améliorer » depuis un rapport) : rien n'est ajouté au tableau
     if (evalTag) entry.tag = evalTag;
     entry.key = entry.at + '|' + entry.name;
     const list = evalList();
@@ -2402,6 +2403,7 @@
     return parts.join(', ') || 'relancée';
   }
   // ---------- Vérifier long terme / court terme sur les simulations affichées ----------
+  let evalNoRecord = false, improveHtml = '';
   let evalTag = '', evalReplaceKey = '', checkRunning = '', checkStop = false, checkReport = '', checkStatusText = '', checkCurrentKey = '';
   const MONTH_CHOICES = [[1, '1 mois'], [2, '2 mois'], [3, '3 mois'], [6, '6 mois'], [12, '1 an'], [24, '2 ans']];
   // choix gardés quand le graphique se redessine (pendant une vérification)
@@ -2471,7 +2473,8 @@
       '<button type="button" class="secondary small" id="capRun">' + (checkRunning === 'cap' ? 'Arrêter' : 'Appliquer') + '</button>' +
       '<span class="hint">Même période, autre capital de départ : chaque simulation est <b>modifiée</b> (même numéro), nouveau résultat en pointillé. Avec une taille en % du capital, le résultat en % change peu ; ' +
       'il change surtout en lots fixes, avec les minimums de lots du courtier, les retraits en somme fixe ou la commission.</span></div>' +
-      '<p class="hint" id="checkStatus">' + esc(checkStatusText) + '</p>' + (checkReport ? '<div class="check-report">' + checkReport + '</div>' : '') + '</div>';
+      '<p class="hint" id="checkStatus">' + esc(checkStatusText) + '</p>' + (checkReport ? '<div class="check-report">' + checkReport + '</div>' : '') +
+      (improveHtml ? '<div class="improve-out" id="improveOut">' + improveHtml + '</div>' : '') + '</div>';
   }
   function monthsValue(id) {
     const v = $(id).value;
@@ -2536,7 +2539,7 @@
     if (jobs.length > 150 && !confirm(jobs.length + ' simulations à lancer : continuer ?')) return;
     if (kind === 'ext') pushUndo((sign < 0 ? 'Raccourcissement' : 'Prolongation') + ' de ' + sel.length + ' simulation(s)');
     if (kind === 'cap') pushUndo('Changement de capital de ' + sel.length + ' simulation(s)');
-    checkRunning = kind; checkStop = false; checkReport = '';
+    checkRunning = kind; checkStop = false; checkReport = ''; improveHtml = '';
     const out = new Map();
     const live = () => { if (!$('evalModal').hidden && evalView === 'charts') renderEvaluation(); };
     try {
@@ -2573,12 +2576,12 @@
         diffs.push(Math.abs(r.st.returnPct - e.returnPct));
         rows += '<tr><td>#' + idx + '</td><td class="l">' + frDate(e.from) + ' → ' + frDate(e.to) + '</td><td>' + money.format(e.capital) + '</td><td>' + p(e.returnPct) + '</td><td class="' + cls(g0) + '">' + signed(g0, money) +
           '</td><td>' + money.format(r.cap) + '</td><td>' + p(r.st.returnPct) + '</td><td class="' + cls(g1) + '">' + signed(g1, money) + '</td><td class="l">' +
-          (ok ? (e.returnPct <= 0 ? '✓ passe au vert' : '✓ reste gagnante') : e.returnPct > 0 ? '✗ passe au rouge' : '✗ reste perdante') + '</td></tr>';
+          (ok ? (e.returnPct <= 0 ? '✓ passe au vert' : '✓ reste gagnante') : e.returnPct > 0 ? '✗ passe au rouge' : '✗ reste perdante') + '</td>' + '<td>' + (ok ? '' : '<button type="button" class="secondary small imp-btn" data-imp="' + esc(e.key) + '" data-from="' + isoD(r.from) + '" data-to="' + isoD(r.to) + '" data-cap="' + (r.cap || '') + '">Améliorer</button>') + '</td>' + '</tr>';
       } else if (kind === 'ext') {
         const r = rs[0]; if (!r.st) continue; total++;
         const ok = r.st.returnPct > 0; if (ok) good++;
         rows += '<tr><td>#' + idx + '</td><td class="l">' + frDate(e.from) + ' → ' + frDate(e.to) + '</td><td>' + p(e.returnPct) + '</td><td class="l">' + frDate(isoD(r.from)) + ' → ' + frDate(isoD(r.to)) +
-          '</td><td>' + p(r.st.returnPct) + '</td><td class="l">' + (ok ? (e.returnPct <= 0 ? '✓ perte rattrapée' : '✓ reste gagnante') : e.returnPct > 0 ? '✗ gain perdu' : '✗ toujours perdante') + '</td></tr>';
+          '</td><td>' + p(r.st.returnPct) + '</td><td class="l">' + (ok ? (e.returnPct <= 0 ? '✓ perte rattrapée' : '✓ reste gagnante') : e.returnPct > 0 ? '✗ gain perdu' : '✗ toujours perdante') + '</td>' + '<td>' + (ok ? '' : '<button type="button" class="secondary small imp-btn" data-imp="' + esc(e.key) + '" data-from="' + isoD(r.from) + '" data-to="' + isoD(r.to) + '" data-cap="' + (r.cap || '') + '">Améliorer</button>') + '</td>' + '</tr>';
       } else {
         const ok = rs.filter((r) => r.st), pos = ok.filter((r) => r.st.returnPct > 0).length; if (!ok.length) continue;
         total += ok.length; good += pos;
@@ -2603,8 +2606,8 @@
       : (rate >= 60 ? good + ' tranches gagnantes sur ' + total + ' (' + rate + ' %) : la stratégie fonctionne aussi sur des périodes <b>courtes</b>.'
         : 'Seulement ' + good + ' tranches gagnantes sur ' + total + ' (' + rate + ' %) : sur des périodes courtes, le résultat dépend beaucoup du moment ; plutôt une stratégie de long terme (ou à revoir).');
     checkReport = '<p class="val ' + (rate >= 60 || kind === 'cap' && rate >= 50 ? 'ok' : 'ko') + '">' + verdict + (checkStop ? ' (vérification arrêtée avant la fin)' : '') + '</p><div class="table-wrap"><table class="eval mini">' +
-      (kind === 'cap' ? '<thead><tr><th>#</th><th class="l">Période</th><th>Capital de départ</th><th>Résultat</th><th>Gain</th><th>Nouveau capital de départ</th><th>Résultat</th><th>Gain</th><th class="l">Verdict</th></tr></thead>'
-        : kind === 'ext' ? '<thead><tr><th>#</th><th class="l">Période d\'origine</th><th>Résultat</th><th class="l">Période ' + (sign < 0 ? 'raccourcie (−' : 'prolongée (+') + months + ' mois)</th><th>Résultat</th><th class="l">Verdict</th></tr></thead>'
+      (kind === 'cap' ? '<thead><tr><th>#</th><th class="l">Période</th><th>Capital de départ</th><th>Résultat</th><th>Gain</th><th>Nouveau capital de départ</th><th>Résultat</th><th>Gain</th><th class="l">Verdict</th><th></th></tr></thead>'
+        : kind === 'ext' ? '<thead><tr><th>#</th><th class="l">Période d\'origine</th><th>Résultat</th><th class="l">Période ' + (sign < 0 ? 'raccourcie (−' : 'prolongée (+') + months + ' mois)</th><th>Résultat</th><th class="l">Verdict</th><th></th></tr></thead>'
         : '<thead><tr><th>#</th><th class="l">Période d\'origine</th><th>Résultat</th><th>Tranches de ' + months + ' mois</th><th>Gagnantes</th><th>Médiane</th></tr></thead>') +
       '<tbody>' + rows + '</tbody></table></div><p class="hint">' + (kind === 'cap' ? 'Les simulations ont été modifiées dans le tableau (capital et résultat), sans nouvelle ligne ; leur résultat d\'origine reste en plein sur le graphique. Ctrl+Z pour annuler.' : kind === 'ext' ? 'Les simulations prolongées ont été modifiées dans le tableau (période et résultat), sans nouvelle ligne ; leur résultat d\'origine reste affiché en plein sur le graphique. Ctrl+Z pour annuler.'
         : 'Les tranches sont enregistrées dans le tableau, marquées « tranche ».') + '</p>';
@@ -2615,6 +2618,100 @@
     if (ev.target.id === 'extRun') runChecks('ext');
     if (ev.target.id === 'cutRun') runChecks('cut');
     if (ev.target.id === 'capRun') runChecks('cap');
+  });
+  // ---------- « Améliorer » une simulation restée perdante ----------
+  let improveCtx = null; // { e, strat, settings, config, sugg, pick, stats, base }
+  async function improveFromReport(btn) {
+    if (checkRunning) return;
+    const e = evalList().find((x) => x.key === btn.dataset.imp);
+    if (!e || !e.strategy) return;
+    const saved = captureForm();
+    checkRunning = 'imp';
+    improveHtml = '<div class="modal-loading"><span class="spinner"></span>Analyse de #' + (evalList().indexOf(e) + 1) + ' : recherche des améliorations…</div>';
+    renderEvaluation();
+    setRunLabel('Analyse');
+    let res = null;
+    try {
+      evalNoRecord = true;
+      const st = await rerunEntry(e, dateOf(btn.dataset.from), dateOf(btn.dataset.to), '', false, btn.dataset.cap ? { capital: +btn.dataset.cap } : null);
+      evalNoRecord = false;
+      if (!st || !lastRunCtx) throw new Error($('formError').textContent || 'simulation impossible');
+      const { bars, strat, settings, config } = lastRunCtx;
+      await new Promise((r) => setTimeout(r, 20));
+      const sg = E.suggest(bars, strat, settings, strat.style || 'none');
+      // proposition : la combinaison recommandée si elle existe, sinon les meilleures suggestions confirmées (ou la meilleure)
+      const combo = sg.suggestions.find((x) => x.group === 'Combinaison recommandée');
+      const confirmed = sg.suggestions.filter((x) => !x.risk && x.group !== 'Combinaison recommandée' && x.validation && x.validation.confirmed);
+      const pick = combo ? [combo] : confirmed.length ? confirmed.slice(0, 2) : sg.suggestions.filter((x) => x.group !== 'Combinaison recommandée').slice(0, 1);
+      let stats = null;
+      if (pick.length) { const c = E.combine(strat, settings, pick); stats = E.run(bars, c.strat, c.settings); }
+      res = { e: e, strat: strat, settings: settings, config: config, sugg: sg, pick: pick, stats: stats, base: sg.base, from: btn.dataset.from, to: btn.dataset.to };
+    } catch (err) {
+      improveHtml = '<p class="val ko">Analyse impossible : ' + esc(err.message) + '</p>';
+    } finally {
+      evalNoRecord = false; checkRunning = ''; setRunLabel('');
+      restoring = true;
+      try { loadStrategy(saved.strat); applyConfig(saved.config); $('style').value = saved.style; $('preset').value = [...$('preset').options].some((o) => o.value === saved.preset) ? saved.preset : 'mine'; $('presetDesc').textContent = saved.desc; updateWithdrawUI(); syncFormState(); }
+      finally { restoring = false; }
+    }
+    if (res) { improveCtx = res; improveHtml = improveReportHtml(res); }
+    renderEvaluation();
+    if ($('improveOut')) $('improveOut').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  function improveReportHtml(r) {
+    const idx = evalList().findIndex((x) => x.key === r.e.key) + 1;
+    const p = (v) => '<span class="' + cls(v) + '">' + signed(v, num1) + ' %</span>';
+    const list = r.sugg.suggestions.filter((x) => x.group !== 'Combinaison recommandée').slice(0, 6);
+    let h = '<h4>Améliorer #' + idx + ' · ' + esc(r.e.name) + '</h4><p class="hint">Analyse sur ' + frDate(r.from) + ' → ' + frDate(r.to) + ' : résultat actuel ' + p(r.base.returnPct) +
+      ', drawdown −' + num1.format(r.base.maxDrawdownPct) + ' %, ' + r.base.trades + ' trades.</p>';
+    if (!list.length) return h + '<p class="val ko">Aucune des modifications testées (réglages, filtres de tendance, stops, sorties, gestion des trades…) n\'améliore cette simulation : la stratégie ne convient pas à cette période.</p>';
+    h += '<p><b>Ce qui a pu être amélioré :</b></p><ul class="imp-list">' + list.map((x) => '<li><span class="grp">' + esc(x.group) + '</span> ' + esc(x.title) + ' → ' + p(x.stats.returnPct) +
+      ' <span class="hint">(au lieu de ' + p(r.base.returnPct) + ')</span>' + (x.validation ? ' <span class="' + (x.validation.confirmed ? 'pos' : 'hint') + '">' + (x.validation.confirmed ? '✓ confirmée sur ' + x.validation.wins + '/' + x.validation.total + ' périodes de contrôle' : 'non confirmée') + '</span>' : '') + '</li>').join('') + '</ul>';
+    if (r.pick.length && r.stats) {
+      const titles = r.pick.map((x) => x.title).join(' + ');
+      h += '<div class="imp-proposal"><p><b>Proposition :</b> ' + esc(titles) + '.</p><p>Sur cette période : ' + p(r.stats.returnPct) + ' au lieu de ' + p(r.base.returnPct) + ', drawdown −' + num1.format(r.stats.maxDrawdownPct) + ' %, ' + r.stats.trades + ' trades.</p>' +
+        '<label class="field imp-name">Nom de la nouvelle stratégie<input id="impName" type="text" maxlength="80" value="' + esc(newStratName(r.e.name)) + '"></label>' +
+        '<div class="row buttons"><button type="button" class="primary small" id="impCreate">Créer la nouvelle stratégie</button><button type="button" class="secondary small" id="impCancel">Ignorer</button></div>' +
+        '<p class="hint">« ' + esc(r.e.name) + ' » est enregistrée telle quelle ; la nouvelle stratégie est enregistrée à côté avec ces améliorations, puis chargée dans le formulaire. ' +
+        'Ces améliorations ont été trouvées sur cette seule période : vérifiez la nouvelle stratégie avec un lot de tests aléatoires avant de la déployer.</p></div>';
+    }
+    return h;
+  }
+  function newStratName(name) {
+    const base = String(name).replace(/ · v\d+$/, ''), taken = new Set(storage.get().map((x) => x.name));
+    let k = 2; while (taken.has(base + ' · v' + k)) k++;
+    return base + ' · v' + k;
+  }
+  function createImproved() {
+    const r = improveCtx; if (!r) return;
+    const name = ($('impName').value || '').trim() || newStratName(r.e.name);
+    undoable('Nouvelle stratégie « ' + name + ' »', () => {
+      // 1) l'ancienne est enregistrée telle quelle (si elle ne l'est pas déjà)
+      const old = Object.assign({}, r.e.strategy);
+      if (!storage.get().some((x) => x.name === old.name)) saveStrategy(old, r.e.config);
+      // 2) la nouvelle : règles et réglages améliorés
+      const c = E.combine(r.strat, r.settings, r.pick);
+      const s = Object.assign({}, c.strat, { name: name, style: r.strat.style || 'none' });
+      s.plots = F.french.derivePlots(s);
+      s.frenchText = F.french.toFrench(s) || '';
+      const config = Object.assign({}, r.e.config, { leverage: c.settings.leverage, broker: Object.assign({}, r.e.config.broker, { sizing: c.settings.sizing, risk: c.settings.riskPct }) });
+      if (c.settings.news) config.news = { on: true, mode: c.settings.news.mode, before: c.settings.news.before, after: c.settings.news.after, impact: (r.e.config.news || {}).impact || 'high' };
+      loadStrategy(s);
+      applyConfig(config);
+      saveStrategy(s, config, r.stats);
+      $('presetDesc').textContent = 'Nouvelle stratégie créée à partir de « ' + old.name + ' » (conservée) : ' + r.pick.map((x) => x.title).join(' + ') + '.';
+      logEvent('strategy.improved', 'Nouvelle stratégie ' + name + ' créée depuis ' + old.name + ' : ' + r.pick.map((x) => x.title).join(' + '), { from: old.name, to: name });
+    });
+    improveHtml = '<p class="val ok">« ' + esc(name) + ' » est créée, enregistrée et chargée dans le formulaire ; « ' + esc(r.e.name) + ' » est conservée. Lancez un backtest ou un lot de tests pour la vérifier.</p>';
+    improveCtx = null;
+    toast('« ' + name + ' » créée et chargée ; « ' + r.e.name + ' » est conservée.', true);
+    renderEvaluation();
+  }
+  $('evalBody').addEventListener('click', (ev) => {
+    const b = ev.target.closest('.imp-btn');
+    if (b) return improveFromReport(b);
+    if (ev.target.id === 'impCreate') return createImproved();
+    if (ev.target.id === 'impCancel') { improveHtml = ''; improveCtx = null; renderEvaluation(); }
   });
   function renderEvalReco(list, filtered) {
     const A = F.advisor.analyze(list);
