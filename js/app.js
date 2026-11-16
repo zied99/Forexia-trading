@@ -2520,6 +2520,8 @@
     try { const ok = await runFromForm(); return ok && lastRun ? lastRun.stats : null; } finally { evalTag = ''; evalReplaceKey = ''; }
   }
   /** ov (une seule simulation, depuis un clic sur sa barre) : {key, months, sign, capMode, capVal} */
+  // petits résultats : 2 décimales (évite « −0 % »)
+  const pctFine = (v) => '<span class="' + cls(Math.abs(v) < 0.005 ? 0 : v) + '">' + (Math.abs(v) < 0.005 ? '0' : signed(v, Math.abs(v) < 1 ? num2 : num1)) + ' %</span>';
   async function runChecks(kind, ov) {
     if (checkRunning) { checkStop = true; return; }
     const shown = evalFiltered(evalList()).map((x) => x.e);
@@ -2595,7 +2597,7 @@
       finally { restoring = false; }
     }
     // rapport
-    const p = (v) => '<span class="' + cls(v) + '">' + signed(v, num1) + ' %</span>';
+    const p = pctFine;
     let rows = '', good = 0, total = 0;
     const diffs = [];
     for (const [e, rs] of out) {
@@ -2606,7 +2608,7 @@
         const cap1 = r.cap || e.capital;
         rows += '<tr><td>#' + idx + '</td><td class="l">' + frDate(e.from) + ' → ' + frDate(e.to) + '</td><td>' + money.format(e.capital) + '</td><td>' + p(e.returnPct) + '</td><td class="l">' + frDate(isoD(r.from)) + ' → ' + frDate(isoD(r.to)) +
           '</td><td>' + money.format(cap1) + '</td><td>' + p(r.st.returnPct) + '</td><td class="l">' + (ok ? (e.returnPct <= 0 ? '✓ passe au vert' : '✓ reste gagnante') : e.returnPct > 0 ? '✗ passe au rouge' : '✗ reste perdante') + '</td>' +
-          (ok ? '<td></td>' : '<td><button type="button" class="secondary small imp-btn" data-imp="' + esc(e.key) + '" data-from="' + isoD(r.from) + '" data-to="' + isoD(r.to) + '" data-cap="' + (r.cap || '') + '">Améliorer</button></td>') + '</tr>';
+          (ok ? '<td></td>' : '<td><button type="button" class="secondary small imp-btn" data-imp="' + esc(e.key) + '" data-from="' + isoD(r.from) + '" data-to="' + isoD(r.to) + '" data-cap="' + (r.cap || '') + '">Améliorer et simuler</button></td>') + '</tr>';
       } else if (kind === 'cap') {
         const r = rs[0]; if (!r.st) continue; total++;
         const ok = r.st.returnPct > 0; if (ok) good++;
@@ -2614,12 +2616,12 @@
         diffs.push(Math.abs(r.st.returnPct - e.returnPct));
         rows += '<tr><td>#' + idx + '</td><td class="l">' + frDate(e.from) + ' → ' + frDate(e.to) + '</td><td>' + money.format(e.capital) + '</td><td>' + p(e.returnPct) + '</td><td class="' + cls(g0) + '">' + signed(g0, money) +
           '</td><td>' + money.format(r.cap) + '</td><td>' + p(r.st.returnPct) + '</td><td class="' + cls(g1) + '">' + signed(g1, money) + '</td><td class="l">' +
-          (ok ? (e.returnPct <= 0 ? '✓ passe au vert' : '✓ reste gagnante') : e.returnPct > 0 ? '✗ passe au rouge' : '✗ reste perdante') + '</td>' + '<td>' + (ok ? '' : '<button type="button" class="secondary small imp-btn" data-imp="' + esc(e.key) + '" data-from="' + isoD(r.from) + '" data-to="' + isoD(r.to) + '" data-cap="' + (r.cap || '') + '">Améliorer</button>') + '</td>' + '</tr>';
+          (ok ? (e.returnPct <= 0 ? '✓ passe au vert' : '✓ reste gagnante') : e.returnPct > 0 ? '✗ passe au rouge' : '✗ reste perdante') + '</td>' + '<td>' + (ok ? '' : '<button type="button" class="secondary small imp-btn" data-imp="' + esc(e.key) + '" data-from="' + isoD(r.from) + '" data-to="' + isoD(r.to) + '" data-cap="' + (r.cap || '') + '">Améliorer et simuler</button>') + '</td>' + '</tr>';
       } else if (kind === 'ext') {
         const r = rs[0]; if (!r.st) continue; total++;
         const ok = r.st.returnPct > 0; if (ok) good++;
         rows += '<tr><td>#' + idx + '</td><td class="l">' + frDate(e.from) + ' → ' + frDate(e.to) + '</td><td>' + p(e.returnPct) + '</td><td class="l">' + frDate(isoD(r.from)) + ' → ' + frDate(isoD(r.to)) +
-          '</td><td>' + p(r.st.returnPct) + '</td><td class="l">' + (ok ? (e.returnPct <= 0 ? '✓ perte rattrapée' : '✓ reste gagnante') : e.returnPct > 0 ? '✗ gain perdu' : '✗ toujours perdante') + '</td>' + '<td>' + (ok ? '' : '<button type="button" class="secondary small imp-btn" data-imp="' + esc(e.key) + '" data-from="' + isoD(r.from) + '" data-to="' + isoD(r.to) + '" data-cap="' + (r.cap || '') + '">Améliorer</button>') + '</td>' + '</tr>';
+          '</td><td>' + p(r.st.returnPct) + '</td><td class="l">' + (ok ? (e.returnPct <= 0 ? '✓ perte rattrapée' : '✓ reste gagnante') : e.returnPct > 0 ? '✗ gain perdu' : '✗ toujours perdante') + '</td>' + '<td>' + (ok ? '' : '<button type="button" class="secondary small imp-btn" data-imp="' + esc(e.key) + '" data-from="' + isoD(r.from) + '" data-to="' + isoD(r.to) + '" data-cap="' + (r.cap || '') + '">Améliorer et simuler</button>') + '</td>' + '</tr>';
       } else {
         const ok = rs.filter((r) => r.st), pos = ok.filter((r) => r.st.returnPct > 0).length; if (!ok.length) continue;
         total += ok.length; good += pos;
@@ -2668,7 +2670,7 @@
     if (!e || !e.strategy) return;
     const saved = captureForm();
     checkRunning = 'imp';
-    improveHtml = '<div class="modal-loading"><span class="spinner"></span>Analyse de #' + (evalList().indexOf(e) + 1) + ' : recherche des améliorations…</div>';
+    improveHtml = '<div class="modal-loading"><span class="spinner"></span>Analyse de #' + (evalList().findIndex((x) => x.key === e.key) + 1) + ' : recherche des améliorations…</div>';
     renderEvaluation();
     setRunLabel('Analyse');
     let res = null;
@@ -2682,11 +2684,37 @@
       const sg = E.suggest(bars, strat, settings, strat.style || 'none');
       // proposition : la combinaison recommandée si elle existe, sinon les meilleures suggestions confirmées (ou la meilleure)
       const combo = sg.suggestions.find((x) => x.group === 'Combinaison recommandée');
-      const confirmed = sg.suggestions.filter((x) => !x.risk && x.group !== 'Combinaison recommandée' && x.validation && x.validation.confirmed);
-      const pick = combo ? [combo] : confirmed.length ? confirmed.slice(0, 2) : sg.suggestions.filter((x) => x.group !== 'Combinaison recommandée').slice(0, 1);
+      // sinon : les améliorations (hors levier) cumulées une par une, gardées seulement si la note progresse
+      let pick = [];
+      if (combo) pick = [combo];
+      else {
+        const pool = sg.suggestions.filter((x) => !x.risk && x.group !== 'Combinaison recommandée').sort((x, y) => y.score - x.score).slice(0, 5);
+        let cur = -Infinity;
+        for (const x of pool) {
+          if (pick.some((y) => y.group === x.group)) continue;
+          const c = E.combine(strat, settings, pick.concat([x])), st2 = E.run(bars, c.strat, c.settings), sc = E.score(st2);
+          if (sc > cur + 0.5) { pick.push(x); cur = sc; }
+        }
+        if (!pick.length) pick = sg.suggestions.filter((x) => x.risk).slice(0, 1); // en dernier recours : réduire le levier
+      }
       let stats = null;
-      if (pick.length) { const c = E.combine(strat, settings, pick); stats = E.run(bars, c.strat, c.settings); }
-      res = { e: e, strat: strat, settings: settings, config: config, sugg: sg, pick: pick, stats: stats, base: sg.base, from: btn.dataset.from, to: btn.dataset.to };
+      res = { e: e, strat: strat, settings: settings, config: config, sugg: sg, pick: pick, stats: null, base: sg.base, from: btn.dataset.from, to: btn.dataset.to };
+      if (pick.length) {
+        // 2e temps : la stratégie améliorée est vraiment resimulée sur la même période (même chaîne que « Lancer le backtest »)
+        improveHtml = '<div class="modal-loading"><span class="spinner"></span>Amélioration trouvée : nouvelle simulation avec la stratégie améliorée…</div>';
+        renderEvaluation();
+        setRunLabel('Simulation améliorée');
+        const imp = improvedVersion(res);
+        loadStrategy(imp.strat);
+        applyConfig(imp.config);
+        document.querySelector('input[name=period][value=custom]').checked = true;
+        $('dateFrom').value = btn.dataset.from; $('dateTo').value = btn.dataset.to;
+        evalNoRecord = true;
+        const ok = await runFromForm();
+        evalNoRecord = false;
+        stats = ok && lastRun ? lastRun.stats : E.run(bars, imp.cStrat, imp.cSettings);
+        res.stats = stats;
+      }
     } catch (err) {
       improveHtml = '<p class="val ko">Analyse impossible : ' + esc(err.message) + '</p>';
     } finally {
@@ -2701,7 +2729,7 @@
   }
   function improveReportHtml(r) {
     const idx = evalList().findIndex((x) => x.key === r.e.key) + 1;
-    const p = (v) => '<span class="' + cls(v) + '">' + signed(v, num1) + ' %</span>';
+    const p = pctFine;
     const list = r.sugg.suggestions.filter((x) => x.group !== 'Combinaison recommandée').slice(0, 6);
     let h = '<h4>Améliorer #' + idx + ' · ' + esc(r.e.name) + '</h4><p class="hint">Analyse sur ' + frDate(r.from) + ' → ' + frDate(r.to) + ' : résultat actuel ' + p(r.base.returnPct) +
       ', drawdown −' + num1.format(r.base.maxDrawdownPct) + ' %, ' + r.base.trades + ' trades.</p>';
@@ -2710,13 +2738,28 @@
       ' <span class="hint">(au lieu de ' + p(r.base.returnPct) + ')</span>' + (x.validation ? ' <span class="' + (x.validation.confirmed ? 'pos' : 'hint') + '">' + (x.validation.confirmed ? '✓ confirmée sur ' + x.validation.wins + '/' + x.validation.total + ' périodes de contrôle' : 'non confirmée') + '</span>' : '') + '</li>').join('') + '</ul>';
     if (r.pick.length && r.stats) {
       const titles = r.pick.map((x) => x.title).join(' + ');
-      h += '<div class="imp-proposal"><p><b>Proposition :</b> ' + esc(titles) + '.</p><p>Sur cette période : ' + p(r.stats.returnPct) + ' au lieu de ' + p(r.base.returnPct) + ', drawdown −' + num1.format(r.stats.maxDrawdownPct) + ' %, ' + r.stats.trades + ' trades.</p>' +
+      const good = r.stats.returnPct > 0 && r.stats.returnPct > r.base.returnPct;
+      h += '<div class="imp-proposal"><p><b>Amélioration appliquée :</b> ' + esc(titles) + '.</p>' +
+        '<p class="val ' + (good ? 'ok' : 'ko') + '"><b>Nouvelle simulation</b> (' + frDate(r.from) + ' → ' + frDate(r.to) + ') : ' + p(r.stats.returnPct) + ' au lieu de ' + p(r.base.returnPct) +
+        ', drawdown −' + num1.format(r.stats.maxDrawdownPct) + ' %, ' + r.stats.trades + ' trades. ' + (good ? '✓ C\'est bon : la simulation passe au vert.' : '✗ Pas suffisant : la simulation reste perdante.') + '</p>' +
+        (good ? '<p>Ajouter ces améliorations dans une nouvelle stratégie ?</p>' : '<p class="hint">Vous pouvez quand même créer la nouvelle stratégie pour la tester sur d\'autres périodes.</p>') +
         '<label class="field imp-name">Nom de la nouvelle stratégie<input id="impName" type="text" maxlength="80" value="' + esc(newStratName(r.e.name)) + '"></label>' +
-        '<div class="row buttons"><button type="button" class="primary small" id="impCreate">Créer la nouvelle stratégie</button><button type="button" class="secondary small" id="impCancel">Ignorer</button></div>' +
+        '<div class="row buttons"><button type="button" class="' + (good ? 'primary' : 'secondary') + ' small" id="impCreate">' + (good ? 'Créer la nouvelle stratégie' : 'Créer quand même') + '</button><button type="button" class="secondary small" id="impCancel">Ignorer</button></div>' +
         '<p class="hint">« ' + esc(r.e.name) + ' » est enregistrée telle quelle ; la nouvelle stratégie est enregistrée à côté avec ces améliorations, puis chargée dans le formulaire. ' +
         'Ces améliorations ont été trouvées sur cette seule période : vérifiez la nouvelle stratégie avec un lot de tests aléatoires avant de la déployer.</p></div>';
     }
     return h;
+  }
+  /** Stratégie et configuration améliorées (règles + réglages comme levier, taille, annonces). */
+  function improvedVersion(r, name) {
+    const c = E.combine(r.strat, r.settings, r.pick);
+    const s = Object.assign({}, c.strat, { name: name || r.e.name, style: r.strat.style || 'none' });
+    s.plots = F.french.derivePlots(s);
+    s.frenchText = F.french.toFrench(s) || '';
+    const base = r.config || r.e.config;
+    const config = Object.assign({}, base, { leverage: c.settings.leverage, capital: r.settings.capital, broker: Object.assign({}, base.broker, { sizing: c.settings.sizing, risk: c.settings.riskPct }) });
+    if (c.settings.news) config.news = { on: true, mode: c.settings.news.mode, before: c.settings.news.before, after: c.settings.news.after, impact: (base.news || {}).impact || 'high' };
+    return { strat: s, config: config, cStrat: c.strat, cSettings: c.settings };
   }
   function newStratName(name) {
     const base = String(name).replace(/ · v\d+$/, ''), taken = new Set(storage.get().map((x) => x.name));
@@ -2731,12 +2774,9 @@
       const old = Object.assign({}, r.e.strategy);
       if (!storage.get().some((x) => x.name === old.name)) saveStrategy(old, r.e.config);
       // 2) la nouvelle : règles et réglages améliorés
-      const c = E.combine(r.strat, r.settings, r.pick);
-      const s = Object.assign({}, c.strat, { name: name, style: r.strat.style || 'none' });
-      s.plots = F.french.derivePlots(s);
-      s.frenchText = F.french.toFrench(s) || '';
-      const config = Object.assign({}, r.e.config, { leverage: c.settings.leverage, broker: Object.assign({}, r.e.config.broker, { sizing: c.settings.sizing, risk: c.settings.riskPct }) });
-      if (c.settings.news) config.news = { on: true, mode: c.settings.news.mode, before: c.settings.news.before, after: c.settings.news.after, impact: (r.e.config.news || {}).impact || 'high' };
+      const imp = improvedVersion(r, name), s = imp.strat;
+      // la nouvelle stratégie garde la configuration d'origine (période, capital…), avec les réglages améliorés
+      const config = Object.assign({}, r.e.config, { leverage: imp.config.leverage, broker: imp.config.broker }, imp.config.news ? { news: imp.config.news } : {});
       loadStrategy(s);
       applyConfig(config);
       saveStrategy(s, config, r.stats);
