@@ -548,3 +548,6 @@ a.btn-link:hover { border-color: var(--accent); color: var(--accent); }
 .cond-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .cond-actions button { width: auto; margin: 0; }
 .stale-note { margin-top: 6px; padding: 6px 10px; border-radius: 8px; background: var(--warn-soft); font-size: 12.5px; }
+.cond-body { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; flex: 1; min-width: 0; }
+.cond-lines { display: flex; flex-wrap: wrap; gap: 6px; }
+.cond-lines button { width: auto; margin: 0; border-color: #9333ea; color: #9333ea; }

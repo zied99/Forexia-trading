@@ -1547,43 +1547,87 @@
     }
     return out;
   }
+  // Arbre d'une règle : {op: 'AND' | 'OR', items: [...]} ou une condition (texte) ; chaque condition, à toute profondeur, peut être retirée.
+  function condTree(rule) {
+    const R = F.rules, split = (n, op) => (n.k === 'bin' && n.op === op ? split(n.a, op).concat(split(n.b, op)) : [n]);
+    const build = (n) => (n.k === 'bin' && (n.op === 'AND' || n.op === 'OR') ? { op: n.op, items: split(n, n.op).map(build) } : R.stringify(n));
+    return rule && rule.trim() ? build(R.parse(rule)) : null;
+  }
+  function treeStr(t, parentOp) {
+    if (typeof t === 'string') return t;
+    const sstr = t.items.map((x) => treeStr(x, t.op)).join(' ' + t.op + ' ');
+    return parentOp ? '(' + sstr + ')' : sstr;
+  }
+  // retire les conditions pour lesquelles drop(texte) est vrai ; simplifie les groupes vides ou à un seul élément
+  function treeDrop(t, drop) {
+    if (t === null) return null;
+    if (typeof t === 'string') return drop(t) ? null : t;
+    // un sous-groupe devenu du même type que son parent (ex. ET dans ET) est fusionné : pas de parenthèses inutiles
+    const items = t.items.map((x) => treeDrop(x, drop)).filter((x) => x !== null).flatMap((x) => (typeof x !== 'string' && x.op === t.op ? x.items : [x]));
+    return !items.length ? null : items.length === 1 ? items[0] : { op: t.op, items: items };
+  }
+  function treeAt(t, path) { return path.reduce((n, i) => n.items[i], t); }
   function renderCondPanel() {
     const box = $('condPanel'), st = currentStrategy();
     let html = '<div class="cond-head"><h3>Conditions de la stratégie</h3><span class="hint">Cliquez sur × pour retirer une condition. Les lignes et niveaux des règles sont tracés en violet (R1, R2…) sur le graphique des cours.</span></div>';
+    // lignes de tendance utilisées : bouton pour retirer d'un coup toutes les conditions qui s'en servent
+    const marks = ruleMarks(st, -Infinity, Infinity).filter((m) => m.type === 'line');
+    if (marks.length) {
+      html += '<div class="cond-lines">' + marks.map((m, k) => {
+        const txt = 'LINE(' + m.t1 + ',', n = RULE_FIELDS.reduce((a, f) => a + ((st[f] || '').split(txt).length - 1), 0);
+        return '<button type="button" class="secondary small" data-dropline="' + m.t1 + '|' + m.t2 + '">🗑 Retirer la ligne R' + (k + 1) + ' (' + dayFr(m.t1) + ' → ' + dayFr(m.t2) + ', ' + n + ' condition' + (n > 1 ? 's' : '') + ')</button>';
+      }).join('') + '</div>';
+    }
+    const chip = (c, k, path) => '<span class="cond-chip' + (lineInfo(c) ? ' line' : '') + '" title="' + esc(c) + '">' + esc(condLabel(c)) +
+      '<button type="button" data-cond="' + k + ':' + path.join('.') + '" aria-label="Retirer cette condition">×</button></span>';
+    const node = (t, k, path, top) => {
+      if (typeof t === 'string') return chip(t, k, path);
+      const sep = '<span class="cond-' + (t.op === 'OR' ? 'or">OU' : 'and">ET') + '</span>';
+      const inner = t.items.map((x, i) => (i ? sep : '') + node(x, k, path.concat(i), false)).join('');
+      return top ? inner : '<span class="cond-group">' + inner + '</span>';
+    };
     let any = false;
     for (const k of RULE_FIELDS) {
-      let groups;
-      try { groups = ruleGroups(st[k]); } catch (e) { groups = null; }
-      if (!groups || !groups.length) continue;
+      let t;
+      try { t = condTree(st[k]); } catch (e) { t = null; }
+      if (!t) continue;
       any = true;
-      html += '<div class="cond-rule"><b>' + RULE_LABEL[k] + '</b>' + groups.map((g, gi) => (gi ? '<span class="cond-or">OU</span>' : '') + '<span class="cond-group">' +
-        g.map((c, ci) => (ci ? '<span class="cond-and">ET</span>' : '') + '<span class="cond-chip' + (lineInfo(c) ? ' line' : '') + '" title="' + esc(c) + '">' + esc(condLabel(c)) +
-          '<button type="button" data-cond="' + k + ':' + gi + ':' + ci + '" aria-label="Retirer cette condition">×</button></span>').join('') + '</span>').join('') + '</div>';
+      html += '<div class="cond-rule"><b>' + RULE_LABEL[k] + '</b><div class="cond-body">' + node(t, k, [], true) + '</div></div>';
     }
     if (!any) html += '<p class="hint">Aucune condition.</p>';
     html += '<div class="row buttons cond-actions"><button type="button" class="primary small" id="condRun">▶ Relancer le backtest</button>' +
       '<button type="button" class="secondary small" id="condDraw">╱ Dessiner un nouveau repère</button></div>';
     box.innerHTML = html;
   }
+  /** Applique un retrait de conditions aux 4 règles (drop(k, texte) -> vrai pour retirer). */
+  function dropConditions(label, drop) {
+    const st = currentStrategy(), next = {};
+    for (const k of RULE_FIELDS) { const t = condTree(st[k]); next[k] = t ? treeStr(treeDrop(t, (c) => drop(k, c)) || '') : ''; if (next[k] === '') next[k] = ''; }
+    if (!next.longEntry && !next.shortEntry) { toast('Il faut au moins une règle d\'entrée : condition non retirée.'); return; }
+    undoable(label, () => {
+      for (const k of RULE_FIELDS) $(k).value = next[k];
+      $('frenchText').value = F.french.toFrench(currentStrategy()) || ''; // texte français impossible avec des repères LINE : on l'efface plutôt que de le laisser faux
+      $('plots').value = F.french.derivePlots(currentStrategy()) || $('plots').value;
+      markCustom();
+      validateAll();
+      $('presetDesc').textContent = label + '. Relancez le backtest pour voir l\'effet.';
+    });
+    renderCondPanel();
+    drawPrice();
+  }
   document.addEventListener('click', (ev) => {
     const b = ev.target.closest('#condPanel [data-cond]');
     if (b) {
-      const [k, gi, ci] = b.dataset.cond.split(':'), groups = ruleGroups($(k).value);
-      const removed = groups[+gi][+ci];
-      undoable('Condition retirée', () => {
-        groups[+gi].splice(+ci, 1);
-        const rule = groupsRule(groups);
-        if ((k === 'longEntry' || k === 'shortEntry') && !rule && !$(k === 'longEntry' ? 'shortEntry' : 'longEntry').value.trim()) { toast('Il faut au moins une règle d\'entrée.'); return; }
-        $(k).value = rule;
-        $('frenchText').value = F.french.toFrench(currentStrategy()) || ''; // texte français impossible avec des repères LINE : on l'efface plutôt que de le laisser faux
-        $('plots').value = F.french.derivePlots(currentStrategy()) || $('plots').value;
-        markCustom();
-        validateAll();
-        $('presetDesc').textContent = 'Condition retirée (' + RULE_LABEL[k].toLowerCase() + ') : ' + condLabel(removed) + '. Relancez le backtest pour voir l\'effet.';
-      });
-      renderCondPanel();
-      drawPrice();
-      return;
+      const [k, ps] = b.dataset.cond.split(':'), path = ps ? ps.split('.').map(Number) : [];
+      const t = condTree($(k).value), target = treeAt(t, path);
+      let done = false; // retire uniquement cette occurrence
+      return dropConditions('Condition retirée (' + RULE_LABEL[k].toLowerCase() + ') : ' + condLabel(target), (kk, c) => { if (kk === k && !done && c === target) { done = true; return true; } return false; });
+    }
+    const dl = ev.target.closest('#condPanel [data-dropline]');
+    if (dl) {
+      const [t1, t2] = dl.dataset.dropline.split('|');
+      const re = new RegExp('LINE\\(\\s*' + t1 + '\\s*,[^)]*,\\s*' + t2 + '\\s*,');
+      return dropConditions('Ligne de tendance retirée de la stratégie', (k, c) => re.test(c));
     }
     if (ev.target.id === 'condRun') { $('form').requestSubmit(); return; }
     if (ev.target.id === 'condDraw') { $('drawLine').scrollIntoView({ behavior: 'smooth', block: 'center' }); setDrawMode('line'); }
