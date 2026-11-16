@@ -297,7 +297,7 @@
         // zone cliquable sur toute la hauteur de la colonne ; glisser pour sélectionner plusieurs barres
         const hz = el('rect', { x: cx - slot / 2, y: 0, width: slot, height: H, class: 'bar-hit' }, svg);
         hz.dataset.i = i;
-        if (opts.titles) { const ti = el('title', {}, hz); ti.textContent = opts.titles[i] + ' — cliquer pour modifier (glisser ou Ctrl+clic pour en choisir plusieurs)'; }
+        if (opts.titles) { const ti = el('title', {}, hz); ti.textContent = opts.titles[i] + ' — clic : modifier · double-clic : recharger sur l\'écran principal · glisser ou Ctrl+clic : plusieurs'; }
         hits.push(hz);
       }
       if (opts.pending === i) el('rect', { x: cx - bw / 2 - 4, y: m.t, width: bw + 8, height: innerH, rx: 3, class: 'pending' }, svg);
@@ -332,6 +332,7 @@
       if (a === b) opts.onBarClick(a, ev); else if (opts.onBarRange) opts.onBarRange(Math.min(a, b), Math.max(a, b), ev);
     };
     svg.addEventListener('pointerup', end);
+    if (opts.onBarDblClick) svg.addEventListener('dblclick', (ev) => { const t = ev.target; if (t && t.classList && t.classList.contains('bar-hit')) opts.onBarDblClick(+t.dataset.i); });
     svg.addEventListener('pointerleave', (ev) => { if (start !== null) end(ev); });
   }
   function mountBars(container, opts) {

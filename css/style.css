@@ -522,3 +522,13 @@ a.btn-link:hover { border-color: var(--accent); color: var(--accent); }
 .pick-ico { background: none; border: 0; padding: 3px 5px; font-size: 14px; cursor: pointer; min-height: 0; border-radius: 6px; opacity: .6; line-height: 1; }
 .pick-ico:hover, .pick-ico:focus-visible { opacity: 1; background: var(--panel); }
 .pick-item.on .pick-ico { opacity: .95; }
+.imp-section { margin-top: 12px; border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; background: var(--panel); }
+.imp-sec-head { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
+.imp-sec-head h4 { margin: 0; font-size: 15px; }
+.imp-section h5 { margin: 12px 0 6px; font-size: 13px; }
+.imp-section .hint { margin: 4px 0; }
+.is-row { display: grid; grid-template-columns: 112px 1fr; gap: 10px; align-items: start; padding: 6px 0; border-top: 1px solid var(--border); font-size: 13px; }
+.is-row .grp { font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); font-weight: 600; }
+.is-row button, .is-foot button, .imp-section .row.buttons button { width: auto; margin: 0; }
+.is-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.imp-section .row.buttons { display: flex; gap: 8px; flex-wrap: wrap; }

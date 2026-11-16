@@ -2483,15 +2483,21 @@
       selected: list.map((e, i) => (barSel.has(e.key) ? i : -1)).filter((i) => i >= 0),
       // clic : une simulation ; Ctrl / Cmd + clic : ajouter ou retirer ; Maj + clic ou glisser : une plage
       onBarClick: (i, ev) => {
-        const k = list[i].key;
+        const k = list[i].key, now = Date.now();
+        // double-clic (2 clics sur la même barre en moins de 0,4 s) : rechargement sur l'écran principal
+        if (lastBarClick.k === k && now - lastBarClick.t < 400) { lastBarClick = { k: '', t: 0 }; return reloadToMain(list[i]); }
+        lastBarClick = { k: k, t: now };
         if (ev && (ev.ctrlKey || ev.metaKey)) { if (barSel.has(k)) barSel.delete(k); else barSel.add(k); }
         else if (ev && ev.shiftKey && barLast >= 0) { for (let j = Math.min(barLast, i); j <= Math.max(barLast, i); j++) barSel.add(list[j].key); }
         else barSel = barSel.size === 1 && barSel.has(k) ? new Set() : new Set([k]);
         barLast = i;
         if (improveWhere === 'panel') { improveHtml = ''; improveCtx = null; }
         renderEvaluation();
-        if (barSel.size && $('barPanel')) $('barPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        // défilement vers le panneau un peu après, pour ne pas gêner un double-clic
+        setTimeout(() => { if (lastBarClick.k === k && barSel.size && $('barPanel') && !$('evalModal').hidden) $('barPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, 450);
       },
+      // double-clic : la simulation est rechargée sur l'écran principal (stratégie, réglages, période) et relancée
+      onBarDblClick: (i) => reloadToMain(list[i]),
       onBarRange: (a, b, ev) => {
         if (!(ev && (ev.ctrlKey || ev.metaKey))) barSel = new Set();
         for (let j = a; j <= b; j++) barSel.add(list[j].key);
@@ -2529,6 +2535,7 @@
   }
   // Panneau d'une simulation choisie en cliquant sur sa barre : prolonger, raccourcir, changer le capital de départ.
   let barSel = new Set(), barLast = -1;
+  let lastBarClick = { k: '', t: 0 };
   const barOpt = { durDir: 'longer', dur: '6', capMode: 'pct', capValue: '100' };
   function barPanelHtml(list) {
     const chosen = list.filter((x) => barSel.has(x.key));
@@ -2590,7 +2597,7 @@
     const base = list.filter((e) => !e.tag); // les tranches d'un découpage ne sont pas reprises
     const red = base.filter((e) => e.returnPct <= 0).length, green = base.length - red;
     const which = (id) => { const d = checkSel[id]; return '<select id="' + id + '"><option value="red"' + (d === 'red' ? ' selected' : '') + '>rouges (' + red + ')</option><option value="green"' + (d === 'green' ? ' selected' : '') + '>vertes (' + green + ')</option><option value="all"' + (d === 'all' ? ' selected' : '') + '>toutes (' + base.length + ')</option></select>'; };
-    return barPanelHtml(list) + '<div class="check-tools">' +
+    return barPanelHtml(list) + improveSectionHtml(list) + '<div class="check-tools">' +
       '<div class="check-row"><b>Long terme ?</b> Prolonger les simulations ' + which('extWhich', 'red') + ' de ' + monthsSelect('extMonths', 6, MONTH_CHOICES.slice(2)) +
       '<button type="button" class="secondary small" id="extRun">' + (checkRunning === 'ext' ? 'Arrêter' : 'Prolonger') + '</button>' +
       '<span class="hint">Même début, fin repoussée : chaque simulation est <b>modifiée</b> (pas de nouvelle ligne). Sur le graphique, la nouvelle longueur s\'affiche en pointillé : ' +
@@ -2837,6 +2844,160 @@
     renderEvaluation();
     if ($('improveOut')) $('improveOut').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
+  function reloadToMain(e) {
+    if (!e || !e.strategy || checkRunning) return;
+    undoable('Simulation rechargée depuis l\'évaluation', () => {
+      loadStrategy(e.strategy);
+      const d = datesOf(e);
+      applyConfig(Object.assign({}, e.config, { period: 'custom', dateFrom: isoD(d.from), dateTo: isoD(d.to) }));
+      document.querySelector('input[name=period][value=custom]').checked = true;
+      syncPeriodUI(); $('dateFrom').value = isoD(d.from); $('dateTo').value = isoD(d.to);
+      $('preset').value = 'mine'; $('deleteStrat').hidden = true;
+      $('presetDesc').textContent = 'Simulation #' + (evalList().findIndex((x) => x.key === e.key) + 1) + ' rechargée depuis l\'évaluation (' + frDate(isoD(d.from)) + ' → ' + frDate(isoD(d.to)) + ').';
+      updateStyleHint();
+    });
+    closeEvaluation();
+    evalNoRecord = true; // déjà dans le tableau : on ne l'ajoute pas une 2e fois
+    runFromForm().finally(() => { evalNoRecord = false; $('results').scrollIntoView({ behavior: 'smooth' }); });
+  }
+
+  // ---------- Section « Améliorations » : communes aux rouges, et à fort impact ----------
+  let impSec = null; // { status, name, ctxs, common, high, chosen:Set, done }
+  function improveSectionHtml(list) {
+    const busy = !!checkRunning;
+    let h = '<section class="imp-section"><div class="imp-sec-head"><h4>Améliorations</h4>';
+    if (!impSec || impSec.status === 'idle') {
+      const red = list.filter((e) => e.returnPct <= 0 && !e.tag).length;
+      return h + '<button type="button" class="secondary small" id="isAnalyze"' + (busy || !list.length ? ' disabled' : '') + '>Analyser</button></div>' +
+        '<p class="hint">Cherche les améliorations communes aux ' + red + ' simulation' + (red > 1 ? 's' : '') + ' rouge' + (red > 1 ? 's' : '') + ' et celles qui rapportent le plus sur l\'ensemble, ' +
+        'puis vous laisse choisir celles à appliquer et resimuler.</p></section>';
+    }
+    if (impSec.status === 'run') return h + '</div><div class="modal-loading"><span class="spinner"></span>' + esc(impSec.msg || 'Analyse…') + '</div></section>';
+    if (impSec.status === 'err') return h + '<button type="button" class="secondary small" id="isAnalyze">Analyser</button></div><p class="val ko">' + esc(impSec.msg) + '</p></section>';
+    const row = (c, kind) => {
+      const on = impSec.chosen.has(c.s.id);
+      const detail = kind === 'common'
+        ? c.redBetter + ' rouge' + (c.redBetter > 1 ? 's' : '') + ' sur ' + c.redN + ' améliorée' + (c.redBetter > 1 ? 's' : '') + ' · ' + c.allBetter + ' / ' + c.n + ' au total'
+        : 'résultat médian ' + pctFine(c.medBefore) + ' → ' + pctFine(c.medAfter) + ' · ' + c.allBetter + ' / ' + c.n + ' meilleures';
+      return '<div class="is-row' + (on ? ' on' : '') + '"><button type="button" class="' + (on ? 'primary' : 'secondary') + ' small is-apply" data-is="' + esc(c.s.id) + '">' + (on ? '✓ Appliquée' : 'Appliquer') + '</button>' +
+        '<div><span class="grp">' + esc(c.s.group) + '</span> ' + esc(c.s.title) + '<div class="hint">' + detail + '</div></div></div>';
+    };
+    h += '<button type="button" class="secondary small" id="isAnalyze"' + (busy ? ' disabled' : '') + '>Analyser de nouveau</button></div>' +
+      '<p class="hint">Analyse sur ' + impSec.ctxs.length + ' simulations de « ' + esc(impSec.name) + ' » (' + impSec.redN + ' rouges).</p>' +
+      '<h5>Communes aux rouges</h5>' + (impSec.common.length ? impSec.common.map((c) => row(c, 'common')).join('') : '<p class="hint">Aucune amélioration n\'aide la majorité des simulations rouges.</p>') +
+      '<h5>À fort impact (sur toutes les simulations)</h5>' + (impSec.high.length ? impSec.high.map((c) => row(c, 'high')).join('') : '<p class="hint">Aucune amélioration ne fait progresser le résultat médian.</p>');
+    const n = impSec.chosen.size;
+    h += '<div class="is-foot"><button type="button" class="primary small" id="isResim"' + (!n || busy ? ' disabled' : '') + '>▶ Resimuler' + (n ? ' avec ' + n + ' amélioration' + (n > 1 ? 's' : '') : '') + '</button>' +
+      '<span class="hint">Relance les ' + impSec.ctxs.length + ' simulations avec les améliorations choisies ; les barres du graphique se mettent à jour (nouveau résultat en pointillé). Ctrl+Z pour annuler.</span></div>';
+    if (impSec.done) h += impSec.done;
+    return h + '</section>';
+  }
+  const appliesSettings = (x, c) => x.apply({ strat: c.strat, settings: c.settings }).settings !== c.settings; // levier, taille, annonces : exclus
+  async function analyzeImprovements() {
+    if (checkRunning) return;
+    const list = evalFiltered(evalList()).map((x) => x.e).filter((e) => e.strategy && e.config && !e.tag);
+    const name = list.some((e) => e.name === currentStratName()) ? currentStratName() : (list[0] || {}).name;
+    const sims = list.filter((e) => e.name === name).slice(-16);
+    if (!sims.length) return;
+    const saved = captureForm();
+    checkRunning = 'isec'; checkStop = false;
+    impSec = { status: 'run', msg: 'Chargement des simulations…' };
+    renderEvaluation();
+    try {
+      const ctxs = [];
+      for (const e of sims) {
+        if (checkStop) break;
+        impSec.msg = 'Chargement de la simulation ' + (ctxs.length + 1) + ' sur ' + sims.length + '…'; setRunLabel('Analyse ' + (ctxs.length + 1) + ' / ' + sims.length); renderEvaluation();
+        const c = await ctxOf(e); if (c) { c.base = E.run(c.bars, c.strat, c.settings); ctxs.push(c); }
+      }
+      if (!ctxs.length) throw new Error('simulations impossibles à recharger');
+      impSec.msg = 'Recherche des améliorations…'; renderEvaluation();
+      await new Promise((r) => setTimeout(r, 20));
+      const reds = ctxs.filter((c) => c.base.returnPct <= 0);
+      // candidats : suggestions trouvées sur les simulations rouges (les 6 pires) et sur les 2 meilleures
+      const srcs = reds.slice().sort((a, b) => a.base.returnPct - b.base.returnPct).slice(0, 6).concat(ctxs.slice().sort((a, b) => b.base.returnPct - a.base.returnPct).slice(0, 2));
+      const cand = new Map();
+      for (const c of srcs) {
+        for (const x of E.suggest(c.bars, c.strat, c.settings, c.strat.style || 'none').suggestions) {
+          if (x.risk || x.group === 'Combinaison recommandée' || cand.has(x.id) || appliesSettings(x, c)) continue;
+          cand.set(x.id, x);
+        }
+      }
+      const med = (a) => { const s2 = a.slice().sort((x, y) => x - y); return s2.length ? s2[s2.length >> 1] : 0; };
+      const rated = [...cand.values()].map((x) => {
+        const res = ctxs.map((c) => { const k = E.combine(c.strat, c.settings, [x]), st = E.run(c.bars, k.strat, k.settings); return { c: c, a: st, d: E.score(st) - E.score(c.base) }; });
+        const r = res.filter((z) => z.c.base.returnPct <= 0);
+        return { s: x, n: res.length, redN: r.length, redBetter: r.filter((z) => z.d > 0.5).length, allBetter: res.filter((z) => z.d > 0.5).length,
+          meanGain: mean(res.map((z) => z.d)), medBefore: med(res.map((z) => z.c.base.returnPct)), medAfter: med(res.map((z) => z.a.returnPct)) };
+      });
+      const common = rated.filter((c) => c.redN && c.redBetter / c.redN >= 0.6).sort((a, b) => b.redBetter - a.redBetter || b.meanGain - a.meanGain).slice(0, 6);
+      const high = rated.filter((c) => c.medAfter > c.medBefore && c.meanGain > 0).sort((a, b) => (b.medAfter - b.medBefore) - (a.medAfter - a.medBefore)).slice(0, 6);
+      impSec = { status: 'ok', name: name, ctxs: ctxs, redN: reds.length, common: common, high: high, chosen: new Set(), byId: new Map(rated.map((c) => [c.s.id, c.s])) };
+    } catch (err) {
+      impSec = { status: 'err', msg: 'Analyse impossible : ' + err.message };
+    } finally {
+      checkRunning = ''; setRunLabel('');
+      restoring = true;
+      try { loadStrategy(saved.strat); applyConfig(saved.config); $('style').value = saved.style; $('preset').value = [...$('preset').options].some((o) => o.value === saved.preset) ? saved.preset : 'mine'; $('presetDesc').textContent = saved.desc; updateWithdrawUI(); syncFormState(); }
+      finally { restoring = false; }
+    }
+    renderEvaluation();
+  }
+  async function resimWithChosen() {
+    if (!impSec || !impSec.chosen.size || checkRunning) return;
+    const pick = [...impSec.chosen].map((id) => impSec.byId.get(id)).filter(Boolean);
+    const c0 = impSec.ctxs[0];
+    const k = E.combine(c0.strat, c0.settings, pick);
+    const strat = Object.assign({}, k.strat, { name: impSec.name, plots: F.french.derivePlots(k.strat), frenchText: F.french.toFrench(k.strat) || '' });
+    const keys = impSec.ctxs.map((c) => c.e.key);
+    pushUndo('Simulations relancées avec ' + pick.length + ' amélioration(s)');
+    impSec.done = '';
+    await rerunWithStrategy(keys, strat);
+    const after = evalList().filter((e) => keys.includes(e.key));
+    const pos = after.filter((e) => e.returnPct > 0).length;
+    impSec.lastStrat = strat; impSec.lastPick = pick;
+    impSec.done = '<div class="imp-proposal"><p class="val ' + (pos * 2 >= after.length ? 'ok' : 'ko') + '">Resimulées avec ' + esc(pick.map((x) => x.title).join(' + ')) + ' : ' + pos + ' gagnante' + (pos > 1 ? 's' : '') + ' sur ' + after.length + '.</p>' +
+      '<div class="row buttons"><button type="button" class="primary small" id="isToCurrent">Ajouter à la stratégie en cours</button><button type="button" class="secondary small" id="isAsNew">Créer une nouvelle stratégie</button></div>' +
+      '<p class="hint">Les barres montrent le résultat d\'origine en plein et le nouveau en pointillé. Ctrl+Z pour revenir aux résultats d\'avant.</p></div>';
+    renderEvaluation();
+  }
+  function saveSectionStrategy(asNew) {
+    const s0 = impSec.lastStrat, name = asNew ? (prompt('Nom de la nouvelle stratégie :', newStratName(impSec.name)) || '').trim() : impSec.name;
+    if (!name) return;
+    undoable(asNew ? 'Nouvelle stratégie « ' + name + ' »' : 'Améliorations ajoutées à « ' + name + ' »', () => {
+      const old = impSec.ctxs[0].e.strategy;
+      if (asNew && !storage.get().some((x) => x.name === old.name)) saveStrategy(old, impSec.ctxs[0].e.config);
+      const s = Object.assign({}, s0, { name: name });
+      loadStrategy(s);
+      const isSaved = storage.get().some((x) => x.name === name);
+      if (asNew || isSaved) saveStrategy(s, currentConfig()); else $('preset').value = 'mine';
+      $('presetDesc').textContent = 'Améliorations : ' + impSec.lastPick.map((x) => x.title).join(' + ') + '.';
+      logEvent('strategy.enhanced', (asNew ? 'Nouvelle stratégie ' : 'Améliorations ajoutées à ') + name + ' : ' + impSec.lastPick.map((x) => x.title).join(' + '), { name: name });
+    });
+    impSec.done = '<p class="val ok">' + (asNew ? '« ' + esc(name) + ' » créée et chargée dans le formulaire.' : 'Améliorations ajoutées à « ' + esc(name) + ' ».') + '</p>';
+    toast(asNew ? '« ' + name + ' » créée.' : 'Améliorations ajoutées à « ' + name + ' ».', true);
+    renderEvaluation();
+  }
+  $('evalBody').addEventListener('click', (ev) => {
+    const t = ev.target;
+    if (t.id === 'isAnalyze') return analyzeImprovements();
+    const ap = t.closest('.is-apply');
+    if (ap && impSec) {
+      const id = ap.dataset.is;
+      if (impSec.chosen.has(id)) impSec.chosen.delete(id);
+      else {
+        // une seule amélioration par type (deux stops suiveurs différents s'annuleraient)
+        const g = impSec.byId.get(id).group;
+        for (const o of [...impSec.chosen]) if (impSec.byId.get(o).group === g) impSec.chosen.delete(o);
+        impSec.chosen.add(id);
+      }
+      return renderEvaluation();
+    }
+    if (t.id === 'isResim') return resimWithChosen();
+    if (t.id === 'isToCurrent') return saveSectionStrategy(false);
+    if (t.id === 'isAsNew') return saveSectionStrategy(true);
+  });
+
   // ---------- « ✨ Améliorer » depuis la sélection du graphique ----------
   // Analyse « croisée » : les améliorations sont cherchées sur la ou les simulations choisies, puis vérifiées sur les autres
   // simulations affichées de la stratégie ; on ne garde que celles qui aident sans dégrader le reste.
