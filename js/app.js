@@ -88,7 +88,7 @@
     return {
       pair: $('pair').value, leverage: Number($('leverage').value), capital: Number($('capital').value),
       exposurePct: Number($('exposure').value), spreadPips: Number($('spread').value) || 0,
-      period: periodValue(), dateFrom: $('dateFrom').value, dateTo: $('dateTo').value, source: sourceValue(),
+      period: periodValue(), randomSpan: $('randomSpan').value, dateFrom: $('dateFrom').value, dateTo: $('dateTo').value, source: sourceValue(),
       estimateWicks: $('estimateWicks').checked,
       withdraw: { on: $('withdrawOn').checked, pct: $('withdrawPct').value, share: $('withdrawShare').value, when: $('withdrawWhen').value,
         mode: $('withdrawMode').value, every: $('withdrawEvery').value, days: $('withdrawDays').value, type: $('withdrawType').value, value: $('withdrawValue').value },
@@ -107,6 +107,7 @@
     if (c.spreadPips !== undefined) $('spread').value = c.spreadPips;
     const per = document.querySelector('input[name=period][value="' + c.period + '"]');
     if (per) { per.checked = true; syncPeriodUI(); }
+    if (c.randomSpan !== undefined) $('randomSpan').value = c.randomSpan;
     if (c.period === 'custom' && c.dateFrom && c.dateTo) { $('dateFrom').value = c.dateFrom; $('dateTo').value = c.dateTo; }
     // Le fichier CSV n'est pas conservé par le navigateur : on ne restaure que les autres sources.
     const src = c.source !== 'csv' && document.querySelector('input[name=source][value="' + c.source + '"]');
@@ -462,7 +463,16 @@
   }));
   // Période aléatoire : une durée (1 mois à 2 ans) et une date de début tirées au hasard dans l'historique disponible,
   // en gardant assez de données avant le début pour amorcer les indicateurs.
-  const RANDOM_DURATIONS = [[1, '1 mois'], [2, '2 mois'], [3, '3 mois'], [6, '6 mois'], [12, '1 an'], [24, '2 ans']];
+  const RANDOM_DURATIONS = [[1, '1 mois'], [2, '2 mois'], [3, '3 mois'], [4, '4 mois'], [6, '6 mois'], [9, '9 mois'], [12, '1 an'], [18, '18 mois'],
+    [24, '2 ans'], [36, '3 ans'], [48, '4 ans'], [60, '5 ans']];
+  // « Au moins N mois » : de N mois à 5 ans ; « au plus N mois » : de 1 mois à N mois ; sinon 1 mois à 2 ans.
+  function randomDurations() {
+    const [kind, v] = ($('randomSpan').value || ':').split(':');
+    const n = Number(v);
+    if (kind === 'min') return RANDOM_DURATIONS.filter(([m]) => m >= n);
+    if (kind === 'max') return RANDOM_DURATIONS.filter(([m]) => m <= n);
+    return RANDOM_DURATIONS.filter(([m]) => m <= 24);
+  }
   function pickRandomPeriod() {
     const day = 86400000, today = new Date(todayIso() + 'T00:00:00Z');
     const src = sourceValue();
@@ -471,8 +481,10 @@
       min = F.data.addMonths(new Date(csvBars[0].date.slice(0, 10) + 'T00:00:00Z'), 12);
       max = new Date(csvBars[csvBars.length - 1].date.slice(0, 10) + 'T00:00:00Z');
     }
-    let choices = RANDOM_DURATIONS.filter(([m]) => F.data.addMonths(min, m) <= max);
-    if (!choices.length) choices = [RANDOM_DURATIONS[0]];
+    const pool = randomDurations();
+    let choices = pool.filter(([m]) => F.data.addMonths(min, m) <= max);
+    let short = false;
+    if (!choices.length) { choices = [pool[0]]; short = true; }
     const [months, label] = choices[Math.floor(Math.random() * choices.length)];
     const latestStart = F.data.addMonths(max, -months);
     const span = Math.max(0, latestStart - min);
@@ -484,8 +496,12 @@
     setDates(start, end);
     $('randomPeriodNote').hidden = false;
     $('randomPeriodNote').textContent = '🎲 Période tirée au hasard : ' + label + ', du ' + frDate(F.data.iso(start)) + ' au ' + frDate(F.data.iso(end)) +
+      ($('randomSpan').value ? ' (' + $('randomSpan').selectedOptions[0].textContent.toLowerCase() + ')' : '') +
+      (short ? ', historique trop court pour cette durée : période raccourcie' : '') +
       '. Cliquez de nouveau sur « Période aléatoire » pour en tirer une autre.';
   }
+  // changer la contrainte de durée retire tout de suite une nouvelle période
+  $('randomSpan').addEventListener('change', () => { if (!$('randomPeriodNote').hidden) pickRandomPeriod(); });
   $('quickRanges').addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
