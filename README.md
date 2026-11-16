@@ -324,6 +324,11 @@ bridge/             passerelle locale Forexia <-> MetaTrader 5
 
 > Outil éducatif : les performances passées ne préjugent pas des performances futures.
 
+## Serveur MCP (agents IA)
+
+`mcp/forexia-mcp.js` donne à un agent IA (Claude Code, Claude Desktop…) l'accès à tout le moteur : backtests, lots
+aléatoires, Améliorer, robustesse, recommandations, EA MT5, passerelle MT5. Installation et outils : [mcp/README.md](mcp/README.md).
+
 ## Historique des versions
 
 ### 1.2 (novembre 2026)

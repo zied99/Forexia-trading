@@ -7,6 +7,12 @@
     "test": "node tests/run-tests.js && node tests/mql5-check.js",
     "start": "npx --yes http-server -c-1 -p 8080 .",
     "test:mql5": "node tests/mql5-check.js",
-    "test:bridge": "python3 tests/bridge-check.py"
+    "test:bridge": "python3 tests/bridge-check.py",
+    "mcp": "node mcp/forexia-mcp.js",
+    "mcp:http": "node mcp/forexia-mcp.js --http 3333",
+    "test:mcp": "node tests/mcp-check.js"
+  },
+  "bin": {
+    "forexia-mcp": "mcp/forexia-mcp.js"
   }
 }
