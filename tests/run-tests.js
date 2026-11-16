@@ -494,7 +494,7 @@ test('EA généré pour chaque modèle : paramètres repris de la stratégie', (
   for (const p of P.list) {
     const r = MQ.generate(p, { pair: 'EUR/USD', leverage: 20, exposurePct: 50, sizing: 'risk', riskPct: 2, maxLots: 3 });
     if (!/^Forexia_[A-Za-z0-9_]+\.mq5$/.test(r.fileName)) throw new Error('nom de fichier ' + r.fileName);
-    for (const needle of ['void OnTick()', 'int OnInit()', 'FxSignals(o, h, l, c, n, le, lx, se, sx)', 'InpSizing = FX_SIZING_RISK', 'InpLeverage = 20',
+    for (const needle of ['void OnTick()', 'int OnInit()', 'FxSignals(o, h, l, c, tm, n, iTime(_Symbol, InpTimeframe, 0), le, lx, se, sx)', 'InpSizing = FX_SIZING_RISK', 'InpLeverage = 20',
       'InpExposurePct = 50', 'InpRiskPct = 2', 'InpMaxLots = 3', 'InpStopLossPips = ' + (p.stopLossPips || 0), 'FX_PAIR "EURUSD"']) {
       if (!r.code.includes(needle)) throw new Error(p.id + ' : « ' + needle + ' » absent');
     }
