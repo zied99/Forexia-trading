@@ -164,6 +164,12 @@ const cases12 = [
     longExit: 'CLOSE < KELTNER_MIDDLE(20,2,10) OR TENKAN(9) < KIJUN(26)', shortEntry: 'CLOSE < KELTNER_LOWER(20,1.5,10) AND SLOPE(EMA(50), 5) < 0', shortExit: 'CLOSE > DONCHIAN_MIDDLE(10)' }],
   ['1.2 : bougies, Heikin-Ashi, divergences', { longEntry: '(BULL_ENGULF OR HAMMER OR BULL_DIV(RSI(14), 10)) AND HA_CLOSE > HA_OPEN', longExit: 'BEAR_ENGULF OR SHOOTING_STAR',
     shortEntry: 'BEAR_DIV(RSI(7), 7) OR (HA_CLOSE < HA_OPEN AND HA_HIGH == HA_OPEN)', shortExit: 'BULL_DIV(STOCH_K(14,3,3), 10)' }],
+  ['Repères dessinés : ligne de tendance et niveau', (() => {
+    const L = 'LINE(' + bars[150].t + ', ' + bars[150].low + ', ' + bars[300].t + ', ' + bars[300].low + ')';
+    const lv = bars[200].close;
+    return { longEntry: '(LOW <= ' + L + ' AND CLOSE > ' + L + ') OR CROSS_UP(CLOSE, ' + lv + ')', longExit: 'HIGH >= ' + (lv * 1.02),
+      shortEntry: 'CROSS_DOWN(CLOSE, ' + L + ')', shortExit: 'LOW <= ' + (lv * 0.98) };
+  })()],
 ];
 const casesH1 = [
   ['1.2 : multi-unités de temps (@H4, @D1) et horaires', { longEntry: 'RSI(14)@H4 > 50 AND (EMA(20) > EMA(50))@H4 AND CLOSE > EMA(10)@D1 AND HOUR >= 7 AND HOUR < 20',

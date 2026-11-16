@@ -831,7 +831,13 @@
       money.format(avg.mean) + ' (<span class="' + cls(avg.pct) + '">' + signed(avg.pct, num1) + ' %</span>)</span>' +
       '<span><i style="background:var(--muted)"></i>Capital initial</span></div></div><div id="equityChart"></div></div>';
 
-    html += '<div class="panel card"><div class="card-head"><h3>Cours et positions</h3><div class="legend" id="priceLegend"></div></div><div id="priceChart"></div></div>';
+    html += '<div class="panel card"><div class="card-head"><h3>Cours et positions</h3><div class="legend" id="priceLegend"></div></div>' +
+      '<div class="chart-tools"><select id="indPick" aria-label="Ajouter un indicateur"><option value="">+ Indicateur…</option>' +
+      IND_CHOICES.map(([g, list]) => '<optgroup label="' + g + '">' + list.map((x) => '<option value="' + esc(x[1]) + '">' + esc(x[0]) + '</option>').join('') + '</optgroup>').join('') +
+      '<option value="?">Autre (formule)…</option></select><span id="indChips"></span></div>' +
+      '<div id="priceChart"></div>' +
+      '<div class="chart-tools"><button type="button" class="chip" id="drawLine">╱ Ligne de tendance</button><button type="button" class="chip" id="drawH">― Support / résistance</button>' +
+      '<span class="hint" id="drawHint"></span></div><div class="draw-list" id="drawList"></div></div>';
 
     const row = (k, v, c) => '<div><dt>' + k + '</dt><dd class="' + (c || '') + '">' + v + '</dd></div>';
     html += '<div class="panel card"><div class="card-head"><h3>Statistiques détaillées</h3></div><div class="stats-grid"><dl>' +
@@ -892,13 +898,15 @@
       }],
     });
 
-    // Graphique des cours, indicateurs et trades
+    // Graphique des cours, indicateurs et trades (redessiné seul quand on ajoute un indicateur ou un repère)
     const ctxR = F.rules.makeContext(bars);
+    chartView = { bars: bars, st: st, ctxR: ctxR, pair: settings.pair, dec: dec, pfmt: pfmt };
+    drawPrice = () => {
     const overlays = [], oscillators = [];
     const closes = view.map((b) => b.close);
     const pMin = Math.min(...closes), pMax = Math.max(...closes);
     let colorIdx = 0;
-    for (const expr of splitTopLevel(strat.plots || '')) {
+    for (const expr of splitTopLevel($('plots').value || '')) {
       let values;
       try { values = F.rules.evaluateSeries(expr, ctxR).slice(st); } catch (e) { continue; }
       const finite = values.filter(Number.isFinite).sort((a, b) => a - b);
@@ -915,11 +923,16 @@
       markers.push({ i: xi, value: t.exitPrice, shape: 'dot', color: t.pnl > 0 ? 'var(--up)' : 'var(--down)',
         title: 'Sortie (' + t.reason + ') ' + frDate(t.exitDate) + ' à ' + pfmt(t.exitPrice) + ' : ' + signed(t.pnl, money) });
     }
-    const panels = [{ height: 280, format: pfmt, series: [{ name: settings.pair, values: closes, color: 'var(--price)', width: 1.5 }].concat(overlays), markers: markers }];
+    const tView = ctxR.t.slice(st);
+    const drawSeries = drawingsFor(settings.pair).map((d, k) => ({
+      name: drawingName(d, k), values: tView.map((t) => drawingValue(d, t)), color: DRAW_COLORS[k % DRAW_COLORS.length],
+      dash: d.type === 'h' ? '6 4' : '', noScale: true, label: String(k + 1), width: 2.2,
+    }));
+    const panels = [{ height: 280, format: pfmt, series: [{ name: settings.pair, values: closes, color: 'var(--price)', width: 1.5 }].concat(overlays, drawSeries), markers: markers }];
     // Regroupe les oscillateurs de même famille (ex. MACD + signal) dans un même panneau.
     const groups = new Map();
     for (const o of oscillators) {
-      const fam = o.name.replace(/\(.*$/, '').replace(/_(SIGNAL|HIST|K|D)$/, '');
+      const fam = o.name.replace(/@.*$/, '').replace(/\(.*$/, '').replace(/_(SIGNAL|HIST|K|D)$/, '').replace(/^(PLUS_DI|MINUS_DI)$/, 'ADX');
       if (!groups.has(fam)) groups.set(fam, []);
       groups.get(fam).push(o);
     }
@@ -933,6 +946,7 @@
     }
     F.chart.mount($('priceChart'), {
       labels: dates, formatLabel: shortDate, panels: panels, ariaLabel: 'Cours de ' + settings.pair + ' avec les trades',
+      draw: drawMode ? { mode: drawMode, pending: drawPending, onPoint: onDrawPoint } : null,
       extraTip: (i) => {
         const t = result.trades.find((tr) => tr.entryIndex - st === i || tr.exitIndex - st === i);
         if (!t) return '';
@@ -944,6 +958,15 @@
     $('priceLegend').innerHTML = '<span><i style="background:var(--price)"></i>' + esc(settings.pair) + '</span>' +
       overlays.map((o) => '<span><i style="background:' + o.color + '"></i>' + esc(o.name) + '</span>').join('') +
       '<span><i class="tri-up"></i>Achat</span><span><i class="tri-dn"></i>Vente</span><span><i class="dot" style="background:var(--muted)"></i>Sortie</span>';
+    renderIndChips();
+    renderDrawList();
+    };
+    drawPrice();
+    $('indPick').addEventListener('change', onIndPick);
+    $('drawLine').addEventListener('click', () => setDrawMode(drawMode === 'line' ? null : 'line'));
+    $('drawH').addEventListener('click', () => setDrawMode(drawMode === 'h' ? null : 'h'));
+    setDrawMode(null, true);
+
 
     $('enhanceBtn').addEventListener('click', openEnhancer);
     $('deployBtn').addEventListener('click', openDeploy);
@@ -997,6 +1020,137 @@
   function closeMonthly() { $('monthlyModal').hidden = true; document.body.style.overflow = ''; }
   $('monthlyModal').addEventListener('click', (e) => { if (e.target.closest('[data-close]')) closeMonthly(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('monthlyModal').hidden) closeMonthly(); });
+
+  // ---------- Indicateurs sous la courbe et repères dessinés ----------
+  const IND_CHOICES = [
+    ['Sous la courbe', [['RSI 14', 'RSI(14)'], ['MACD 12/26/9', 'MACD(12,26,9), MACD_SIGNAL(12,26,9), MACD_HIST(12,26,9)'], ['Stochastique 14/3/3', 'STOCH_K(14,3,3), STOCH_D(14,3,3)'],
+      ['ADX 14 et DMI', 'ADX(14), PLUS_DI(14), MINUS_DI(14)'], ['ATR 14', 'ATR(14)'], ['CCI 20', 'CCI(20)'], ['Williams %R 14', 'WILLR(14)'], ['Momentum 10', 'MOM(10)'],
+      ['ROC 10', 'ROC(10)'], ['Pente de l\'EMA 50', 'SLOPE(EMA(50), 5)'], ['Direction SuperTrend', 'SUPERTREND_DIR(10,3)']]],
+    ['Sur la courbe', [['SMA 20', 'SMA(20)'], ['SMA 50', 'SMA(50)'], ['EMA 20', 'EMA(20)'], ['EMA 200', 'EMA(200)'], ['Bollinger 20/2', 'BB_UPPER(20,2), BB_MIDDLE(20,2), BB_LOWER(20,2)'],
+      ['SuperTrend 10/3', 'SUPERTREND(10,3)'], ['SAR parabolique', 'PSAR(0.02,0.2)'], ['Donchian 20', 'DONCHIAN_UPPER(20), DONCHIAN_LOWER(20)'],
+      ['Keltner 20', 'KELTNER_UPPER(20,2,10), KELTNER_LOWER(20,2,10)'], ['Ichimoku Tenkan / Kijun', 'TENKAN(9), KIJUN(26)'], ['Points pivots', 'PIVOT, PIVOT_R1, PIVOT_S1']]],
+  ];
+  const DRAW_COLORS = ['#ea580c', '#16a34a', '#e11d48', '#4f46e5', '#65a30d', '#b45309'];
+  let chartView = null, drawPrice = () => {}, drawMode = null, drawPending = null;
+  function plotList() { return splitTopLevel($('plots').value || '').map((x) => x.trim()).filter(Boolean); }
+  function renderIndChips() {
+    $('indChips').innerHTML = plotList().map((p, k) => '<span class="ind-chip">' + esc(p.replace(/\s+/g, '')) + '<button type="button" data-k="' + k + '" aria-label="Retirer ' + esc(p) + '">×</button></span>').join(' ');
+    $('indChips').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => undoable('Indicateur retiré', () => {
+      const l = plotList(); l.splice(+b.dataset.k, 1); $('plots').value = l.join(', '); drawPrice();
+    })));
+  }
+  function onIndPick() {
+    let v = $('indPick').value;
+    $('indPick').value = '';
+    if (!v) return;
+    if (v === '?') { v = (prompt('Indicateur ou formule à afficher (ex. RSI(9), EMA(100), ATR(14) / CLOSE * 100) :') || '').trim(); if (!v) return; }
+    for (const x of splitTopLevel(v)) { const err = F.rules.validate(x.trim()); if (err) { alert('Formule invalide : ' + err); return; } }
+    undoable('Indicateur ajouté', () => {
+      const l = plotList();
+      for (const x of splitTopLevel(v).map((y) => y.trim())) if (!l.some((y) => y.replace(/\s+/g, '') === x.replace(/\s+/g, ''))) l.push(x);
+      $('plots').value = l.join(', ');
+      drawPrice();
+    });
+  }
+  // Repères : par paire, en heure (secondes) et prix, pour rester valables quelle que soit la période affichée.
+  function drawingsAll() { try { return JSON.parse(localStorage.getItem('forexia.drawings') || '{}'); } catch (e) { return {}; } }
+  function drawingsFor(pair) { return drawingsAll()[pair] || []; }
+  function saveDrawings(pair, list) {
+    const all = drawingsAll(); all[pair] = list;
+    try { localStorage.setItem('forexia.drawings', JSON.stringify(all)); } catch (e) { /* ignoré */ }
+  }
+  function drawingValue(d, t) { return d.type === 'h' ? d.v : t >= d.t1 ? d.v1 + ((d.v2 - d.v1) * (t - d.t1)) / (d.t2 - d.t1) : NaN; }
+  const dayOf = (t) => frDate(new Date(t * 1000).toISOString().slice(0, 10));
+  function drawingName(d, k) {
+    const f = chartView ? chartView.pfmt : (v) => String(v);
+    return (k + 1) + '. ' + (d.type === 'h' ? 'Niveau ' + f(d.v) : 'Tendance ' + dayOf(d.t1) + ' ' + f(d.v1) + ' → ' + dayOf(d.t2) + ' ' + f(d.v2));
+  }
+  function drawingExpr(d) {
+    const r = (v) => +v.toFixed(chartView ? chartView.dec + 1 : 6);
+    return d.type === 'h' ? String(r(d.v)) : 'LINE(' + d.t1 + ', ' + r(d.v1) + ', ' + d.t2 + ', ' + r(d.v2) + ')';
+  }
+  const ROLES = [
+    ['buyBounce', 'Acheter sur rebond (support)', 'longEntry', 'or', (X) => '(LOW <= ' + X + ' AND CLOSE > ' + X + ')'],
+    ['sellBounce', 'Vendre sur rejet (résistance)', 'shortEntry', 'or', (X) => '(HIGH >= ' + X + ' AND CLOSE < ' + X + ')'],
+    ['buyBreak', 'Acheter à la cassure vers le haut', 'longEntry', 'or', (X) => 'CROSS_UP(CLOSE, ' + X + ')'],
+    ['sellBreak', 'Vendre à la cassure vers le bas', 'shortEntry', 'or', (X) => 'CROSS_DOWN(CLOSE, ' + X + ')'],
+    ['buyAbove', 'Filtre : acheter seulement au-dessus', 'longEntry', 'and', (X) => 'CLOSE > ' + X],
+    ['sellBelow', 'Filtre : vendre seulement en dessous', 'shortEntry', 'and', (X) => 'CLOSE < ' + X],
+    ['exitLong', 'Sortir de l\'achat quand le prix le touche (objectif)', 'longExit', 'or', (X) => 'HIGH >= ' + X],
+    ['exitShort', 'Sortir de la vente quand le prix le touche (objectif)', 'shortExit', 'or', (X) => 'LOW <= ' + X],
+    ['stopLong', 'Sortir de l\'achat s\'il passe dessous (stop)', 'longExit', 'or', (X) => 'CLOSE < ' + X],
+    ['stopShort', 'Sortir de la vente s\'il passe dessus (stop)', 'shortExit', 'or', (X) => 'CLOSE > ' + X],
+  ];
+  function defaultRole(d) {
+    if (d.type === 'line') return d.v2 >= d.v1 ? 'buyBounce' : 'sellBounce';
+    const last = chartView.bars[chartView.bars.length - 1].close;
+    return d.v < last ? 'buyBounce' : 'sellBounce';
+  }
+  function strategyWith(strat, d, role) {
+    const R = ROLES.find((x) => x[0] === role), X = drawingExpr(d), cond = R[4](X), s = Object.assign({}, strat);
+    if (R[3] === 'and') { if (!s[R[2]]) return { error: 'La stratégie n\'a pas de règle « ' + (R[2] === 'longEntry' ? 'entrée achat' : 'entrée vente') + ' » à filtrer.' }; s[R[2]] = E.andWith(s[R[2]], cond); }
+    else s[R[2]] = s[R[2]] ? E.orWith(s[R[2]], cond) : cond;
+    return { strat: s };
+  }
+  function setDrawMode(mode, silent) {
+    drawMode = mode; drawPending = null;
+    if (!$('drawLine')) return;
+    $('drawLine').classList.toggle('active', mode === 'line');
+    $('drawH').classList.toggle('active', mode === 'h');
+    $('drawHint').textContent = mode === 'line' ? 'Cliquez sur 2 points du graphique des cours.' : mode === 'h' ? 'Cliquez à la hauteur du niveau.' : '';
+    if (!silent) drawPrice();
+  }
+  function onDrawPoint(i, value) {
+    const v = chartView, t = v.ctxR.t[v.st + i], pair = v.pair, list = drawingsFor(pair);
+    const round = (x) => +x.toFixed(v.dec + 1);
+    if (drawMode === 'h') {
+      undoable('Repère ajouté', () => { list.push({ type: 'h', v: round(value) }); saveDrawings(pair, list); setDrawMode(null); });
+    } else if (drawMode === 'line') {
+      if (!drawPending) { drawPending = { i: i, value: value, t: t }; drawPrice(); return; }
+      if (t === drawPending.t) return;
+      const a = drawPending.t < t ? drawPending : { t: t, value: value }, b = drawPending.t < t ? { t: t, value: value } : drawPending;
+      undoable('Ligne de tendance ajoutée', () => { list.push({ type: 'line', t1: a.t, v1: round(a.value), t2: b.t, v2: round(b.value) }); saveDrawings(pair, list); setDrawMode(null); });
+    }
+  }
+  function renderDrawList() {
+    if (!chartView || !$('drawList')) return;
+    const list = drawingsFor(chartView.pair);
+    $('drawList').innerHTML = list.length ? list.map((d, k) => '<div class="draw-item" data-k="' + k + '"><div class="head"><span><i style="background:' + DRAW_COLORS[k % DRAW_COLORS.length] + '"></i>' + esc(drawingName(d, k)) + '</span>' +
+      '<button type="button" class="chip" data-act="del">Supprimer</button></div><div class="acts"><select data-act="role" aria-label="Rôle du repère dans la stratégie">' +
+      ROLES.map((r) => '<option value="' + r[0] + '"' + (r[0] === (d.role || defaultRole(d)) ? ' selected' : '') + '>' + esc(r[1]) + '</option>').join('') + '</select>' +
+      '<button type="button" class="secondary" data-act="add">Ajouter à la stratégie</button></div><div class="preview hint" data-act="preview"></div></div>').join('') +
+      '<p class="hint">Un repère est un prix précis : il vaut pour ' + esc(chartView.pair) + ' et pour la période où il a du sens. Comparez le résultat avant de l\'ajouter (Ctrl+Z pour annuler).</p>'
+      : '<p class="hint">Dessinez une ligne de tendance ou un support / une résistance sur le graphique des cours, puis ajoutez-le à la stratégie comme règle d\'entrée, de filtre ou de sortie.</p>';
+    $('drawList').querySelectorAll('.draw-item').forEach((item) => {
+      const k = +item.dataset.k, sel = item.querySelector('[data-act=role]');
+      const preview = () => {
+        const d = drawingsFor(chartView.pair)[k], out = item.querySelector('[data-act=preview]');
+        if (!lastRunCtx || !d) return;
+        const w = strategyWith(lastRunCtx.strat, d, sel.value);
+        if (w.error) { out.textContent = w.error; return; }
+        const st = E.run(lastRunCtx.bars, w.strat, lastRunCtx.settings), base = lastRun && lastRun.stats;
+        out.innerHTML = st ? 'Avec ce repère : ' + statLine(st) + (base ? ' <span class="hint">(au lieu de ' + pct(base.returnPct) + ', ' + base.trades + ' trades)</span>' : '') : 'Simulation impossible.';
+      };
+      sel.addEventListener('change', () => { const l = drawingsFor(chartView.pair); l[k].role = sel.value; saveDrawings(chartView.pair, l); preview(); });
+      item.querySelector('[data-act=del]').addEventListener('click', () => undoable('Repère supprimé', () => { const l = drawingsFor(chartView.pair); l.splice(k, 1); saveDrawings(chartView.pair, l); drawPrice(); }));
+      item.querySelector('[data-act=add]').addEventListener('click', () => {
+        const d = drawingsFor(chartView.pair)[k], w = strategyWith(lastRunCtx.strat, d, sel.value);
+        if (w.error) { item.querySelector('[data-act=preview]').textContent = w.error; return; }
+        undoable('Repère ajouté à la stratégie', () => {
+          const s = Object.assign({}, currentStrategy(), { longEntry: w.strat.longEntry, longExit: w.strat.longExit, shortEntry: w.strat.shortEntry, shortExit: w.strat.shortExit });
+          s.name = String(s.name).replace(/ \(repères\)$/, '') + ' (repères)';
+          s.frenchText = F.french.toFrench(s) || '';
+          loadStrategy(s);
+          $('preset').value = 'mine';
+          $('presetDesc').textContent = 'Repère ajouté : ' + ROLES.find((r) => r[0] === sel.value)[1].toLowerCase() + ' (' + drawingName(d, k) + '). Voir « Règles techniques ».';
+          $('rulesDetails').open = true;
+          logEvent('strategy.drawing', 'Repère ajouté à ' + s.name + ' : ' + drawingName(d, k), { drawing: d, role: sel.value });
+        });
+        $('form').requestSubmit();
+      });
+      preview();
+    });
+  }
 
   function withdrawLabel(se) {
     if (se.withdrawMode !== 'periodic') return 'seuil +' + se.withdrawPct + ' %, ' + (se.withdrawWhen === 'immediate' ? 'dès le seuil' : 'à la clôture');

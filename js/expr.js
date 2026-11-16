@@ -220,6 +220,13 @@
     BULL_DIV: (c, a) => divOf(c, a, 1, 'BULL_DIV'),
     BEAR_DIV: (c, a) => divOf(c, a, -1, 'BEAR_DIV'),
     SLOPE: (c, a) => { const [s, n] = srcAndPeriod(c, a, 5, 'SLOPE'); return I.slope(s, n); },
+    // Ligne de tendance dessinée sur le graphique : passe par (t1, v1) et (t2, v2), heures en secondes ; prolongée vers la droite.
+    LINE: (c, a) => {
+      if (a.length !== 4 || a.some((x) => isSeries(x) || !Number.isFinite(x))) throw new RuleError('LINE(t1, prix1, t2, prix2) : 4 nombres attendus');
+      const [t1, v1, t2, v2] = a;
+      if (!(t2 > t1)) throw new RuleError('LINE : le 2e point doit être après le 1er');
+      return c.t.map((t) => (t >= t1 ? v1 + ((v2 - v1) * (t - t1)) / (t2 - t1) : NaN));
+    },
   };
 
   function macdOf(c, a, key) {

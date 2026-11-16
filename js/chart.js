@@ -52,7 +52,7 @@
     const panelInfo = [];
     for (const p of opts.panels) {
       const all = [];
-      for (const s of p.series) for (const v of s.values) if (Number.isFinite(v)) all.push(v);
+      for (const s of p.series) if (!s.noScale) for (const v of s.values) if (Number.isFinite(v)) all.push(v);
       for (const r of p.refLines || []) all.push(r.value);
       let lo = Math.min(...all), hi = Math.max(...all);
       if (p.min !== undefined) lo = Math.min(lo, p.min);
@@ -62,6 +62,10 @@
       const t0 = top, h = p.height;
       const y = (v) => t0 + h - ((v - lo) / (hi - lo)) * h;
       const g = el('g', {}, svg);
+      // les repères dessinés peuvent sortir du cadre : on les coupe aux bords du panneau
+      const clipId = 'clip' + Math.random().toString(36).slice(2, 9);
+      const cp = el('clipPath', { id: clipId }, svg);
+      el('rect', { x: m.l, y: t0, width: innerW, height: h }, cp);
       const fmt = p.format || ((v) => v.toFixed(2));
       // grille + axe Y
       for (const t of niceTicks(lo, hi, Math.max(2, Math.round(h / 55))).ticks) {
@@ -90,10 +94,19 @@
           let last = s.values.length - 1; while (last > 0 && !Number.isFinite(s.values[last])) last--;
           el('path', { d: d + 'L' + x(last) + ' ' + (t0 + h) + 'L' + x(first) + ' ' + (t0 + h) + 'Z', class: 'area', style: 'fill:' + s.color }, g);
         }
-        el('path', {
+        const path = el('path', {
           d: d, fill: 'none', style: 'stroke:' + s.color, 'stroke-width': s.width || 1.6,
           'stroke-dasharray': s.dash || '', 'stroke-linejoin': 'round', 'vector-effect': 'non-scaling-stroke',
         }, g);
+        if (s.noScale) path.setAttribute('clip-path', 'url(#' + clipId + ')');
+        if (s.label) {
+          // numéro du repère au dernier point visible dans le cadre
+          const last = s.values.reduce((k, v, i) => (Number.isFinite(v) && v >= lo && v <= hi ? i : k), -1);
+          if (last >= 0) {
+            const tl = el('text', { x: x(last) - 4, y: y(s.values[last]) - 5, class: 'ref-label', 'text-anchor': 'end', style: 'fill:' + s.color }, g);
+            tl.textContent = s.label;
+          }
+        }
       }
       for (const mk of p.markers || []) {
         const cx = x(mk.i), cy = y(mk.value);
@@ -118,7 +131,7 @@
         shape.setAttribute('style', 'fill:' + mk.color);
         if (mk.title) { const ti = el('title', {}, shape); ti.textContent = mk.title; }
       }
-      panelInfo.push({ p: p, y: y, top: t0, h: h, fmt: fmt });
+      panelInfo.push({ p: p, y: y, top: t0, h: h, fmt: fmt, inv: (py) => lo + ((t0 + h - py) / h) * (hi - lo) });
       top += h + gap;
     }
     // axe X
@@ -156,8 +169,41 @@
       tip.style.left = (cx + 14 + tw > rect.width ? cx - 14 - tw : cx + 14) + 'px';
       tip.style.top = '8px';
     }
+    // Mode dessin (opts.draw = {mode: 'h' | 'line', pending: {i, value}, onPoint(i, value)}) : clic dans le panneau des cours.
+    const dr = opts.draw && opts.draw.mode ? opts.draw : null;
+    const P0 = panelInfo[0];
+    let guideH = null, guideL = null;
+    if (dr) {
+      svg.classList.add('drawing');
+      guideH = el('line', { x1: m.l, x2: m.l + innerW, class: 'draw-guide', visibility: 'hidden' }, svg);
+      guideL = el('line', { class: 'draw-guide', visibility: 'hidden' }, svg);
+      if (dr.pending) el('circle', { cx: x(dr.pending.i), cy: P0.y(dr.pending.value), r: 5, class: 'draw-point' }, svg);
+    }
+    const pointAt = (ev) => {
+      const rect = svg.getBoundingClientRect();
+      const px = ((ev.clientX - rect.left) / rect.width) * W, py = ((ev.clientY - rect.top) / rect.height) * total;
+      const i = Math.max(0, Math.min(n - 1, Math.round(((px - m.l) / innerW) * (n - 1))));
+      return { i: i, py: py, inside: py >= P0.top && py <= P0.top + P0.h };
+    };
+    function drawMove(ev) {
+      const pt = pointAt(ev);
+      if (!pt.inside) { guideH.setAttribute('visibility', 'hidden'); guideL.setAttribute('visibility', 'hidden'); return; }
+      if (dr.mode === 'h') { guideH.setAttribute('y1', pt.py); guideH.setAttribute('y2', pt.py); guideH.setAttribute('visibility', 'visible'); }
+      if (dr.mode === 'line' && dr.pending) {
+        guideL.setAttribute('x1', x(dr.pending.i)); guideL.setAttribute('y1', P0.y(dr.pending.value));
+        guideL.setAttribute('x2', x(pt.i)); guideL.setAttribute('y2', pt.py); guideL.setAttribute('visibility', 'visible');
+      }
+    }
     hit.addEventListener('pointermove', move);
-    hit.addEventListener('pointerdown', move);
+    if (dr) {
+      hit.addEventListener('pointermove', drawMove);
+      hit.addEventListener('pointerdown', (ev) => {
+        const pt = pointAt(ev);
+        if (!pt.inside) return;
+        ev.preventDefault();
+        dr.onPoint(pt.i, P0.inv(pt.py));
+      });
+    } else hit.addEventListener('pointerdown', move);
     hit.addEventListener('pointerleave', () => { cross.setAttribute('visibility', 'hidden'); tip.hidden = true; });
   }
 

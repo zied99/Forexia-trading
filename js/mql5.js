@@ -531,6 +531,11 @@ void FxDivergence(const double &price[], const double &osc[], const int p, const
       else out[i] = (cur > prevExt && osc[i] < prevOsc) ? 1.0 : 0.0;
      }
   }
+void FxLine(const datetime &t[], const int n, const double t1, const double v1, const double t2, const double v2, double &out[])
+  {
+   FxInit(out, n);
+   for(int i = 0; i < n; i++) if((double)t[i] >= t1) out[i] = v1 + (v2 - v1) * ((double)t[i] - t1) / (t2 - t1);
+  }
 void FxSlope(const double &src[], const int p, double &out[])
   {
    int n = ArraySize(src);
@@ -768,6 +773,11 @@ void FxSlope(const double &src[], const int p, double &out[])
         if (!a.length || constant(a[0]) !== null) throw new Error(name + ' : oscillateur manquant');
         const osc = series(gen(a[0]));
         return out1('FxDivergence', [name === 'BULL_DIV' ? f.l : f.h, osc, intParam(a[1], 14, name), name === 'BULL_DIV' ? 1 : -1]);
+      }
+      if (name === 'LINE') {
+        const v = a.map((x) => numParam(x));
+        if (v.length !== 4 || !(v[2] > v[0])) throw new Error('LINE : 4 nombres attendus, 2e point après le 1er');
+        return out1('FxLine', [f.t, f.n].concat(v.map(fmtNum)));
       }
       if (name === 'PREV') return out1('FxPrev', [series(gen(a[0])), intParam(a[1], 1, 'PREV')]);
       if (name === 'CROSS_UP' || name === 'CROSS_DOWN') return out1('FxCross', [series(gen(a[0])), series(gen(a[1])), name === 'CROSS_UP' ? 1 : -1]);

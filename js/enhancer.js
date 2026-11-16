@@ -577,5 +577,5 @@
     return { runs: runs, tested: ok.length, positive: pos, robust: ok.length >= 3 && pos * 3 >= ok.length * 2 };
   }
 
-  F.enhancer = { STYLES, adaptToStyle, scaleStrategy, suggest, combine, score, run, customSuggestion, makeFolds, validateOn, robustness, ORDER };
+  F.enhancer = { STYLES, adaptToStyle, scaleStrategy, suggest, combine, score, run, customSuggestion, makeFolds, validateOn, robustness, ORDER, andWith, orWith };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -191,6 +191,16 @@ qui n'ont pas servi à la choisir (contrôle « walk-forward ») ; elle est « c
 - **Combinaison recommandée** : les suggestions confirmées cumulées une par une, gardées seulement si elles progressent ensemble.
 - **Robustesse** : la stratégie (avec les améliorations cochées) testée sur 8 grandes paires, même période.
 
+## Graphique : indicateurs et repères dessinés
+
+- **+ Indicateur** (au-dessus du graphique des cours) : RSI, MACD, stochastique, ADX, ATR… s'affichent chacun dans un panneau
+  sous la courbe ; moyennes, Bollinger, SuperTrend… se superposent aux cours. Le × retire un indicateur. « Autre (formule) » accepte
+  toute expression (`RSI(9)`, `ATR(14) / CLOSE * 100`…).
+- **Ligne de tendance** (2 clics) et **support / résistance** (1 clic) : les repères sont gardés par paire. Pour chacun, choisissez
+  un rôle (acheter sur rebond, vendre sur rejet, cassure, filtre au-dessus / en dessous, objectif, stop), comparez le résultat
+  affiché, puis **Ajouter à la stratégie** : la règle devient `CROSS_UP(CLOSE, 1.0850)`, `CLOSE > LINE(t1, prix1, t2, prix2)`…
+  (`LINE` = la droite qui passe par les deux points, prolongée vers la droite), reprise telle quelle par l'EA MT5.
+
 ## Calendrier économique (1.2)
 
 Le calendrier vient de **MetaTrader 5** : la passerelle (1.5 ou plus) compile et lance un petit script MQL5 (`ForexiaCalendar`)

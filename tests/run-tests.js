@@ -123,6 +123,12 @@ test('Heure, jour de la semaine, figures de bougies', () => {
   eq(R.evaluateRule('BULL_ENGULF', R.makeContext(eng))[1], true);
 });
 
+test('LINE : ligne de tendance dessinée (prolongée à droite, rien avant le 1er point)', () => {
+  const bars = series([1, 1, 1, 1, 1]), ctx = R.makeContext(bars), t = ctx.t;
+  const v = R.evaluateSeries('LINE(' + t[1] + ', 1.0, ' + t[3] + ', 1.2)', ctx);
+  eq(Number.isNaN(v[0]), true); near(v[1], 1, 1e-12); near(v[2], 1.1, 1e-12); near(v[4], 1.3, 1e-12);
+  if (!R.validate('CLOSE > LINE(' + t[3] + ', 1, ' + t[1] + ', 2)')) throw new Error('2e point avant le 1er accepté');
+});
 console.log('Backtest');
 const base = { capital: 10000, leverage: 10, exposurePct: 100, spreadPips: 0, pair: 'EUR/USD', startIndex: 1 };
 test('Achat exécuté à l\'ouverture suivante, soldé en fin de période', () => {
