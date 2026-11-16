@@ -467,3 +467,9 @@ a.btn-link:hover { border-color: var(--accent); color: var(--accent); }
 .check-row .hint { flex-basis: 100%; margin: 0; }
 .check-report { margin-top: 6px; }
 .eval-tag { display: block; font-size: 10.5px; color: var(--muted); font-weight: 500; }
+.chart .ghost { fill: none; stroke-width: 2; stroke-dasharray: 5 3; }
+.chart .ghost.up { stroke: var(--up); fill: var(--up-soft); fill-opacity: .35; }
+.chart .ghost.blue { stroke: #2563eb; fill: #2563eb; fill-opacity: .08; }
+.chart .pending { fill: var(--accent); opacity: .12; animation: fx-pulse 1s ease-in-out infinite alternate; }
+@keyframes fx-pulse { from { opacity: .06; } to { opacity: .22; } }
+.lg-up { color: var(--up); font-weight: 600; } .lg-blue { color: #2563eb; font-weight: 600; }

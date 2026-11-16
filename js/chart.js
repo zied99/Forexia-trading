@@ -255,7 +255,8 @@
     const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, role: 'img' }, container);
     if (opts.ariaLabel) svg.setAttribute('aria-label', opts.ariaLabel);
     const n = opts.values.length, innerW = W - m.l - m.r, innerH = H - m.t - m.b;
-    let lo = Math.min(0, ...opts.values), hi = Math.max(0, ...opts.values);
+    const gv = (opts.ghosts || []).map((g) => g.value);
+    let lo = Math.min(0, ...opts.values, ...gv), hi = Math.max(0, ...opts.values, ...gv);
     if (hi === lo) { hi += 1; lo -= 1; }
     const pad = (hi - lo) * 0.08; hi += pad; lo -= lo < 0 ? pad : 0;
     const y = (v) => m.t + innerH - ((v - lo) / (hi - lo)) * innerH;
@@ -267,6 +268,8 @@
       tx.textContent = fmt(t);
     }
     const slot = innerW / Math.max(1, n), bw = Math.max(2, Math.min(38, slot * 0.68));
+    // barres « fantômes » en pointillé (ex. résultat après prolongation), et barre en cours de calcul
+    const ghostAt = new Map((opts.ghosts || []).map((g) => [g.i, g]));
     const stars = new Set(opts.stars || []);
     const every = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(innerW / 64))));
     for (let i = 0; i < n; i++) {
@@ -274,6 +277,13 @@
       const top = y(Math.max(0, v)), bottom = y(Math.min(0, v));
       const r = el('rect', { x: cx - bw / 2, y: top, width: bw, height: Math.max(1, bottom - top), rx: 2, class: 'bar ' + (v >= 0 ? 'up' : 'down') }, svg);
       if (opts.titles) { const ti = el('title', {}, r); ti.textContent = opts.titles[i]; }
+      const gh = ghostAt.get(i);
+      if (gh) {
+        const gt = y(Math.max(0, gh.value)), gb = y(Math.min(0, gh.value));
+        const gr = el('rect', { x: cx - bw / 2 - 1, y: gt, width: bw + 2, height: Math.max(1, gb - gt), rx: 2, class: 'ghost ' + gh.kind }, svg);
+        if (opts.titles) { const ti = el('title', {}, gr); ti.textContent = opts.titles[i]; }
+      }
+      if (opts.pending === i) el('rect', { x: cx - bw / 2 - 4, y: m.t, width: bw + 8, height: innerH, rx: 3, class: 'pending' }, svg);
       if (stars.has(i)) {
         const sy = top - 9;
         let d = '';

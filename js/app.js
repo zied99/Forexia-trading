@@ -2181,6 +2181,21 @@
     if (evalTag) entry.tag = evalTag;
     entry.key = entry.at + '|' + entry.name;
     const list = evalList();
+    // Prolongation : la simulation d'origine est remplacée (même ligne), en gardant son résultat de départ.
+    const ri = evalReplaceKey ? list.findIndex((x) => x.key === evalReplaceKey) : -1;
+    if (ri >= 0) {
+      const old = list[ri];
+      entry.key = old.key; entry.at = old.at;
+      entry.extended = old.extended || { from: old.from, to: old.to, returnPct: old.returnPct, maxDrawdownPct: old.maxDrawdownPct, trades: old.trades };
+      if (old.tag) entry.tag = old.tag;
+      list[ri] = entry;
+      evalSave(list);
+      const fullR = Object.assign({}, entry, { tradeList: c.result.trades.map((t) => ({
+        dir: t.dir, entryDate: t.entryDate, exitDate: t.exitDate, entryPrice: t.entryPrice, exitPrice: t.exitPrice, lots: t.lots, pips: t.pips, pnl: t.pnl, reason: t.reason })) });
+      dbPush('simulations/put', fullR);
+      cloudPush(() => C.putSimulations([fullR]));
+      return;
+    }
     const last = list[list.length - 1];
     // Même stratégie, mêmes réglages, même résultat : on ne compte pas deux fois la même simulation.
     const same = (a, b) => a && ['name', 'pair', 'from', 'to', 'data', 'leverage', 'capital', 'rules'].every((k) => a[k] === b[k]) && Math.abs(a.returnPct - b.returnPct) < 1e-9;
@@ -2255,7 +2270,8 @@
     const p = (v) => '<span class="' + cls(v) + '">' + signed(v, num2) + ' %</span>';
     const rows = shown.map(({ e, i }) => '<tr>' +
       '<td>' + (i + 1) + '</td><td class="l">' + new Date(e.at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) + '</td>' +
-      '<td class="name" title="' + esc(e.name + (e.tag ? ' — ' + e.tag : '')) + '">' + esc(e.name) + (e.tag ? '<small class="eval-tag">' + esc(e.tag) + '</small>' : '') + '</td><td class="l">' + esc(e.pair) + '</td>' +
+      '<td class="name" title="' + esc(e.name + (e.tag ? ' — ' + e.tag : '')) + '">' + esc(e.name) + (e.tag ? '<small class="eval-tag">' + esc(e.tag) + '</small>' : '') +
+        (e.extended ? '<small class="eval-tag">prolongée (origine ' + frDate(e.extended.from) + ' → ' + frDate(e.extended.to) + ' : ' + signed(e.extended.returnPct, num1) + ' %)</small>' : '') + '</td><td class="l">' + esc(e.pair) + '</td>' +
       '<td class="l">' + frDate(e.from) + ' → ' + frDate(e.to) + '</td><td class="l" title="' + durationDays(e.from, e.to) + ' jours">' + durationLabel(e.from, e.to) + '</td>' +
       '<td class="l">' + esc(e.data) + '</td>' +
       '<td>1:' + e.leverage + '</td><td>' + money.format(e.capital) + '</td>' +
@@ -2309,50 +2325,63 @@
       hbars('Selon le levier', G.leverage) +
       hbars('Selon les données', G.data) + '</div>';
     // valeurs extrêmes coupées pour que les autres barres restent lisibles (valeur exacte dans l'info-bulle)
-    const absSorted = list.map((e) => Math.abs(e.returnPct)).sort((a, b) => a - b);
+    const absSorted = list.map((e) => Math.max(Math.abs(e.returnPct), e.extended ? Math.abs(e.extended.returnPct) : 0)).sort((a, b) => a - b);
     const cap = Math.max(20, 2 * absSorted[Math.floor(absSorted.length * 0.9)] || 20);
     const clipped = list.filter((e) => Math.abs(e.returnPct) > cap).length;
     if (clipped) $('evalRunsChart').insertAdjacentHTML('beforebegin', '<p class="hint">' + clipped + ' barre' + (clipped > 1 ? 's coupées' : ' coupée') + ' à ±' + Math.round(cap) + ' % (résultat extrême, valeur exacte au survol).</p>');
+    const clip = (v) => Math.max(-cap, Math.min(cap, v));
+    // simulation prolongée : barre pleine = résultat d'origine, pointillé = résultat après prolongation (vert rattrapé, bleu non)
     F.chart.mountBars($('evalRunsChart'), {
-      labels: list.map((e, i) => '#' + (i + 1)), values: list.map((e) => Math.max(-cap, Math.min(cap, e.returnPct))), format: (v) => num1.format(v) + ' %', height: 200,
-      titles: list.map((e, i) => '#' + (i + 1) + ' ' + e.name + ' · ' + e.pair + ' · ' + frDate(e.from) + ' → ' + frDate(e.to) + ' : ' + pctTxt(e.returnPct) + ', drawdown −' + num1.format(e.maxDrawdownPct) + ' %'),
+      labels: list.map((e, i) => '#' + (i + 1)), values: list.map((e) => clip(e.extended ? e.extended.returnPct : e.returnPct)), format: (v) => num1.format(v) + ' %', height: 200,
+      ghosts: list.map((e, i) => (e.extended ? { i: i, value: clip(e.returnPct), kind: e.returnPct > 0 ? 'up' : 'blue' } : null)).filter(Boolean),
+      pending: list.findIndex((e) => e.key === checkCurrentKey),
+      titles: list.map((e, i) => '#' + (i + 1) + ' ' + e.name + ' · ' + e.pair + ' · ' + (e.extended ? 'origine ' + frDate(e.extended.from) + ' → ' + frDate(e.extended.to) + ' : ' + pctTxt(e.extended.returnPct) + ' ; prolongée jusqu\'au ' + frDate(e.to) + ' : ' : frDate(e.from) + ' → ' + frDate(e.to) + ' : ') +
+        pctTxt(e.returnPct) + ', drawdown −' + num1.format(e.maxDrawdownPct) + ' %'),
       ariaLabel: 'Résultat de chaque simulation',
     });
   }
   // ---------- Vérifier long terme / court terme sur les simulations affichées ----------
-  let evalTag = '', checkRunning = false, checkStop = false, checkReport = '';
+  let evalTag = '', evalReplaceKey = '', checkRunning = '', checkStop = false, checkReport = '', checkStatusText = '', checkCurrentKey = '';
   const MONTH_CHOICES = [[1, '1 mois'], [2, '2 mois'], [3, '3 mois'], [6, '6 mois'], [12, '1 an'], [24, '2 ans']];
+  // choix gardés quand le graphique se redessine (pendant une vérification)
+  const checkSel = { extWhich: 'red', extMonths: '6', cutWhich: 'all', cutMonths: '1' };
   function monthsSelect(id, def, list) {
-    return '<select id="' + id + '">' + list.map(([m, l]) => '<option value="' + m + '"' + (m === def ? ' selected' : '') + '>' + l + '</option>').join('') + '<option value="x">x mois…</option></select>';
+    const cur = checkSel[id] || String(def);
+    const known = list.some(([m]) => String(m) === cur);
+    return '<select id="' + id + '">' + list.map(([m, l]) => '<option value="' + m + '"' + (String(m) === cur ? ' selected' : '') + '>' + l + '</option>').join('') +
+      (known || cur === 'x' ? '' : '<option value="' + cur + '" selected>' + cur + ' mois</option>') + '<option value="x">x mois…</option></select>';
   }
   function checkToolsHtml(list) {
-    const base = list.filter((e) => !e.tag); // les simulations déjà prolongées / découpées ne sont pas reprises
+    const base = list.filter((e) => !e.tag); // les tranches d'un découpage ne sont pas reprises
     const red = base.filter((e) => e.returnPct <= 0).length, green = base.length - red;
-    const which = (id, def) => '<select id="' + id + '"><option value="red"' + (def === 'red' ? ' selected' : '') + '>rouges (' + red + ')</option><option value="green"' + (def === 'green' ? ' selected' : '') + '>vertes (' + green + ')</option><option value="all"' + (def === 'all' ? ' selected' : '') + '>toutes (' + list.length + ')</option></select>';
+    const which = (id) => { const d = checkSel[id]; return '<select id="' + id + '"><option value="red"' + (d === 'red' ? ' selected' : '') + '>rouges (' + red + ')</option><option value="green"' + (d === 'green' ? ' selected' : '') + '>vertes (' + green + ')</option><option value="all"' + (d === 'all' ? ' selected' : '') + '>toutes (' + base.length + ')</option></select>'; };
     return '<div class="check-tools">' +
       '<div class="check-row"><b>Long terme ?</b> Prolonger les simulations ' + which('extWhich', 'red') + ' de ' + monthsSelect('extMonths', 6, MONTH_CHOICES.slice(2)) +
-      '<button type="button" class="secondary small" id="extRun">Prolonger</button>' +
-      '<span class="hint">Même début, fin repoussée : une stratégie de long terme doit rattraper ses pertes avec le temps.</span></div>' +
+      '<button type="button" class="secondary small" id="extRun">' + (checkRunning === 'ext' ? 'Arrêter' : 'Prolonger') + '</button>' +
+      '<span class="hint">Même début, fin repoussée : chaque simulation est <b>modifiée</b> (pas de nouvelle ligne). Sur le graphique, la nouvelle longueur s\'affiche en pointillé : ' +
+      '<span class="lg-up">vert</span> si la perte est rattrapée, <span class="lg-blue">bleu</span> si elle ne l\'est pas. Ctrl+Z pour revenir aux résultats d\'origine.</span></div>' +
       '<div class="check-row"><b>Court terme ?</b> Découper les simulations ' + which('cutWhich', 'all') + ' en tranches de ' + monthsSelect('cutMonths', 1, MONTH_CHOICES.slice(0, 4)) +
-      '<button type="button" class="secondary small" id="cutRun">Découper</button>' +
+      '<button type="button" class="secondary small" id="cutRun">' + (checkRunning === 'cut' ? 'Arrêter' : 'Découper') + '</button>' +
       '<span class="hint">Chaque tranche est simulée seule : une stratégie de court terme doit gagner sur la plupart des tranches.</span></div>' +
-      '<p class="hint" id="checkStatus"></p>' + (checkReport ? '<div class="check-report">' + checkReport + '</div>' : '') + '</div>';
+      '<p class="hint" id="checkStatus">' + esc(checkStatusText) + '</p>' + (checkReport ? '<div class="check-report">' + checkReport + '</div>' : '') + '</div>';
   }
   function monthsValue(id) {
     const v = $(id).value;
     if (v !== 'x') return +v;
     const x = Math.round(Number(prompt('Nombre de mois :', '9')));
-    return x >= 1 && x <= 120 ? x : 0;
+    if (x >= 1 && x <= 120) { checkSel[id] = String(x); return x; }
+    return 0;
   }
+  $('evalBody').addEventListener('change', (ev) => { if (checkSel[ev.target.id] !== undefined && ev.target.value !== 'x') checkSel[ev.target.id] = ev.target.value; });
   const isoD = (d) => F.data.iso(d), dateOf = (s) => new Date(s.slice(0, 10) + 'T00:00:00Z');
   /** Relance une simulation de l'historique (même stratégie, mêmes réglages) sur d'autres dates ; renvoie ses statistiques. */
-  async function rerunEntry(e, from, to, tag) {
+  async function rerunEntry(e, from, to, tag, replace) {
     loadStrategy(e.strategy);
     applyConfig(Object.assign({}, e.config, { period: 'custom', dateFrom: isoD(from), dateTo: isoD(to) }));
     document.querySelector('input[name=period][value=custom]').checked = true;
     $('dateFrom').value = isoD(from); $('dateTo').value = isoD(to);
-    evalTag = tag;
-    try { const ok = await runFromForm(); return ok && lastRun ? lastRun.stats : null; } finally { evalTag = ''; }
+    evalTag = tag; evalReplaceKey = replace ? e.key : '';
+    try { const ok = await runFromForm(); return ok && lastRun ? lastRun.stats : null; } finally { evalTag = ''; evalReplaceKey = ''; }
   }
   async function runChecks(kind) {
     if (checkRunning) { checkStop = true; return; }
@@ -2361,7 +2390,7 @@
     const sel = shown.filter((e) => e.strategy && e.config && !e.tag && (which === 'all' || (which === 'red' ? e.returnPct <= 0 : e.returnPct > 0)));
     const months = monthsValue(kind === 'ext' ? 'extMonths' : 'cutMonths');
     if (!months) return;
-    if (!sel.length) { $('checkStatus').textContent = 'Aucune simulation à vérifier (les simulations déjà prolongées ou découpées ne sont pas reprises).'; return; }
+    if (!sel.length) { $('checkStatus').textContent = 'Aucune simulation à vérifier (les tranches issues d\'un découpage ne sont pas reprises).'; return; }
     const saved = captureForm(), today = dateOf(todayIso()), DAYMS = 864e5;
     // tâches : une prolongation par simulation, ou toutes les tranches de chaque simulation
     const jobs = [];
@@ -2380,20 +2409,24 @@
       }
     }
     if (jobs.length > 150 && !confirm(jobs.length + ' simulations à lancer : continuer ?')) return;
-    checkRunning = true; checkStop = false;
-    const btn = $(kind === 'ext' ? 'extRun' : 'cutRun'); btn.textContent = 'Arrêter';
+    if (kind === 'ext') pushUndo('Prolongation de ' + sel.length + ' simulation(s)');
+    checkRunning = kind; checkStop = false; checkReport = '';
     const out = new Map();
+    const live = () => { if (!$('evalModal').hidden && evalView === 'charts') renderEvaluation(); };
     try {
       for (let k = 0; k < jobs.length && !checkStop; k++) {
         const j = jobs[k];
-        if ($('checkStatus')) $('checkStatus').textContent = (kind === 'ext' ? 'Prolongation ' : 'Tranche ') + (k + 1) + ' sur ' + jobs.length + '…';
-        const st = await rerunEntry(j.e, j.from, j.to, j.tag);
+        checkStatusText = (kind === 'ext' ? 'Prolongation ' : 'Tranche ') + (k + 1) + ' sur ' + jobs.length + '…';
+        checkCurrentKey = j.e.key;
+        live();
+        const st = await rerunEntry(j.e, j.from, j.to, kind === 'ext' ? '' : j.tag, kind === 'ext');
         if (!out.has(j.e)) out.set(j.e, []);
         out.get(j.e).push({ from: j.from, to: j.to, st: st });
-        await new Promise((r) => setTimeout(r, 20));
+        live(); // la barre s'allonge tout de suite
+        await new Promise((r) => setTimeout(r, kind === 'ext' ? 250 : 20));
       }
     } finally {
-      checkRunning = false;
+      checkRunning = ''; checkStatusText = ''; checkCurrentKey = '';
       // le formulaire revient à son état d'avant la vérification
       restoring = true;
       try { loadStrategy(saved.strat); applyConfig(saved.config); $('style').value = saved.style; $('preset').value = [...$('preset').options].some((o) => o.value === saved.preset) ? saved.preset : 'mine'; $('presetDesc').textContent = saved.desc; updateWithdrawUI(); syncFormState(); }
@@ -2408,7 +2441,7 @@
         const r = rs[0]; if (!r.st) continue; total++;
         const ok = r.st.returnPct > 0; if (ok) good++;
         rows += '<tr><td>#' + idx + '</td><td class="l">' + frDate(e.from) + ' → ' + frDate(e.to) + '</td><td>' + p(e.returnPct) + '</td><td class="l">' + frDate(isoD(r.from)) + ' → ' + frDate(isoD(r.to)) +
-          '</td><td>' + p(r.st.returnPct) + '</td><td class="l">' + (ok ? (e.returnPct <= 0 ? '✓ pertes rattrapées' : '✓ reste gagnante') : e.returnPct > 0 ? '✗ gain perdu' : '✗ toujours perdante') + '</td></tr>';
+          '</td><td>' + p(r.st.returnPct) + '</td><td class="l">' + (ok ? (e.returnPct <= 0 ? '✓ perte rattrapée' : '✓ reste gagnante') : e.returnPct > 0 ? '✗ gain perdu' : '✗ toujours perdante') + '</td></tr>';
       } else {
         const ok = rs.filter((r) => r.st), pos = ok.filter((r) => r.st.returnPct > 0).length; if (!ok.length) continue;
         total += ok.length; good += pos;
@@ -2426,7 +2459,8 @@
     checkReport = '<p class="val ' + (rate >= 60 ? 'ok' : 'ko') + '">' + verdict + (checkStop ? ' (vérification arrêtée avant la fin)' : '') + '</p><div class="table-wrap"><table class="eval mini">' +
       (kind === 'ext' ? '<thead><tr><th>#</th><th class="l">Période d\'origine</th><th>Résultat</th><th class="l">Période prolongée (+' + months + ' mois)</th><th>Résultat</th><th class="l">Verdict</th></tr></thead>'
         : '<thead><tr><th>#</th><th class="l">Période d\'origine</th><th>Résultat</th><th>Tranches de ' + months + ' mois</th><th>Gagnantes</th><th>Médiane</th></tr></thead>') +
-      '<tbody>' + rows + '</tbody></table></div><p class="hint">Les simulations relancées sont enregistrées dans le tableau, marquées « ' + (kind === 'ext' ? 'prolongée' : 'tranche') + ' ».</p>';
+      '<tbody>' + rows + '</tbody></table></div><p class="hint">' + (kind === 'ext' ? 'Les simulations prolongées ont été modifiées dans le tableau (période et résultat), sans nouvelle ligne ; leur résultat d\'origine reste affiché en plein sur le graphique. Ctrl+Z pour annuler.'
+        : 'Les tranches sont enregistrées dans le tableau, marquées « tranche ».') + '</p>';
     logEvent('evaluation.check', (kind === 'ext' ? 'Prolongation de ' : 'Découpage de ') + out.size + ' simulations : ' + good + '/' + total + ' gagnantes', { kind: kind, months: months });
     if (!$('evalModal').hidden) renderEvaluation();
   }

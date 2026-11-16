@@ -212,7 +212,7 @@ qui n'ont pas servi à la choisir (contrôle « walk-forward ») ; elle est « c
   au hasard (avec la contrainte « au moins / au plus » choisie), tous enregistrés dans « Évaluation ». Bouton « Arrêter » en cours de lot.
 - **Graphiques** : résultat de chaque simulation, puis résultat **médian** par stratégie, paire, durée de période, retrait,
   levier et source de données (la médiane n'est pas faussée par un résultat extrême ; la moyenne est dans l'info-bulle).
-- **Long terme ? / Court terme ?** (onglet Graphiques) : « Prolonger » relance les simulations rouges (ou vertes, ou toutes)
+- **Long terme ? / Court terme ?** (onglet Graphiques) : « Prolonger » modifie les simulations rouges (ou vertes, ou toutes) — même ligne, même numéro —
   avec la même date de début et une fin repoussée de 3 mois, 6 mois, 1 an, 2 ans ou x mois ; « Découper » relance chaque
   simulation en tranches de 1, 2, 3, 6 ou x mois. Un rapport dit si les pertes se rattrapent avec le temps (long terme) ou si la
   stratégie gagne sur la plupart des tranches (court terme). Les simulations relancées sont marquées dans le tableau.
