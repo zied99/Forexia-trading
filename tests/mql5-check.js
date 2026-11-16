@@ -20,10 +20,21 @@ const SHIM = `
 #include <cfloat>
 #include <cstdio>
 #include <algorithm>
+#include <ctime>
 typedef std::vector<double> DArr;
+typedef long long datetime;
+typedef std::vector<datetime> TArr;
+typedef std::vector<int> IArr;
 #define EMPTY_VALUE DBL_MAX
-static int ArraySize(const DArr &a) { return (int)a.size(); }
-static void ArrayResize(DArr &a, int n) { a.resize(n); }
+template <class T> static int ArraySize(const std::vector<T> &a) { return (int)a.size(); }
+template <class T> static void ArrayResize(std::vector<T> &a, int n) { a.resize(n); }
+static double MathFloor(double x) { return std::floor(x); }
+static double MathMin(double a, double b) { return a < b ? a : b; }
+struct MqlDateTime { int year, mon, day, hour, min, sec, day_of_week, day_of_year; };
+static void TimeToStruct(datetime t, MqlDateTime &d) {
+  time_t tt = (time_t)t; struct tm g; gmtime_r(&tt, &g);
+  d.year = g.tm_year + 1900; d.mon = g.tm_mon + 1; d.day = g.tm_mday; d.hour = g.tm_hour; d.min = g.tm_min; d.sec = g.tm_sec; d.day_of_week = g.tm_wday; d.day_of_year = g.tm_yday;
+}
 static void ArrayInitialize(DArr &a, double v) { std::fill(a.begin(), a.end(), v); }
 static void ArrayCopy(DArr &d, const DArr &s) { d = s; }
 static bool MathIsValidNumber(double x) { return std::isfinite(x); }
@@ -34,6 +45,12 @@ static double MathMax(double a, double b) { return a > b ? a : b; }
 
 function toCpp(mql) {
   return mql
+    .replace(/const datetime &(\w+)\[\]/g, 'const TArr &$1')
+    .replace(/datetime &(\w+)\[\]/g, 'TArr &$1')
+    .replace(/datetime (\w+)\[\];/g, 'TArr $1;')
+    .replace(/const int &(\w+)\[\]/g, 'const IArr &$1')
+    .replace(/int &(\w+)\[\]/g, 'IArr &$1')
+    .replace(/int (\w+)\[\];/g, 'IArr $1;')
     .replace(/const double &(\w+)\[\]/g, 'const DArr &$1')
     .replace(/double &(\w+)\[\]/g, 'DArr &$1')
     .replace(/double (\w+)\[\];/g, 'DArr $1;');
@@ -45,12 +62,14 @@ function check(label, strategy, bars) {
   const main = `
 int main() {
   int N; if (scanf("%d", &N) != 1) return 1;
-  DArr O(N), H(N), L(N), C(N);
-  for (int i = 0; i < N; i++) if (scanf("%lf %lf %lf %lf", &O[i], &H[i], &L[i], &C[i]) != 4) return 1;
+  DArr O(N), H(N), L(N), C(N); TArr T(N);
+  for (int i = 0; i < N; i++) if (scanf("%lld %lf %lf %lf %lf", &T[i], &O[i], &H[i], &L[i], &C[i]) != 5) return 1;
   for (int t = 2; t <= N; t++) {
     DArr o(O.begin(), O.begin() + t), h(H.begin(), H.begin() + t), l(L.begin(), L.begin() + t), c(C.begin(), C.begin() + t);
+    TArr tm(T.begin(), T.begin() + t);
+    datetime tnext = t < N ? T[t] : 0;
     bool le = false, lx = false, se = false, sx = false;
-    FxSignals(o, h, l, c, t, le, lx, se, sx);
+    FxSignals(o, h, l, c, tm, t, tnext, le, lx, se, sx);
     printf("%d%d%d%d\\n", le, lx, se, sx);
   }
   return 0;
@@ -60,7 +79,7 @@ int main() {
   fs.writeFileSync(src, SHIM + toCpp(calc) + main);
   try { execFileSync('g++', ['-O2', '-w', '-o', bin, src], { stdio: 'pipe' }); }
   catch (e) { throw new Error('compilation C++ : ' + e.stderr.toString().split('\n').slice(0, 15).join('\n')); }
-  const input = bars.length + '\n' + bars.map((b) => [b.open, b.high, b.low, b.close].map((v) => v.toPrecision(17)).join(' ')).join('\n');
+  const input = bars.length + '\n' + bars.map((b) => [b.t].concat([b.open, b.high, b.low, b.close].map((v) => v.toPrecision(17))).join(' ')).join('\n');
   const out = execFileSync(bin, { input: input, maxBuffer: 1 << 26 }).toString().trim().split('\n');
   fs.rmSync(dir, { recursive: true, force: true });
   // Référence JavaScript : même calcul sur chaque début d'historique (comme l'EA en direct).
@@ -68,7 +87,7 @@ int main() {
   const keys = ['longEntry', 'longExit', 'shortEntry', 'shortExit'];
   for (let t = 2; t <= bars.length; t++) {
     if (t % 7 && t !== bars.length) continue; // échantillon : 1 bougie sur 7 (le moteur JS est plus lent)
-    const ctx = R.makeContext(bars.slice(0, t));
+    const ctx = R.makeContext(bars.slice(0, t), { nextTime: t < bars.length ? bars[t].t : null });
     const js = keys.map((k) => (R.evaluateRule(strategy[k] || '', ctx)[t - 1] ? 1 : 0)).join('');
     if (js.includes('1')) active++;
     if (js !== out[t - 2]) { if (mismatches < 3) console.log('    bougie ' + t + ' : JS ' + js + ' / MQL5 ' + out[t - 2]); mismatches++; }
@@ -78,7 +97,12 @@ int main() {
 }
 
 const rg = D.periodRange('1y', new Date('2025-06-30'));
-const bars = D.generateSynthetic('EUR/USD', rg.fetchStart, rg.end).slice(-420);
+const bars = D.generateSynthetic('EUR/USD', rg.fetchStart, rg.end).slice(-420).map((b) => Object.assign({ t: Date.parse(b.date + 'T00:00:00Z') / 1000 }, b));
+// bougies H1 (avec mèches, week-ends compris) pour les règles multi-unités de temps et horaires
+const hbars = [];
+{ let p = 1.1, s2 = 3; const rnd = () => { s2 = (s2 * 1103515245 + 12345) % 2147483648; return s2 / 2147483648; };
+  for (let i = 0; i < 1100; i++) { const t = 1704067200 + i * 3600, o = p; p = p * (1 + (rnd() - 0.5) * 0.004 + Math.sin(i / 60) * 0.0004);
+    hbars.push({ t: t, date: new Date(t * 1000).toISOString().slice(0, 16).replace('T', ' '), open: o, high: Math.max(o, p) + rnd() * 0.001, low: Math.min(o, p) - rnd() * 0.001, close: p }); } }
 const cases = [];
 for (const p of P.list) cases.push([p.name, p]);
 for (const st of ['scalping', 'long']) for (const p of P.list) cases.push([p.name + ' · ' + st, E.adaptToStyle(p, st)]);
@@ -133,13 +157,30 @@ static int g_cntSignals = 12, g_cntSpreadDelayed = 9, g_cntSpreadMissed = 3, g_c
   if (j.trades !== 25 || j.deals.length !== 4 || j.deals[1].entry !== 1 || j.diag.spreadMissed !== 3 || j.deals[0].reason !== 4 || j.symbol !== 'GBPUSD') throw new Error('contenu inattendu : ' + out);
 }
 
+const cases12 = [
+  ['1.2 : ADX, DMI, SAR, SuperTrend', { longEntry: 'ADX(14) > 20 AND PLUS_DI(14) > MINUS_DI(14) AND CLOSE > PSAR(0.02,0.2)', longExit: 'CROSS_DOWN(SUPERTREND_DIR(10,3), 0)',
+    shortEntry: 'CROSS_DOWN(CLOSE, SUPERTREND(7,2.5)) AND ADX(10) > 15', shortExit: 'CLOSE > PSAR()' }],
+  ['1.2 : Donchian, Keltner, Ichimoku, pente', { longEntry: 'CROSS_UP(CLOSE, PREV(DONCHIAN_UPPER(20), 1)) AND CLOSE > SENKOU_A(9,26) AND CLOSE > SENKOU_B(52,26)',
+    longExit: 'CLOSE < KELTNER_MIDDLE(20,2,10) OR TENKAN(9) < KIJUN(26)', shortEntry: 'CLOSE < KELTNER_LOWER(20,1.5,10) AND SLOPE(EMA(50), 5) < 0', shortExit: 'CLOSE > DONCHIAN_MIDDLE(10)' }],
+  ['1.2 : bougies, Heikin-Ashi, divergences', { longEntry: '(BULL_ENGULF OR HAMMER OR BULL_DIV(RSI(14), 10)) AND HA_CLOSE > HA_OPEN', longExit: 'BEAR_ENGULF OR SHOOTING_STAR',
+    shortEntry: 'BEAR_DIV(RSI(7), 7) OR (HA_CLOSE < HA_OPEN AND HA_HIGH == HA_OPEN)', shortExit: 'BULL_DIV(STOCH_K(14,3,3), 10)' }],
+];
+const casesH1 = [
+  ['1.2 : multi-unités de temps (@H4, @D1) et horaires', { longEntry: 'RSI(14)@H4 > 50 AND (EMA(20) > EMA(50))@H4 AND CLOSE > EMA(10)@D1 AND HOUR >= 7 AND HOUR < 20',
+    longExit: 'CROSS_DOWN(MACD(12,26,9)@H4, MACD_SIGNAL(12,26,9)@H4) OR WEEKDAY == 5', shortEntry: 'CLOSE < PIVOT AND CLOSE@D1 < PIVOT_S1@H4 AND ADX(14)@H4 > 20',
+    shortExit: 'CLOSE > PIVOT_R1 OR (MINUTE == 0 AND DAY == 15) OR MONTH == 2' }],
+  ['1.2 : pivots et SuperTrend en H4', { longEntry: 'CROSS_UP(CLOSE, PIVOT) AND SUPERTREND_DIR(10,3)@H4 > 0', longExit: 'CLOSE > PIVOT_R2 OR CLOSE < PIVOT_S2',
+    shortEntry: 'CROSS_DOWN(CLOSE, PIVOT) AND SUPERTREND_DIR(10,3)@H4 < 0', shortExit: 'HIGH@W1 > 1.2' }],
+];
+
 let failed = 0;
 try { checkReport(); console.log('  ok  Rapport de test (OnTester) : JSON valide'); }
 catch (e) { failed++; console.log('  ÉCHEC Rapport de test (OnTester)\n       ' + e.message); }
 console.log('Vérification de l\'EA MQL5 (compilé en C++) contre le moteur JavaScript');
-for (const [label, s] of cases) {
-  try { const a = check(label, s, bars); console.log('  ok  ' + label + ' (' + a + ' bougies avec signal)'); }
+for (const [label, s, b] of cases.concat(cases12).concat(casesH1.map((x) => x.concat([hbars])))) {
+  try { const a = check(label, s, b || bars); console.log('  ok  ' + label + ' (' + a + ' bougies avec signal)'); }
   catch (e) { failed++; console.log('  ÉCHEC ' + label + '\n       ' + e.message); }
 }
-console.log('\n' + (cases.length - failed) + ' réussis, ' + failed + ' échoués');
+const total = cases.length + cases12.length + casesH1.length + 1;
+console.log('\n' + (total - failed) + ' réussis, ' + failed + ' échoués');
 process.exit(failed ? 1 : 0);

@@ -264,14 +264,287 @@ void FxCross(const double &a[], const double &b[], const int dir, double &out[])
       else out[i] = (a[i] < b[i] && a[i - 1] >= b[i - 1]) ? 1.0 : 0.0;
      }
   }
+// ---------- Forexia 1.2 ----------
+void FxTime(const datetime &tm[], const int n, const int kind, double &out[])
+  {
+   FxInit(out, n);
+   for(int i = 0; i < n; i++)
+     {
+      MqlDateTime d;
+      TimeToStruct(tm[i], d);
+      if(kind == 0) out[i] = d.hour;
+      else if(kind == 1) out[i] = d.min;
+      else if(kind == 2) out[i] = (d.day_of_week == 0) ? 7 : d.day_of_week;
+      else if(kind == 3) out[i] = d.day;
+      else out[i] = d.mon;
+     }
+  }
+long FxBucket(const datetime t, const int tf)
+  {
+   if(tf == -1) return (long)MathFloor(((double)t / 86400.0 + 3.0) / 7.0);
+   if(tf == -2) { MqlDateTime d; TimeToStruct(t, d); return (long)d.year * 12 + d.mon - 1; }
+   return (long)t / tf;
+  }
+// Bougies d'unité supérieure ; map[i] = dernière bougie supérieure close à la bougie i (-1 sinon).
+int FxResample(const datetime &tm[], const double &o[], const double &h[], const double &l[], const double &c[], const int n, const datetime tnext, const int tf,
+               datetime &ht[], double &ho[], double &hh[], double &hl[], double &hc[], int &map[])
+  {
+   ArrayResize(ht, n);
+   ArrayResize(ho, n);
+   ArrayResize(hh, n);
+   ArrayResize(hl, n);
+   ArrayResize(hc, n);
+   ArrayResize(map, n);
+   int idx[];
+   ArrayResize(idx, n);
+   int m = -1;
+   long prev = 0;
+   for(int i = 0; i < n; i++)
+     {
+      long k = FxBucket(tm[i], tf);
+      if(i == 0 || k != prev) { m++; ht[m] = tm[i]; ho[m] = o[i]; hh[m] = h[i]; hl[m] = l[i]; hc[m] = c[i]; }
+      else { hh[m] = MathMax(hh[m], h[i]); hl[m] = MathMin(hl[m], l[i]); hc[m] = c[i]; }
+      idx[i] = m;
+      prev = k;
+     }
+   for(int i = 0; i < n; i++)
+     {
+      long k = FxBucket(tm[i], tf);
+      bool known = (i + 1 < n) || (tnext > 0);
+      long nk = (i + 1 < n) ? FxBucket(tm[i + 1], tf) : FxBucket(tnext, tf);
+      map[i] = (known && nk != k) ? idx[i] : idx[i] - 1;
+     }
+   m++;
+   ArrayResize(ht, m);
+   ArrayResize(ho, m);
+   ArrayResize(hh, m);
+   ArrayResize(hl, m);
+   ArrayResize(hc, m);
+   return m;
+  }
+void FxMapBack(const double &src[], const int &map[], const int n, double &out[])
+  {
+   FxInit(out, n);
+   for(int i = 0; i < n; i++) if(map[i] >= 0) out[i] = src[map[i]];
+  }
+void FxDMI(const double &h[], const double &l[], const double &c[], const int p, double &adx[], double &plus[], double &minus[])
+  {
+   int n = ArraySize(c);
+   double pdm[];
+   double mdm[];
+   double tr[];
+   FxInit(pdm, n);
+   FxInit(mdm, n);
+   FxInit(tr, n);
+   for(int i = 1; i < n; i++)
+     {
+      double up = h[i] - h[i - 1], down = l[i - 1] - l[i];
+      pdm[i] = (up > down && up > 0.0) ? up : 0.0;
+      mdm[i] = (down > up && down > 0.0) ? down : 0.0;
+      tr[i] = MathMax(h[i] - l[i], MathMax(MathAbs(h[i] - c[i - 1]), MathAbs(l[i] - c[i - 1])));
+     }
+   double at[];
+   double sp[];
+   double sm[];
+   double dx[];
+   FxRMA(tr, p, at);
+   FxRMA(pdm, p, sp);
+   FxRMA(mdm, p, sm);
+   FxInit(plus, n);
+   FxInit(minus, n);
+   FxInit(dx, n);
+   for(int i = 0; i < n; i++)
+     {
+      if(!FxOk(at[i]) || at[i] == 0.0) continue;
+      plus[i] = 100.0 * sp[i] / at[i];
+      minus[i] = 100.0 * sm[i] / at[i];
+      double sum = plus[i] + minus[i];
+      dx[i] = (sum == 0.0) ? 0.0 : 100.0 * MathAbs(plus[i] - minus[i]) / sum;
+     }
+   FxRMA(dx, p, adx);
+  }
+void FxPSAR(const double &h[], const double &l[], const double stp, const double mx, double &out[])
+  {
+   int n = ArraySize(h);
+   FxInit(out, n);
+   if(n < 2) return;
+   bool up = h[1] + l[1] >= h[0] + l[0];
+   double sar = up ? l[0] : h[0], ep = up ? h[1] : l[1], af = stp;
+   out[1] = sar;
+   for(int i = 2; i < n; i++)
+     {
+      sar = sar + af * (ep - sar);
+      if(up)
+        {
+         sar = MathMin(sar, MathMin(l[i - 1], l[i - 2]));
+         if(l[i] < sar) { up = false; sar = ep; ep = l[i]; af = stp; }
+         else if(h[i] > ep) { ep = h[i]; af = MathMin(af + stp, mx); }
+        }
+      else
+        {
+         sar = MathMax(sar, MathMax(h[i - 1], h[i - 2]));
+         if(h[i] > sar) { up = true; sar = ep; ep = h[i]; af = stp; }
+         else if(l[i] < ep) { ep = l[i]; af = MathMin(af + stp, mx); }
+        }
+      out[i] = sar;
+     }
+  }
+void FxSuperTrend(const double &h[], const double &l[], const double &c[], const int p, const double mult, double &line[], double &dir[])
+  {
+   int n = ArraySize(c);
+   double a[];
+   FxATR(h, l, c, p, a);
+   FxInit(line, n);
+   FxInit(dir, n);
+   double fu = 0.0, fl = 0.0;
+   bool started = false;
+   int d = 1;
+   for(int i = 0; i < n; i++)
+     {
+      if(!FxOk(a[i])) continue;
+      double hl2 = (h[i] + l[i]) / 2.0, bu = hl2 + mult * a[i], bl = hl2 - mult * a[i];
+      if(!started) { fu = bu; fl = bl; d = 1; started = true; }
+      else
+        {
+         double pc = c[i - 1];
+         fu = (bu < fu || pc > fu) ? bu : fu;
+         fl = (bl > fl || pc < fl) ? bl : fl;
+         if(d > 0) d = (c[i] < fl) ? -1 : 1;
+         else d = (c[i] > fu) ? 1 : -1;
+        }
+      line[i] = (d > 0) ? fl : fu;
+      dir[i] = d;
+     }
+  }
+void FxKeltner(const double &h[], const double &l[], const double &c[], const int p, const double mult, const int ap, double &up[], double &mid[], double &lo[])
+  {
+   int n = ArraySize(c);
+   double a[];
+   FxEMA(c, p, mid);
+   FxATR(h, l, c, ap, a);
+   FxInit(up, n);
+   FxInit(lo, n);
+   for(int i = 0; i < n; i++) if(FxOk(mid[i]) && FxOk(a[i])) { up[i] = mid[i] + mult * a[i]; lo[i] = mid[i] - mult * a[i]; }
+  }
+void FxMidRange(const double &h[], const double &l[], const int p, double &out[])
+  {
+   int n = ArraySize(h);
+   double hh[];
+   double ll[];
+   FxHighest(h, p, hh);
+   FxLowest(l, p, ll);
+   FxInit(out, n);
+   for(int i = 0; i < n; i++) if(FxOk(hh[i]) && FxOk(ll[i])) out[i] = (hh[i] + ll[i]) / 2.0;
+  }
+void FxIchimoku(const double &h[], const double &l[], const int tp, const int kp, const int sp, double &tenkan[], double &kijun[], double &spanA[], double &spanB[])
+  {
+   int n = ArraySize(h);
+   double b[];
+   FxMidRange(h, l, tp, tenkan);
+   FxMidRange(h, l, kp, kijun);
+   FxMidRange(h, l, sp, b);
+   FxInit(spanA, n);
+   FxInit(spanB, n);
+   for(int i = kp; i < n; i++)
+     {
+      int j = i - kp;
+      if(FxOk(tenkan[j]) && FxOk(kijun[j])) spanA[i] = (tenkan[j] + kijun[j]) / 2.0;
+      if(FxOk(b[j])) spanB[i] = b[j];
+     }
+  }
+void FxPivots(const double &h[], const double &l[], const double &c[], const datetime &tm[], const int n,
+              double &P[], double &R1[], double &S1[], double &R2[], double &S2[])
+  {
+   FxInit(P, n);
+   FxInit(R1, n);
+   FxInit(S1, n);
+   FxInit(R2, n);
+   FxInit(S2, n);
+   long curDay = -1;
+   double dh = -DBL_MAX, dl = DBL_MAX, dc = 0.0, ph = 0.0, pl = 0.0, pc = 0.0;
+   bool havePrev = false;
+   for(int i = 0; i < n; i++)
+     {
+      long day = (long)tm[i] / 86400;
+      if(day != curDay)
+        {
+         if(curDay != -1) { ph = dh; pl = dl; pc = dc; havePrev = true; }
+         curDay = day; dh = -DBL_MAX; dl = DBL_MAX;
+        }
+      if(havePrev)
+        {
+         double p = (ph + pl + pc) / 3.0;
+         P[i] = p; R1[i] = 2.0 * p - pl; S1[i] = 2.0 * p - ph; R2[i] = p + (ph - pl); S2[i] = p - (ph - pl);
+        }
+      dh = MathMax(dh, h[i]); dl = MathMin(dl, l[i]); dc = c[i];
+     }
+  }
+void FxHeikin(const double &o[], const double &h[], const double &l[], const double &c[], double &ho[], double &hh[], double &hl[], double &hc[])
+  {
+   int n = ArraySize(c);
+   FxInit(ho, n);
+   FxInit(hh, n);
+   FxInit(hl, n);
+   FxInit(hc, n);
+   for(int i = 0; i < n; i++)
+     {
+      hc[i] = (o[i] + h[i] + l[i] + c[i]) / 4.0;
+      ho[i] = (i == 0) ? (o[i] + c[i]) / 2.0 : (ho[i - 1] + hc[i - 1]) / 2.0;
+      hh[i] = MathMax(h[i], MathMax(ho[i], hc[i]));
+      hl[i] = MathMin(l[i], MathMin(ho[i], hc[i]));
+     }
+  }
+// 0 avalement haussier, 1 avalement baissier, 2 marteau, 3 étoile filante
+void FxPattern(const double &o[], const double &h[], const double &l[], const double &c[], const int kind, double &out[])
+  {
+   int n = ArraySize(c);
+   FxConst(out, n, 0.0);
+   for(int i = 0; i < n; i++)
+     {
+      double body = MathAbs(c[i] - o[i]), range = h[i] - l[i];
+      double upper = h[i] - MathMax(o[i], c[i]), lower = MathMin(o[i], c[i]) - l[i];
+      bool r = false;
+      if(kind == 0) r = i > 0 && c[i - 1] < o[i - 1] && c[i] > o[i] && o[i] <= c[i - 1] && c[i] >= o[i - 1];
+      else if(kind == 1) r = i > 0 && c[i - 1] > o[i - 1] && c[i] < o[i] && o[i] >= c[i - 1] && c[i] <= o[i - 1];
+      else if(kind == 2) r = range > 0.0 && lower >= 2.0 * body && upper <= 0.25 * range;
+      else r = range > 0.0 && upper >= 2.0 * body && lower <= 0.25 * range;
+      out[i] = r ? 1.0 : 0.0;
+     }
+  }
+void FxDivergence(const double &price[], const double &osc[], const int p, const int dir, double &out[])
+  {
+   int n = ArraySize(price);
+   FxConst(out, n, 0.0);
+   for(int i = 2 * p - 1; i < n; i++)
+     {
+      double cur = price[i], prevExt = (dir > 0) ? DBL_MAX : -DBL_MAX, prevOsc = (dir > 0) ? DBL_MAX : -DBL_MAX;
+      bool ok = FxOk(osc[i]);
+      for(int j = i - p + 1; j <= i && ok; j++) if((dir > 0) ? price[j] < cur : price[j] > cur) ok = false;
+      for(int j = i - 2 * p + 1; j <= i - p && ok; j++)
+        {
+         if(!FxOk(osc[j])) { ok = false; break; }
+         if(dir > 0) { prevExt = MathMin(prevExt, price[j]); prevOsc = MathMin(prevOsc, osc[j]); }
+         else { prevExt = MathMax(prevExt, price[j]); prevOsc = MathMax(prevOsc, osc[j]); }
+        }
+      if(!ok) continue;
+      if(dir > 0) out[i] = (cur < prevExt && osc[i] > prevOsc) ? 1.0 : 0.0;
+      else out[i] = (cur > prevExt && osc[i] < prevOsc) ? 1.0 : 0.0;
+     }
+  }
+void FxSlope(const double &src[], const int p, double &out[])
+  {
+   int n = ArraySize(src);
+   FxInit(out, n);
+   for(int i = p; i < n; i++) if(FxOk(src[i]) && FxOk(src[i - p])) out[i] = (src[i] - src[i - p]) / p;
+  }
 `;
 
   // ---------- Traduction des règles en MQL5 ----------
   const OPS = { '+': 0, '-': 1, '*': 2, '/': 3, '>': 4, '<': 5, '>=': 6, '<=': 7, '==': 8, '!=': 9, AND: 10, OR: 11 };
-  const DEF = { SMA: 20, EMA: 20, RSI: 14, MOM: 10, ROC: 10, HIGHEST: 20, LOWEST: 20, ATR: 14, CCI: 20, WILLR: 14 };
-  const SRC_FN = { SMA: 'FxSMA', EMA: 'FxEMA', RSI: 'FxRSI', MOM: 'FxMom', ROC: 'FxRoc', HIGHEST: 'FxHighest', LOWEST: 'FxLowest' };
+  const DEF = { SMA: 20, EMA: 20, RSI: 14, MOM: 10, ROC: 10, HIGHEST: 20, LOWEST: 20, ATR: 14, CCI: 20, WILLR: 14, SLOPE: 5 };
+  const SRC_FN = { SMA: 'FxSMA', EMA: 'FxEMA', RSI: 'FxRSI', MOM: 'FxMom', ROC: 'FxRoc', HIGHEST: 'FxHighest', LOWEST: 'FxLowest', SLOPE: 'FxSlope' };
   const HLC_FN = { ATR: 'FxATR', CCI: 'FxCCI', WILLR: 'FxWillR' };
-  const SERIES = { CLOSE: 'c', PRICE: 'c', OPEN: 'o', HIGH: 'h', LOW: 'l' };
+  const SERIES = { CLOSE: 'c', PRICE: 'c', OPEN: 'o', HIGH: 'h', LOW: 'l' };  // HOUR, WEEKDAY… : calculés depuis l'heure des bougies
 
   function fmtNum(v) {
     if (!Number.isFinite(v)) throw new Error('nombre invalide');
@@ -279,13 +552,20 @@ void FxCross(const double &a[], const double &b[], const int dir, double &out[])
     return /[.e]/.test(s) ? s : s + '.0';
   }
 
+  // Unités de temps : secondes, ou -1 (semaine commençant le lundi) / -2 (mois).
+  const TF_CODE = { M1: 60, M5: 300, M15: 900, M30: 1800, H1: 3600, H4: 14400, D1: 86400, W1: -1, MN: -2 };
+  const TIME_KIND = { HOUR: 0, MINUTE: 1, WEEKDAY: 2, DAY: 3, MONTH: 4 };
+  const PATTERN = { BULL_ENGULF: 0, BEAR_ENGULF: 1, HAMMER: 2, SHOOTING_STAR: 3 };
+
   function Compiler() {
     const lines = [];
     const cache = new Map();
     let id = 0;
     const newVar = () => 's' + ++id;
+    // Cadre de calcul : bougies de base, ou bougies d'unité supérieure reconstruites (RSI(14)@H4).
+    const BASE = { o: 'o', h: 'h', l: 'l', c: 'c', t: 'tm', n: 'n', id: '' };
+    let frame = BASE;
 
-    // Valeur constante (nombre, -nombre, calcul entre nombres) ou null.
     function constant(node) {
       if (node.k === 'num') return node.v;
       if (node.k === 'neg') { const v = constant(node.a); return v === null ? null : -v; }
@@ -308,18 +588,19 @@ void FxCross(const double &a[], const double &b[], const int dir, double &out[])
       if (v === null) throw new Error('paramètre non constant');
       return v;
     }
-    function series(r) { // résultat -> nom de tableau
+    function series(r) {
       if (r.s) return r.s;
       const v = newVar();
-      lines.push('   double ' + v + '[];', '   FxConst(' + v + ', n, ' + r.k + ');');
+      lines.push('   double ' + v + '[];', '   FxConst(' + v + ', ' + frame.n + ', ' + r.k + ');');
       return v;
     }
     const at = (r) => (r.s ? r.s + '[i]' : r.k);
+    const F = () => frame;
 
     function gen(node) {
       const c = constant(node);
       if (c !== null) return { k: fmtNum(c) };
-      const key = F.rules.stringify(node);
+      const key = frame.id + '|' + root.Forexia.rules.stringify(node);
       if (cache.has(key)) return cache.get(key);
       const r = genUncached(node);
       cache.set(key, r);
@@ -327,17 +608,24 @@ void FxCross(const double &a[], const double &b[], const int dir, double &out[])
     }
     function loop(expr) {
       const v = newVar();
-      lines.push('   double ' + v + '[];', '   FxInit(' + v + ', n);', '   for(int i = 0; i < n; i++) ' + v + '[i] = ' + expr + ';');
+      lines.push('   double ' + v + '[];', '   FxInit(' + v + ', ' + frame.n + ');', '   for(int i = 0; i < ' + frame.n + '; i++) ' + v + '[i] = ' + expr + ';');
       return { s: v };
     }
-    function multi(key, make) { // indicateurs à plusieurs sorties, calculés une fois
+    function multi(key, make) {
+      key = frame.id + '|' + key;
       if (!cache.has(key)) cache.set(key, make());
       return cache.get(key);
     }
+    function decl(names) { for (const nm of names) lines.push('   double ' + nm + '[];'); }
 
     function genUncached(node) {
       switch (node.k) {
-        case 'series': return { s: SERIES[node.name] };
+        case 'series': {
+          if (SERIES[node.name]) return { s: frame[SERIES[node.name]] };
+          const v = newVar();
+          lines.push('   double ' + v + '[];', '   FxTime(' + frame.t + ', ' + frame.n + ', ' + TIME_KIND[node.name] + ', ' + v + ');');
+          return { s: v };
+        }
         case 'neg': { const a = gen(node.a); return loop('(FxOk(' + at(a) + ') ? -' + at(a) + ' : EMPTY_VALUE)'); }
         case 'not': { const a = gen(node.a); return a.s ? loop('(FxTruthy(' + at(a) + ') ? 0.0 : 1.0)') : { k: '(FxTruthy(' + a.k + ') ? 0.0 : 1.0)' }; }
         case 'bin': {
@@ -345,31 +633,47 @@ void FxCross(const double &a[], const double &b[], const int dir, double &out[])
           const e = 'FxBin(' + OPS[node.op] + ', ' + at(a) + ', ' + at(b) + ')';
           return a.s || b.s ? loop(e) : { k: e };
         }
+        case 'tf': return genTf(node);
         case 'call': return genCall(node);
       }
       throw new Error('élément non pris en charge');
     }
 
+    // Bougies d'unité supérieure reconstruites une fois par unité, puis valeurs ramenées sur les bougies de base
+    // (dernière bougie supérieure close, comme le moteur de backtest).
+    function genTf(node) {
+      if (frame !== BASE) throw new Error('unité de temps imbriquée non prise en charge');
+      const tf = node.tf, sfx = '_' + tf;
+      const hf = multi('TF:' + tf, () => {
+        const f = { o: 'ho' + sfx, h: 'hh' + sfx, l: 'hl' + sfx, c: 'hc' + sfx, t: 'ht' + sfx, n: 'hn' + sfx, map: 'hmap' + sfx, id: tf };
+        lines.push('   datetime ' + f.t + '[];', '   double ' + f.o + '[];', '   double ' + f.h + '[];', '   double ' + f.l + '[];', '   double ' + f.c + '[];', '   int ' + f.map + '[];',
+          '   int ' + f.n + ' = FxResample(tm, o, h, l, c, n, tnext, ' + TF_CODE[tf] + ', ' + f.t + ', ' + f.o + ', ' + f.h + ', ' + f.l + ', ' + f.c + ', ' + f.map + ');');
+        return f;
+      });
+      frame = hf;
+      let r;
+      try { r = gen(node.a); } finally { frame = BASE; }
+      if (!r.s) return r;
+      const v = newVar();
+      lines.push('   double ' + v + '[];', '   FxMapBack(' + r.s + ', ' + hf.map + ', n, ' + v + ');');
+      return { s: v };
+    }
+
+    function out1(fn, args) { const v = newVar(); lines.push('   double ' + v + '[];', '   ' + fn + '(' + args.concat([v]).join(', ') + ');'); return { s: v }; }
+
     function genCall(node) {
-      const name = node.name, a = node.args;
+      const name = node.name, a = node.args, f = F();
       if (SRC_FN[name]) {
-        let src = 'c', pNode = a[0];
+        let src = f.c, pNode = a[0];
         if (a.length && constant(a[0]) === null) { src = series(gen(a[0])); pNode = a[1]; }
-        const p = intParam(pNode, DEF[name], name), v = newVar();
-        lines.push('   double ' + v + '[];', '   ' + SRC_FN[name] + '(' + src + ', ' + p + ', ' + v + ');');
-        return { s: v };
+        return out1(SRC_FN[name], [src, intParam(pNode, DEF[name], name)]);
       }
-      if (HLC_FN[name]) {
-        const p = intParam(a[0], DEF[name], name), v = newVar();
-        lines.push('   double ' + v + '[];', '   ' + HLC_FN[name] + '(h, l, c, ' + p + ', ' + v + ');');
-        return { s: v };
-      }
+      if (HLC_FN[name]) return out1(HLC_FN[name], [f.h, f.l, f.c, intParam(a[0], DEF[name], name)]);
       if (/^MACD/.test(name)) {
-        const f = intParam(a[0], 12, 'MACD'), s = intParam(a[1], 26, 'MACD'), g = intParam(a[2], 9, 'MACD');
-        const o = multi('MACD:' + [f, s, g], () => {
+        const fa = intParam(a[0], 12, 'MACD'), sl = intParam(a[1], 26, 'MACD'), g = intParam(a[2], 9, 'MACD');
+        const o = multi('MACD:' + [fa, sl, g], () => {
           const m = newVar(), sg = newVar(), hi = newVar();
-          lines.push('   double ' + m + '[];', '   double ' + sg + '[];', '   double ' + hi + '[];',
-            '   FxMACD(c, ' + f + ', ' + s + ', ' + g + ', ' + m + ', ' + sg + ', ' + hi + ');');
+          decl([m, sg, hi]); lines.push('   FxMACD(' + f.c + ', ' + fa + ', ' + sl + ', ' + g + ', ' + m + ', ' + sg + ', ' + hi + ');');
           return { MACD: m, MACD_SIGNAL: sg, MACD_HIST: hi };
         });
         return { s: o[name] };
@@ -378,7 +682,7 @@ void FxCross(const double &a[], const double &b[], const int dir, double &out[])
         const k = intParam(a[0], 14, 'STOCH'), d = intParam(a[1], 3, 'STOCH'), sm = intParam(a[2], 3, 'STOCH');
         const o = multi('STOCH:' + [k, d, sm], () => {
           const kv = newVar(), dv = newVar();
-          lines.push('   double ' + kv + '[];', '   double ' + dv + '[];', '   FxStoch(h, l, c, ' + k + ', ' + d + ', ' + sm + ', ' + kv + ', ' + dv + ');');
+          decl([kv, dv]); lines.push('   FxStoch(' + [f.h, f.l, f.c, k, d, sm, kv, dv].join(', ') + ');');
           return { STOCH_K: kv, STOCH_D: dv };
         });
         return { s: o[name] };
@@ -387,22 +691,86 @@ void FxCross(const double &a[], const double &b[], const int dir, double &out[])
         const p = intParam(a[0], 20, 'BB'), m = numParam(a[1], 2);
         const o = multi('BB:' + [p, m], () => {
           const up = newVar(), mid = newVar(), lo = newVar();
-          lines.push('   double ' + up + '[];', '   double ' + mid + '[];', '   double ' + lo + '[];',
-            '   FxBB(c, ' + p + ', ' + fmtNum(m) + ', ' + up + ', ' + mid + ', ' + lo + ');');
+          decl([up, mid, lo]); lines.push('   FxBB(' + [f.c, p, fmtNum(m), up, mid, lo].join(', ') + ');');
           return { BB_UPPER: up, BB_MIDDLE: mid, BB_LOWER: lo };
         });
         return { s: o[name] };
       }
-      if (name === 'PREV') {
-        const src = series(gen(a[0])), p = intParam(a[1], 1, 'PREV'), v = newVar();
-        lines.push('   double ' + v + '[];', '   FxPrev(' + src + ', ' + p + ', ' + v + ');');
-        return { s: v };
+      if (name === 'ADX' || name === 'PLUS_DI' || name === 'MINUS_DI') {
+        const p = intParam(a[0], 14, 'ADX');
+        const o = multi('DMI:' + p, () => {
+          const ad = newVar(), pl = newVar(), mi = newVar();
+          decl([ad, pl, mi]); lines.push('   FxDMI(' + [f.h, f.l, f.c, p, ad, pl, mi].join(', ') + ');');
+          return { ADX: ad, PLUS_DI: pl, MINUS_DI: mi };
+        });
+        return { s: o[name] };
       }
-      if (name === 'CROSS_UP' || name === 'CROSS_DOWN') {
-        const x = series(gen(a[0])), y = series(gen(a[1])), v = newVar();
-        lines.push('   double ' + v + '[];', '   FxCross(' + x + ', ' + y + ', ' + (name === 'CROSS_UP' ? 1 : -1) + ', ' + v + ');');
-        return { s: v };
+      if (name === 'PSAR') return out1('FxPSAR', [f.h, f.l, fmtNum(numParam(a[0], 0.02)), fmtNum(numParam(a[1], 0.2))]);
+      if (name === 'SUPERTREND' || name === 'SUPERTREND_DIR') {
+        const p = intParam(a[0], 10, 'SUPERTREND'), m = numParam(a[1], 3);
+        const o = multi('ST:' + [p, m], () => {
+          const ln = newVar(), dr = newVar();
+          decl([ln, dr]); lines.push('   FxSuperTrend(' + [f.h, f.l, f.c, p, fmtNum(m), ln, dr].join(', ') + ');');
+          return { SUPERTREND: ln, SUPERTREND_DIR: dr };
+        });
+        return { s: o[name] };
       }
+      if (/^DONCHIAN_/.test(name)) {
+        const p = intParam(a[0], 20, 'DONCHIAN');
+        const o = multi('DON:' + p, () => {
+          const up = newVar(), lo = newVar(), mid = newVar();
+          decl([up, lo, mid]); lines.push('   FxHighest(' + f.h + ', ' + p + ', ' + up + ');', '   FxLowest(' + f.l + ', ' + p + ', ' + lo + ');',
+            '   FxInit(' + mid + ', ' + f.n + ');', '   for(int i = 0; i < ' + f.n + '; i++) if(FxOk(' + up + '[i]) && FxOk(' + lo + '[i])) ' + mid + '[i] = (' + up + '[i] + ' + lo + '[i]) / 2.0;');
+          return { DONCHIAN_UPPER: up, DONCHIAN_LOWER: lo, DONCHIAN_MIDDLE: mid };
+        });
+        return { s: o[name] };
+      }
+      if (/^KELTNER_/.test(name)) {
+        const p = intParam(a[0], 20, 'KELTNER'), m = numParam(a[1], 2), ap = intParam(a[2], 10, 'KELTNER');
+        const o = multi('KEL:' + [p, m, ap], () => {
+          const up = newVar(), mid = newVar(), lo = newVar();
+          decl([up, mid, lo]); lines.push('   FxKeltner(' + [f.h, f.l, f.c, p, fmtNum(m), ap, up, mid, lo].join(', ') + ');');
+          return { KELTNER_UPPER: up, KELTNER_MIDDLE: mid, KELTNER_LOWER: lo };
+        });
+        return { s: o[name] };
+      }
+      if (['TENKAN', 'KIJUN', 'SENKOU_A', 'SENKOU_B'].includes(name)) {
+        let t = 9, k = 26, sp = 52;
+        if (name === 'TENKAN') t = intParam(a[0], 9, name);
+        if (name === 'KIJUN') k = intParam(a[0], 26, name);
+        if (name === 'SENKOU_A') { t = intParam(a[0], 9, name); k = intParam(a[1], 26, name); }
+        if (name === 'SENKOU_B') { sp = intParam(a[0], 52, name); k = intParam(a[1], 26, name); }
+        const o = multi('ICHI:' + [t, k, sp], () => {
+          const te = newVar(), ki = newVar(), sa = newVar(), sb = newVar();
+          decl([te, ki, sa, sb]); lines.push('   FxIchimoku(' + [f.h, f.l, t, k, sp, te, ki, sa, sb].join(', ') + ');');
+          return { TENKAN: te, KIJUN: ki, SENKOU_A: sa, SENKOU_B: sb };
+        });
+        return { s: o[name] };
+      }
+      if (/^PIVOT/.test(name)) {
+        const o = multi('PIV', () => {
+          const P = newVar(), r1 = newVar(), s1 = newVar(), r2 = newVar(), s2 = newVar();
+          decl([P, r1, s1, r2, s2]); lines.push('   FxPivots(' + [f.h, f.l, f.c, f.t, f.n, P, r1, s1, r2, s2].join(', ') + ');');
+          return { PIVOT: P, PIVOT_R1: r1, PIVOT_S1: s1, PIVOT_R2: r2, PIVOT_S2: s2 };
+        });
+        return { s: o[name] };
+      }
+      if (/^HA_/.test(name)) {
+        const o = multi('HA', () => {
+          const ho = newVar(), hh = newVar(), hl = newVar(), hc = newVar();
+          decl([ho, hh, hl, hc]); lines.push('   FxHeikin(' + [f.o, f.h, f.l, f.c, ho, hh, hl, hc].join(', ') + ');');
+          return { HA_OPEN: ho, HA_HIGH: hh, HA_LOW: hl, HA_CLOSE: hc };
+        });
+        return { s: o[name] };
+      }
+      if (PATTERN[name] !== undefined) return out1('FxPattern', [f.o, f.h, f.l, f.c, PATTERN[name]]);
+      if (name === 'BULL_DIV' || name === 'BEAR_DIV') {
+        if (!a.length || constant(a[0]) !== null) throw new Error(name + ' : oscillateur manquant');
+        const osc = series(gen(a[0]));
+        return out1('FxDivergence', [name === 'BULL_DIV' ? f.l : f.h, osc, intParam(a[1], 14, name), name === 'BULL_DIV' ? 1 : -1]);
+      }
+      if (name === 'PREV') return out1('FxPrev', [series(gen(a[0])), intParam(a[1], 1, 'PREV')]);
+      if (name === 'CROSS_UP' || name === 'CROSS_DOWN') return out1('FxCross', [series(gen(a[0])), series(gen(a[1])), name === 'CROSS_UP' ? 1 : -1]);
       throw new Error('fonction ' + name + ' non prise en charge');
     }
 
@@ -410,7 +778,7 @@ void FxCross(const double &a[], const double &b[], const int dir, double &out[])
       rule(text, outVar) {
         if (!text || !text.trim()) { lines.push('   ' + outVar + ' = false;'); return; }
         lines.push('   // ' + text.replace(/\s+/g, ' '));
-        const r = gen(F.rules.parse(text));
+        const r = gen(root.Forexia.rules.parse(text));
         lines.push('   ' + outVar + ' = ' + (r.s ? 'FxTruthy(' + r.s + '[n - 1])' : 'FxTruthy(' + r.k + ')') + ';');
       },
       lines: lines,
@@ -424,7 +792,7 @@ void FxCross(const double &a[], const double &b[], const int dir, double &out[])
     comp.rule(strategy.longExit, 'lx');
     comp.rule(strategy.shortEntry, 'se');
     comp.rule(strategy.shortExit, 'sx');
-    return 'void FxSignals(const double &o[], const double &h[], const double &l[], const double &c[], const int n,\n' +
+    return 'void FxSignals(const double &o[], const double &h[], const double &l[], const double &c[], const datetime &tm[], const int n, const datetime tnext,\n' +
       '               bool &le, bool &lx, bool &se, bool &sx)\n  {\n' + comp.lines.join('\n') + '\n  }\n';
   }
 
@@ -725,12 +1093,15 @@ bool FxProcess()
    double h[];
    double l[];
    double c[];
+   datetime tm[];
+   ArrayResize(tm, n);
    ArrayResize(o, n);
    ArrayResize(h, n);
    ArrayResize(l, n);
    ArrayResize(c, n);
    for(int i = 0; i < n; i++)
      {
+      tm[i] = r[i].time;
       o[i] = r[i].open;
       h[i] = r[i].high;
       l[i] = r[i].low;
@@ -743,7 +1114,7 @@ bool FxProcess()
       g_pendDir = 0;
      }
    bool le = false, lx = false, se = false, sx = false;
-   FxSignals(o, h, l, c, n, le, lx, se, sx);
+   FxSignals(o, h, l, c, tm, n, iTime(_Symbol, InpTimeframe, 0), le, lx, se, sx);
    bool wantLong = le && !se;
    bool wantShort = se && !le;
    int dir = FxPositionDir();

@@ -173,8 +173,173 @@
     return out;
   }
 
+  // ---------- Forexia 1.2 : nouveaux indicateurs ----------
+
+  // ADX / DMI (Wilder) : force de la tendance et directions.
+  function dmi(high, low, close, period) {
+    const n = close.length, pdm = nanArray(n), mdm = nanArray(n), tr = nanArray(n);
+    for (let i = 1; i < n; i++) {
+      const up = high[i] - high[i - 1], down = low[i - 1] - low[i];
+      pdm[i] = up > down && up > 0 ? up : 0;
+      mdm[i] = down > up && down > 0 ? down : 0;
+      tr[i] = Math.max(high[i] - low[i], Math.abs(high[i] - close[i - 1]), Math.abs(low[i] - close[i - 1]));
+    }
+    const atr = rma(tr, period), sp = rma(pdm, period), sm = rma(mdm, period);
+    const plus = nanArray(n), minus = nanArray(n), dx = nanArray(n);
+    for (let i = 0; i < n; i++) {
+      if (!Number.isFinite(atr[i]) || atr[i] === 0) continue;
+      plus[i] = (100 * sp[i]) / atr[i];
+      minus[i] = (100 * sm[i]) / atr[i];
+      const sum = plus[i] + minus[i];
+      dx[i] = sum === 0 ? 0 : (100 * Math.abs(plus[i] - minus[i])) / sum;
+    }
+    return { adx: rma(dx, period), plus: plus, minus: minus };
+  }
+
+  // SAR parabolique (Wilder).
+  function psar(high, low, step, max) {
+    const n = high.length, out = nanArray(n);
+    if (n < 2) return out;
+    let up = high[1] + low[1] >= high[0] + low[0];
+    let sar = up ? low[0] : high[0], ep = up ? high[1] : low[1], af = step;
+    out[1] = sar;
+    for (let i = 2; i < n; i++) {
+      sar = sar + af * (ep - sar);
+      if (up) {
+        sar = Math.min(sar, low[i - 1], low[i - 2]);
+        if (low[i] < sar) { up = false; sar = ep; ep = low[i]; af = step; }
+        else if (high[i] > ep) { ep = high[i]; af = Math.min(af + step, max); }
+      } else {
+        sar = Math.max(sar, high[i - 1], high[i - 2]);
+        if (high[i] > sar) { up = true; sar = ep; ep = high[i]; af = step; }
+        else if (low[i] < ep) { ep = low[i]; af = Math.min(af + step, max); }
+      }
+      out[i] = sar;
+    }
+    return out;
+  }
+
+  // SuperTrend : ligne et direction (1 haussière, -1 baissière).
+  function supertrend(high, low, close, period, mult) {
+    const n = close.length, a = atr(high, low, close, period), line = nanArray(n), dir = nanArray(n);
+    let fu = NaN, fl = NaN, d = 1;
+    for (let i = 0; i < n; i++) {
+      if (!Number.isFinite(a[i])) continue;
+      const hl2 = (high[i] + low[i]) / 2, bu = hl2 + mult * a[i], bl = hl2 - mult * a[i];
+      if (!Number.isFinite(fu)) { fu = bu; fl = bl; d = 1; }
+      else {
+        const pc = close[i - 1];
+        fu = bu < fu || pc > fu ? bu : fu;
+        fl = bl > fl || pc < fl ? bl : fl;
+        d = d > 0 ? (close[i] < fl ? -1 : 1) : (close[i] > fu ? 1 : -1);
+      }
+      line[i] = d > 0 ? fl : fu;
+      dir[i] = d;
+    }
+    return { line: line, dir: dir };
+  }
+
+  function donchian(high, low, period) {
+    const up = highest(high, period), lo = lowest(low, period), n = high.length, mid = nanArray(n);
+    for (let i = 0; i < n; i++) if (Number.isFinite(up[i]) && Number.isFinite(lo[i])) mid[i] = (up[i] + lo[i]) / 2;
+    return { upper: up, lower: lo, middle: mid };
+  }
+
+  function keltner(high, low, close, period, mult, atrPeriod) {
+    const mid = ema(close, period), a = atr(high, low, close, atrPeriod), n = close.length, up = nanArray(n), lo = nanArray(n);
+    for (let i = 0; i < n; i++) if (Number.isFinite(mid[i]) && Number.isFinite(a[i])) { up[i] = mid[i] + mult * a[i]; lo[i] = mid[i] - mult * a[i]; }
+    return { upper: up, middle: mid, lower: lo };
+  }
+
+  // Ichimoku : Tenkan, Kijun et nuage (Senkou A / B) tel qu'il se trouve au-dessus de la bougie courante
+  // (valeurs calculées « shift » bougies plus tôt, donc sans regarder le futur).
+  function midRange(high, low, period) {
+    const hh = highest(high, period), ll = lowest(low, period), n = high.length, out = nanArray(n);
+    for (let i = 0; i < n; i++) if (Number.isFinite(hh[i]) && Number.isFinite(ll[i])) out[i] = (hh[i] + ll[i]) / 2;
+    return out;
+  }
+  function ichimoku(high, low, tenkanP, kijunP, senkouP) {
+    const n = high.length, tenkan = midRange(high, low, tenkanP), kijun = midRange(high, low, kijunP), b = midRange(high, low, senkouP);
+    const spanA = nanArray(n), spanB = nanArray(n);
+    for (let i = kijunP; i < n; i++) {
+      const j = i - kijunP;
+      if (Number.isFinite(tenkan[j]) && Number.isFinite(kijun[j])) spanA[i] = (tenkan[j] + kijun[j]) / 2;
+      if (Number.isFinite(b[j])) spanB[i] = b[j];
+    }
+    return { tenkan: tenkan, kijun: kijun, spanA: spanA, spanB: spanB };
+  }
+
+  // Points pivots classiques à partir du plus haut / plus bas / clôture de la journée précédente.
+  function pivots(high, low, close, dayKeys) {
+    const n = close.length, P = nanArray(n), R1 = nanArray(n), S1 = nanArray(n), R2 = nanArray(n), S2 = nanArray(n);
+    let curDay = null, h = -Infinity, l = Infinity, c = NaN, prev = null;
+    for (let i = 0; i < n; i++) {
+      if (dayKeys[i] !== curDay) {
+        if (curDay !== null) prev = { h: h, l: l, c: c };
+        curDay = dayKeys[i]; h = -Infinity; l = Infinity;
+      }
+      if (prev) {
+        const p = (prev.h + prev.l + prev.c) / 3;
+        P[i] = p; R1[i] = 2 * p - prev.l; S1[i] = 2 * p - prev.h; R2[i] = p + (prev.h - prev.l); S2[i] = p - (prev.h - prev.l);
+      }
+      h = Math.max(h, high[i]); l = Math.min(l, low[i]); c = close[i];
+    }
+    return { P: P, R1: R1, S1: S1, R2: R2, S2: S2 };
+  }
+
+  function heikinAshi(open, high, low, close) {
+    const n = close.length, ho = nanArray(n), hc = nanArray(n), hh = nanArray(n), hl = nanArray(n);
+    for (let i = 0; i < n; i++) {
+      hc[i] = (open[i] + high[i] + low[i] + close[i]) / 4;
+      ho[i] = i === 0 ? (open[i] + close[i]) / 2 : (ho[i - 1] + hc[i - 1]) / 2;
+      hh[i] = Math.max(high[i], ho[i], hc[i]);
+      hl[i] = Math.min(low[i], ho[i], hc[i]);
+    }
+    return { open: ho, close: hc, high: hh, low: hl };
+  }
+
+  // Figures de bougies : 1 si la figure apparaît sur la bougie, 0 sinon.
+  function candlePattern(open, high, low, close, kind) {
+    const n = close.length, out = new Array(n).fill(0);
+    for (let i = 0; i < n; i++) {
+      const o = open[i], c = close[i], h = high[i], l = low[i], body = Math.abs(c - o), range = h - l;
+      const upper = h - Math.max(o, c), lower = Math.min(o, c) - l;
+      if (kind === 'BULL_ENGULF') out[i] = i > 0 && close[i - 1] < open[i - 1] && c > o && o <= close[i - 1] && c >= open[i - 1] ? 1 : 0;
+      else if (kind === 'BEAR_ENGULF') out[i] = i > 0 && close[i - 1] > open[i - 1] && c < o && o >= close[i - 1] && c <= open[i - 1] ? 1 : 0;
+      else if (kind === 'HAMMER') out[i] = range > 0 && lower >= 2 * body && upper <= 0.25 * range ? 1 : 0;
+      else if (kind === 'SHOOTING_STAR') out[i] = range > 0 && upper >= 2 * body && lower <= 0.25 * range ? 1 : 0;
+    }
+    return out;
+  }
+
+  // Divergence : le prix fait un nouveau plus bas (plus haut) sur « period » bougies, plus bas (haut) que la fenêtre
+  // précédente, mais l'oscillateur ne confirme pas.
+  function divergence(price, osc, period, dir) {
+    const n = price.length, out = new Array(n).fill(0);
+    for (let i = 2 * period - 1; i < n; i++) {
+      let curExt = price[i], prevExt = dir > 0 ? Infinity : -Infinity, prevOsc = dir > 0 ? Infinity : -Infinity, ok = Number.isFinite(osc[i]);
+      for (let j = i - period + 1; j <= i && ok; j++) if (dir > 0 ? price[j] < curExt : price[j] > curExt) ok = false; // bougie courante = extrême de la fenêtre
+      for (let j = i - 2 * period + 1; j <= i - period && ok; j++) {
+        if (!Number.isFinite(osc[j])) { ok = false; break; }
+        if (dir > 0) { prevExt = Math.min(prevExt, price[j]); prevOsc = Math.min(prevOsc, osc[j]); }
+        else { prevExt = Math.max(prevExt, price[j]); prevOsc = Math.max(prevOsc, osc[j]); }
+      }
+      if (!ok) continue;
+      out[i] = dir > 0 ? (curExt < prevExt && osc[i] > prevOsc ? 1 : 0) : (curExt > prevExt && osc[i] < prevOsc ? 1 : 0);
+    }
+    return out;
+  }
+
+  // Pente moyenne sur « period » bougies.
+  function slope(src, period) {
+    const n = src.length, out = nanArray(n);
+    for (let i = period; i < n; i++) if (Number.isFinite(src[i]) && Number.isFinite(src[i - period])) out[i] = (src[i] - src[i - period]) / period;
+    return out;
+  }
+
   root.Forexia = root.Forexia || {};
   root.Forexia.indicators = {
+    dmi, psar, supertrend, donchian, keltner, ichimoku, pivots, heikinAshi, candlePattern, divergence, slope, trueRange,
     sma, ema, rma, rsi, macd, stochastic, bollinger, atr, cci, williamsR, momentum, roc, highest, lowest, stdev,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

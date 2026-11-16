@@ -39,7 +39,7 @@
         tokens.push({ t: 'op', v: two === '&&' ? 'AND' : two === '||' ? 'OR' : two, pos: i }); i += 2; continue;
       }
       if ('<>+-*/=!'.includes(c)) { tokens.push({ t: 'op', v: c === '=' ? '==' : c === '!' ? 'NOT' : c, pos: i }); i++; continue; }
-      if (c === '(' || c === ')' || c === ',') { tokens.push({ t: c, pos: i }); i++; continue; }
+      if (c === '(' || c === ')' || c === ',' || c === '@') { tokens.push({ t: c, pos: i }); i++; continue; }
       throw new RuleError('Caractère inattendu « ' + c + ' » (position ' + (i + 1) + ')');
     }
     tokens.push({ t: 'eof', pos: src.length });
@@ -91,7 +91,20 @@
       if (isOp('+')) { p++; return unary(); }
       return primary();
     }
-    function primary() {
+    // Unité de temps supérieure : RSI(14)@H4, CLOSE@D1, (EMA(50) > EMA(200))@D1
+    function postfix(node) {
+      while (peek().t === '@') {
+        p++;
+        const t = peek();
+        const tf = t.t === 'id' ? (t.v === 'MN1' ? 'MN' : t.v) : '';
+        if (!TIMEFRAMES[tf]) throw new RuleError('Unité de temps inconnue après @ (M1, M5, M15, M30, H1, H4, D1, W1, MN)');
+        p++;
+        node = { k: 'tf', tf: tf, a: node };
+      }
+      return node;
+    }
+    function primary() { return postfix(primaryInner()); }
+    function primaryInner() {
       const t = peek();
       if (t.t === 'num') { p++; return { k: 'num', v: t.v }; }
       if (t.t === '(') { p++; const e = orExpr(); expect(')'); return e; }
@@ -122,7 +135,14 @@
   }
 
   // ---------- Évaluation ----------
-  const SERIES = { CLOSE: 'close', OPEN: 'open', HIGH: 'high', LOW: 'low', PRICE: 'close' };
+  const SERIES = { CLOSE: 'close', OPEN: 'open', HIGH: 'high', LOW: 'low', PRICE: 'close', HOUR: 'hour', MINUTE: 'minute', WEEKDAY: 'weekday', DAY: 'day', MONTH: 'month' };
+  const TIMEFRAMES = { M1: 60, M5: 300, M15: 900, M30: 1800, H1: 3600, H4: 14400, D1: 86400, W1: 'W1', MN: 'MN' };
+  function bucketOf(t, tf) {
+    const sec = TIMEFRAMES[tf];
+    if (sec === 'W1') return Math.floor((t / 86400 + 3) / 7); // semaines commençant le lundi
+    if (sec === 'MN') { const d = new Date(t * 1000); return d.getUTCFullYear() * 12 + d.getUTCMonth(); }
+    return Math.floor(t / sec);
+  }
   const ALIASES = {
     MA: 'SMA', MM: 'SMA', MME: 'EMA', CROSSOVER: 'CROSS_UP', CROSSUNDER: 'CROSS_DOWN', CROSS_ABOVE: 'CROSS_UP',
     CROSS_BELOW: 'CROSS_DOWN', CROISE_HAUSSE: 'CROSS_UP', CROISE_BAISSE: 'CROSS_DOWN', MACD_LINE: 'MACD',
@@ -174,6 +194,32 @@
     },
     CROSS_UP: (c, a) => crossOf(c, a, 1, 'CROSS_UP'),
     CROSS_DOWN: (c, a) => crossOf(c, a, -1, 'CROSS_DOWN'),
+    // --- Forexia 1.2
+    ADX: (c, a) => dmiOf(c, a, 'adx'),
+    PLUS_DI: (c, a) => dmiOf(c, a, 'plus'),
+    MINUS_DI: (c, a) => dmiOf(c, a, 'minus'),
+    PSAR: (c, a) => { const st = constArg(a, 0, 0.02, 'PSAR'), mx = constArg(a, 1, 0.2, 'PSAR'); return I.psar(c.high, c.low, st, mx); },
+    SUPERTREND: (c, a) => stOf(c, a, 'line'),
+    SUPERTREND_DIR: (c, a) => stOf(c, a, 'dir'),
+    DONCHIAN_UPPER: (c, a) => donOf(c, a, 'upper'),
+    DONCHIAN_MIDDLE: (c, a) => donOf(c, a, 'middle'),
+    DONCHIAN_LOWER: (c, a) => donOf(c, a, 'lower'),
+    KELTNER_UPPER: (c, a) => keltOf(c, a, 'upper'),
+    KELTNER_MIDDLE: (c, a) => keltOf(c, a, 'middle'),
+    KELTNER_LOWER: (c, a) => keltOf(c, a, 'lower'),
+    TENKAN: (c, a) => ichiOf(c, period(constArg(a, 0, 9, 'TENKAN'), 'TENKAN'), 26, 52, 'tenkan'),
+    KIJUN: (c, a) => ichiOf(c, 9, period(constArg(a, 0, 26, 'KIJUN'), 'KIJUN'), 52, 'kijun'),
+    SENKOU_A: (c, a) => ichiOf(c, period(constArg(a, 0, 9, 'SENKOU_A'), 'SENKOU_A'), period(constArg(a, 1, 26, 'SENKOU_A'), 'SENKOU_A'), 52, 'spanA'),
+    SENKOU_B: (c, a) => ichiOf(c, 9, period(constArg(a, 1, 26, 'SENKOU_B'), 'SENKOU_B'), period(constArg(a, 0, 52, 'SENKOU_B'), 'SENKOU_B'), 'spanB'),
+    PIVOT: (c) => pivOf(c, 'P'), PIVOT_R1: (c) => pivOf(c, 'R1'), PIVOT_R2: (c) => pivOf(c, 'R2'), PIVOT_S1: (c) => pivOf(c, 'S1'), PIVOT_S2: (c) => pivOf(c, 'S2'),
+    HA_OPEN: (c) => haOf(c, 'open'), HA_HIGH: (c) => haOf(c, 'high'), HA_LOW: (c) => haOf(c, 'low'), HA_CLOSE: (c) => haOf(c, 'close'),
+    BULL_ENGULF: (c) => I.candlePattern(c.open, c.high, c.low, c.close, 'BULL_ENGULF'),
+    BEAR_ENGULF: (c) => I.candlePattern(c.open, c.high, c.low, c.close, 'BEAR_ENGULF'),
+    HAMMER: (c) => I.candlePattern(c.open, c.high, c.low, c.close, 'HAMMER'),
+    SHOOTING_STAR: (c) => I.candlePattern(c.open, c.high, c.low, c.close, 'SHOOTING_STAR'),
+    BULL_DIV: (c, a) => divOf(c, a, 1, 'BULL_DIV'),
+    BEAR_DIV: (c, a) => divOf(c, a, -1, 'BEAR_DIV'),
+    SLOPE: (c, a) => { const [s, n] = srcAndPeriod(c, a, 5, 'SLOPE'); return I.slope(s, n); },
   };
 
   function macdOf(c, a, key) {
@@ -189,6 +235,32 @@
   function bbOf(c, a, key) {
     const n = period(constArg(a, 0, 20, 'BB'), 'BB'), m = constArg(a, 1, 2, 'BB');
     return c.cached('BB:' + n + ':' + m, () => I.bollinger(c.close, n, m))[key];
+  }
+  function dmiOf(c, a, key) {
+    const n = period(constArg(a, 0, 14, 'ADX'), 'ADX');
+    return c.cached('DMI:' + n, () => I.dmi(c.high, c.low, c.close, n))[key];
+  }
+  function stOf(c, a, key) {
+    const n = period(constArg(a, 0, 10, 'SUPERTREND'), 'SUPERTREND'), m = constArg(a, 1, 3, 'SUPERTREND');
+    return c.cached('ST:' + n + ':' + m, () => I.supertrend(c.high, c.low, c.close, n, m))[key];
+  }
+  function donOf(c, a, key) {
+    const n = period(constArg(a, 0, 20, 'DONCHIAN'), 'DONCHIAN');
+    return c.cached('DON:' + n, () => I.donchian(c.high, c.low, n))[key];
+  }
+  function keltOf(c, a, key) {
+    const n = period(constArg(a, 0, 20, 'KELTNER'), 'KELTNER'), m = constArg(a, 1, 2, 'KELTNER'), at = period(constArg(a, 2, 10, 'KELTNER'), 'KELTNER');
+    return c.cached('KEL:' + n + ':' + m + ':' + at, () => I.keltner(c.high, c.low, c.close, n, m, at))[key];
+  }
+  function ichiOf(c, t, k, s, key) {
+    return c.cached('ICHI:' + t + ':' + k + ':' + s, () => I.ichimoku(c.high, c.low, t, k, s))[key];
+  }
+  function pivOf(c, key) { return c.cached('PIV', () => I.pivots(c.high, c.low, c.close, c.dayKeys))[key]; }
+  function haOf(c, key) { return c.cached('HA', () => I.heikinAshi(c.open, c.high, c.low, c.close))[key]; }
+  function divOf(c, a, dir, fname) {
+    if (!a.length || !isSeries(a[0])) throw new RuleError(fname + '(oscillateur, n) : indiquez un oscillateur, ex. ' + fname + '(RSI(14), 14)');
+    const n = period(constArg(a, 1, 14, fname), fname);
+    return I.divergence(dir > 0 ? c.low : c.high, a[0], n, dir);
   }
   function crossOf(c, a, dir, fname) {
     if (a.length !== 2) throw new RuleError(fname + '(a, b) attend 2 arguments');
@@ -233,6 +305,14 @@
         for (let i = 0; i < ctx.n; i++) out[i] = binary(node.op, isSeries(x) ? x[i] : x, isSeries(y) ? y[i] : y);
         return out;
       }
+      case 'tf': {
+        const h = ctx.htf(node.tf);
+        const v = evalNode(node.a, h.ctx);
+        if (!isSeries(v)) return v;
+        const out = new Array(ctx.n);
+        for (let i = 0; i < ctx.n; i++) out[i] = h.map[i] >= 0 ? v[h.map[i]] : NaN;
+        return out;
+      }
       case 'call': {
         const args = node.args.map((a) => evalNode(a, ctx));
         const key = node.name + '(' + args.map((a) => (isSeries(a) ? '#' + ctx.idOf(a) : a)).join(',') + ')';
@@ -242,14 +322,42 @@
     throw new RuleError('Nœud inconnu');
   }
 
-  function makeContext(bars) {
-    const cache = new Map(), ids = new Map();
+  function timeOf(b) {
+    if (b.t !== undefined) return b.t;
+    const d = String(b.date);
+    return Date.parse(d.length > 10 ? d.slice(0, 10) + 'T' + d.slice(11, 16) + ':00Z' : d.slice(0, 10) + 'T00:00:00Z') / 1000;
+  }
+  /** opts.nextTime : début de la bougie suivant la dernière (pour savoir si la dernière bougie d'unité supérieure est close). */
+  function makeContext(bars, opts) {
+    const cache = new Map(), ids = new Map(), htfs = new Map();
+    const t = bars.map(timeOf);
+    const dt = t.map((x) => new Date(x * 1000));
     const ctx = {
-      n: bars.length,
+      n: bars.length, t: t, nextTime: opts && opts.nextTime != null ? opts.nextTime : null,
       open: bars.map((b) => b.open), high: bars.map((b) => b.high),
       low: bars.map((b) => b.low), close: bars.map((b) => b.close),
+      hour: dt.map((d) => d.getUTCHours()), minute: dt.map((d) => d.getUTCMinutes()),
+      weekday: dt.map((d) => d.getUTCDay() || 7), day: dt.map((d) => d.getUTCDate()), month: dt.map((d) => d.getUTCMonth() + 1),
+      dayKeys: t.map((x) => Math.floor(x / 86400)),
       cached(key, fn) { if (!cache.has(key)) cache.set(key, fn()); return cache.get(key); },
       idOf(arr) { if (!ids.has(arr)) ids.set(arr, ids.size); return ids.get(arr); },
+      // Bougies d'unité supérieure construites à partir des bougies de base ; map[i] = dernière bougie supérieure close à la bougie i.
+      htf(tf) {
+        if (htfs.has(tf)) return htfs.get(tf);
+        const n = bars.length, keys = t.map((x) => bucketOf(x, tf)), hb = [], idx = new Array(n), map = new Array(n);
+        for (let i = 0; i < n; i++) {
+          if (i === 0 || keys[i] !== keys[i - 1]) hb.push({ t: t[i], date: bars[i].date, open: ctx.open[i], high: ctx.high[i], low: ctx.low[i], close: ctx.close[i] });
+          else { const x = hb[hb.length - 1]; x.high = Math.max(x.high, ctx.high[i]); x.low = Math.min(x.low, ctx.low[i]); x.close = ctx.close[i]; }
+          idx[i] = hb.length - 1;
+        }
+        for (let i = 0; i < n; i++) {
+          const nextKey = i + 1 < n ? keys[i + 1] : ctx.nextTime != null ? bucketOf(ctx.nextTime, tf) : null;
+          map[i] = nextKey !== null && nextKey !== keys[i] ? idx[i] : idx[i] - 1;
+        }
+        const r = { ctx: makeContext(hb), map: map };
+        htfs.set(tf, r);
+        return r;
+      },
     };
     return ctx;
   }
@@ -288,6 +396,7 @@
       case 'series': return node.name === 'PRICE' ? 'CLOSE' : node.name;
       case 'neg': return '-' + stringify(node.a, 7);
       case 'not': { const t = 'NOT ' + stringify(node.a, 3); return parentPrec > 3 ? '(' + t + ')' : t; }
+      case 'tf': return stringify(node.a, 8) + '@' + node.tf;
       case 'call': {
         const spaced = SPACED_ARGS[node.name] || (node.args[0] && node.args[0].k !== 'num');
         return node.name + '(' + node.args.map((x) => stringify(x, 0)).join(spaced ? ', ' : ',') + ')';
@@ -304,7 +413,7 @@
   function mapNodes(node, fn) {
     let n = node;
     if (node.k === 'bin') n = Object.assign({}, node, { a: mapNodes(node.a, fn), b: mapNodes(node.b, fn) });
-    else if (node.k === 'neg' || node.k === 'not') n = Object.assign({}, node, { a: mapNodes(node.a, fn) });
+    else if (node.k === 'neg' || node.k === 'not' || node.k === 'tf') n = Object.assign({}, node, { a: mapNodes(node.a, fn) });
     else if (node.k === 'call') n = Object.assign({}, node, { args: node.args.map((x) => mapNodes(x, fn)) });
     const r = fn(n);
     return r === undefined ? n : r;

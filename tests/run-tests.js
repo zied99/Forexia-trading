@@ -70,6 +70,59 @@ test('Tous les modèles de stratégie sont valides', () => {
   }
 });
 
+console.log('Indicateurs 1.2');
+function hourly(n, f) {
+  const out = []; let p = 1.1;
+  for (let i = 0; i < n; i++) { const o = p; p = f ? f(i, p) : p * (1 + Math.sin(i / 7) * 0.002); out.push({ t: 1704067200 + i * 3600, open: o, high: Math.max(o, p) + 0.0005, low: Math.min(o, p) - 0.0005, close: p }); }
+  return out;
+}
+test('Unité supérieure (@H4) : dernière bougie H4 close, jamais la bougie en cours', () => {
+  const bars = hourly(40), ctx = R.makeContext(bars);
+  const v = R.evaluateSeries('CLOSE@H4', ctx);
+  for (let i = 0; i < 40; i++) {
+    const bucket = Math.floor(bars[i].t / 14400), lastOfBucket = i + 1 < 40 && Math.floor(bars[i + 1].t / 14400) !== bucket;
+    // bougie H4 close à i : celle de i si i est sa dernière heure, sinon la précédente
+    let j = lastOfBucket ? i : i - (i % 4) - 1;
+    const expect = j >= 0 ? bars[j].close : NaN;
+    if (!(Number.isNaN(expect) ? Number.isNaN(v[i]) : Math.abs(v[i] - expect) < 1e-12)) throw new Error('bougie ' + i + ' : ' + v[i] + ' au lieu de ' + expect);
+  }
+  // la dernière bougie : close seulement si on sait que la suivante ouvre une nouvelle H4
+  eq(Number.isNaN(R.evaluateSeries('CLOSE@H4', R.makeContext(bars.slice(0, 4)))[3]), true);
+  near(R.evaluateSeries('CLOSE@H4', R.makeContext(bars.slice(0, 4), { nextTime: bars[4].t }))[3], bars[3].close, 1e-12);
+  // modifier une bougie future ne change rien au passé
+  const a = R.evaluateSeries('RSI(3)@H4', R.makeContext(bars)), changed = bars.map((b, i) => (i === 30 ? Object.assign({}, b, { close: 5 }) : b));
+  const b = R.evaluateSeries('RSI(3)@H4', R.makeContext(changed));
+  for (let i = 0; i < 30; i++) if (!(a[i] === b[i] || (Number.isNaN(a[i]) && Number.isNaN(b[i])))) throw new Error('regard vers le futur à ' + i);
+});
+test('Pivots : calculés sur la journée précédente', () => {
+  const bars = hourly(60), ctx = R.makeContext(bars), P = R.evaluateSeries('PIVOT', ctx);
+  const d0 = bars.filter((b) => Math.floor(b.t / 86400) === Math.floor(bars[0].t / 86400));
+  const H = Math.max(...d0.map((b) => b.high)), L = Math.min(...d0.map((b) => b.low)), C = d0[d0.length - 1].close;
+  eq(Number.isNaN(P[0]), true); near(P[24], (H + L + C) / 3, 1e-12);
+});
+test('Divergence haussière : prix plus bas, oscillateur plus haut', () => {
+  const low = [10, 9, 8, 7, 8, 9, 9.5, 9, 8.5, 6.5], osc = [50, 40, 30, 20, 30, 40, 45, 40, 35, 25];
+  const d = I.divergence(low, osc, 5, 1);
+  eq(d[9], 1); eq(I.divergence(low, osc.map((x, i) => (i === 9 ? 15 : x)), 5, 1)[9], 0);
+});
+test('ADX, SuperTrend, SAR parabolique, Ichimoku, Donchian, Keltner : valeurs cohérentes', () => {
+  const up = hourly(200, (i, p) => p * 1.001), ctx = R.makeContext(up); // forte hausse continue
+  const last = (e) => { const v = R.evaluateSeries(e, ctx); return v[v.length - 1]; };
+  if (!(last('ADX(14)') > 50 && last('PLUS_DI(14)') > last('MINUS_DI(14)'))) throw new Error('ADX');
+  eq(last('SUPERTREND_DIR(10,3)'), 1); if (!(last('SUPERTREND(10,3)') < last('CLOSE'))) throw new Error('SuperTrend');
+  if (!(last('PSAR()') < last('LOW'))) throw new Error('SAR');
+  if (!(last('TENKAN(9)') > last('KIJUN(26)') && last('CLOSE') > last('SENKOU_A(9,26)'))) throw new Error('Ichimoku');
+  near(last('DONCHIAN_UPPER(20)'), Math.max(...up.slice(-20).map((b) => b.high)), 1e-12);
+  if (!(last('KELTNER_UPPER(20,2,10)') > last('KELTNER_MIDDLE(20,2,10)'))) throw new Error('Keltner');
+  if (!(last('SLOPE(EMA(50), 5)') > 0)) throw new Error('pente');
+});
+test('Heure, jour de la semaine, figures de bougies', () => {
+  const ctx = R.makeContext(hourly(30));
+  eq(R.evaluateSeries('HOUR', ctx)[5], 5); eq(R.evaluateSeries('WEEKDAY', ctx)[0], 1); // 1er janvier 2024 = lundi
+  const eng = [{ t: 0, open: 1.10, high: 1.11, low: 1.09, close: 1.095 }, { t: 3600, open: 1.094, high: 1.12, low: 1.093, close: 1.115 }];
+  eq(R.evaluateRule('BULL_ENGULF', R.makeContext(eng))[1], true);
+});
+
 console.log('Backtest');
 const base = { capital: 10000, leverage: 10, exposurePct: 100, spreadPips: 0, pair: 'EUR/USD', startIndex: 1 };
 test('Achat exécuté à l\'ouverture suivante, soldé en fin de période', () => {
