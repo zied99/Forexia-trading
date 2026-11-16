@@ -540,6 +540,7 @@
     let attempts = 0;
     for (let k = 0; k < n && !batchStop && attempts++ < n * 3; k++) {
       $('batchStatus').textContent = 'Test ' + (k + 1) + ' sur ' + n + '…';
+      setRunLabel('Test ' + (k + 1) + ' / ' + n);
       pickRandomPeriod();
       const before = evalList().length;
       const ok = await runFromForm();
@@ -550,6 +551,7 @@
       await new Promise((r) => setTimeout(r, 30)); // laisse la page se redessiner
     }
     batchRunning = false;
+    setRunLabel('');
     $('batchRun').textContent = 'Lancer le lot';
     if (res.length) {
       const pos = res.filter((v) => v > 0).length, avg = res.reduce((a, b) => a + b, 0) / res.length;
@@ -749,6 +751,12 @@
 
   // ---------- Lancement ----------
   $('form').addEventListener('submit', (e) => { e.preventDefault(); if (!batchRunning) runFromForm(); });
+  // Compteur affiché dans le bouton pendant un lot ou une vérification (« Test 3 / 10 »)
+  let runLabel = '';
+  function setRunLabel(t) {
+    runLabel = t;
+    if (!t) { $('runBtn').disabled = false; $('runBtn').textContent = 'Lancer le backtest'; }
+  }
   /** Lance le backtest du formulaire. Renvoie true si la simulation a abouti. */
   async function runFromForm() {
     $('formError').textContent = '';
@@ -765,7 +773,7 @@
 
     const pair = $('pair').value, periodKey = periodValue(), leverage = Number($('leverage').value);
     const btn = $('runBtn');
-    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Calcul en cours…';
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>' + (runLabel ? esc(runLabel) + ' · calcul en cours…' : 'Calcul en cours…');
     try {
       const loaded = await loadBars(pair, periodKey);
       const endIso = F.data.iso(loaded.range.end);
@@ -855,7 +863,8 @@
       $('formError').textContent = err.message;
       return false;
     } finally {
-      btn.disabled = false; btn.textContent = 'Lancer le backtest';
+      btn.disabled = false;
+      if (runLabel) btn.innerHTML = '<span class="spinner"></span>' + esc(runLabel); else btn.textContent = 'Lancer le backtest';
     }
   }
 
@@ -2442,6 +2451,7 @@
         const j = jobs[k];
         checkStatusText = (kind === 'ext' ? 'Prolongation ' : 'Tranche ') + (k + 1) + ' sur ' + jobs.length + '…';
         checkCurrentKey = j.e.key;
+        setRunLabel((kind === 'ext' ? 'Prolongation ' : 'Tranche ') + (k + 1) + ' / ' + jobs.length);
         live();
         const st = await rerunEntry(j.e, j.from, j.to, kind === 'ext' ? '' : j.tag, kind === 'ext');
         if (!out.has(j.e)) out.set(j.e, []);
@@ -2450,7 +2460,7 @@
         await new Promise((r) => setTimeout(r, kind === 'ext' ? 250 : 20));
       }
     } finally {
-      checkRunning = ''; checkStatusText = ''; checkCurrentKey = '';
+      checkRunning = ''; checkStatusText = ''; checkCurrentKey = ''; setRunLabel('');
       // le formulaire revient à son état d'avant la vérification
       restoring = true;
       try { loadStrategy(saved.strat); applyConfig(saved.config); $('style').value = saved.style; $('preset').value = [...$('preset').options].some((o) => o.value === saved.preset) ? saved.preset : 'mine'; $('presetDesc').textContent = saved.desc; updateWithdrawUI(); syncFormState(); }
