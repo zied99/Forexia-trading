@@ -2487,7 +2487,7 @@
       const i = evalList().indexOf(e);
       const btn = document.createElement('button'); btn.dataset.reload = String(i); $('evalBody').appendChild(btn); btn.click();
     });
-    $('recoReset').addEventListener('click', () => { $('evalClear').click(); $('evalConfirm').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
+    $('recoReset').addEventListener('click', () => { $('evalResetAll').click(); $('evalConfirm').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
     $('recoBatch').addEventListener('click', () => { closeEvaluation(); $('batchCount').focus(); $('batchCount').scrollIntoView({ behavior: 'smooth', block: 'center' }); });
   }
   $('evalScopeCurrent').addEventListener('click', () => setEvalScope('current'));
@@ -2527,18 +2527,44 @@
     }
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('evalModal').hidden) closeEvaluation(); });
-  $('evalClear').addEventListener('click', () => { $('evalConfirmN').textContent = evalList().length; $('evalConfirm').hidden = false; });
-  // « Réinitialiser » : efface toutes les simulations (après confirmation) et remet les filtres à zéro
-  $('evalResetAll').addEventListener('click', () => {
-    ['evalFStrat', 'evalFPair', 'evalFData', 'evalFResult'].forEach((id) => { $(id).value = ''; });
-    $('evalFSearch').value = '';
-    $('evalConfirmN').textContent = evalList().length;
+  // Effacement : toutes les simulations (« Tout effacer ») ou seulement celles de l'onglet (« Réinitialiser »).
+  let pendingDelete = null; // null = tout ; sinon liste des clés à effacer
+  function askClear(keys, who) {
+    pendingDelete = keys;
+    const n = keys ? keys.length : evalList().length;
+    $('evalConfirmQ').textContent = 'Effacer ' + (n > 1 ? 'les ' + n + ' simulations' : n === 1 ? 'la simulation' : 'les simulations') + (keys ? ' ' + (n === 1 ? who.q.replace('affichées', 'affichée') : who.q) : ' du tableau') + ' ?';
+    $('evalConfirmWho').textContent = keys ? who.note : 'Toutes les stratégies sont concernées';
+    $('evalClearGo').textContent = keys ? 'Effacer' : 'Tout effacer';
     $('evalConfirm').hidden = false;
+  }
+  $('evalClear').addEventListener('click', () => askClear(null));
+  // « Réinitialiser » : onglet « Stratégie en cours » = seulement cette stratégie ; « Historique complet » = les simulations affichées
+  $('evalResetAll').addEventListener('click', () => {
+    if (evalScope === 'current') {
+      const name = currentStratName();
+      askClear(evalList().filter((e) => e.name === name).map((e) => e.key), { q: 'de « ' + name + ' »', note: 'Les simulations des autres stratégies sont conservées' });
+    } else {
+      const shown = evalFiltered(evalList()).map((x) => x.e), all = evalList().length;
+      if (shown.length === all) askClear(null);
+      else askClear(shown.map((e) => e.key), { q: 'affichées (filtres appliqués)', note: 'Les ' + (all - shown.length) + ' autres simulations sont conservées' });
+    }
     $('evalClearGo').focus();
     $('evalConfirm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   });
   $('evalClearCancel').addEventListener('click', () => { $('evalConfirm').hidden = true; });
   $('evalClearGo').addEventListener('click', () => {
+    if (pendingDelete) {
+      const keys = new Set(pendingDelete), list = evalList();
+      pushUndo('Effacement de ' + keys.size + ' simulation(s)');
+      evalSave(list.filter((e) => !keys.has(e.key)));
+      for (const k of keys) { dbPush('simulations/delete', { key: k }); cloudPush(() => C.deleteSimulation(k)); }
+      toast(keys.size + ' simulation' + (keys.size > 1 ? 's effacées' : ' effacée') + '.', true);
+      logEvent('simulation.cleared', keys.size + ' simulation(s) effacée(s) du tableau d\'évaluation');
+      pendingDelete = null; checkReport = '';
+      $('evalConfirm').hidden = true;
+      renderEvaluation();
+      return;
+    }
     pushUndo('Effacement du tableau d\'évaluation');
     toast('Tableau d\'évaluation effacé.', true);
     const n = evalList().length;
