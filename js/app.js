@@ -755,8 +755,15 @@
   let runLabel = '';
   function setRunLabel(t) {
     runLabel = t;
-    if (!t) { $('runBtn').disabled = false; $('runBtn').textContent = 'Lancer le backtest'; }
+    // bouton « Arrêter » visible pendant un lot, une prolongation, un découpage ou un changement de capital
+    $('runStop').hidden = !t || t === 'Analyse';
+    if (!t) { $('runBtn').disabled = false; $('runBtn').textContent = 'Lancer le backtest'; $('runStop').disabled = false; $('runStop').textContent = '■ Arrêter'; }
   }
+  $('runStop').addEventListener('click', () => {
+    batchStop = true; checkStop = true;
+    $('runStop').disabled = true; $('runStop').textContent = 'Arrêt…';
+    if (batchRunning) $('batchRun').textContent = 'Arrêt…';
+  });
   /** Lance le backtest du formulaire. Renvoie true si la simulation a abouti. */
   async function runFromForm() {
     $('formError').textContent = '';
