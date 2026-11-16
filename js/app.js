@@ -107,7 +107,12 @@
     if (c.spreadPips !== undefined) $('spread').value = c.spreadPips;
     const per = document.querySelector('input[name=period][value="' + c.period + '"]');
     if (per) { per.checked = true; syncPeriodUI(); }
-    if (c.randomSpan !== undefined) $('randomSpan').value = c.randomSpan;
+    if (c.randomSpan !== undefined) {
+      if (/^exact:\d+$/.test(c.randomSpan) && ![...$('randomSpan').options].some((o) => o.value === c.randomSpan)) {
+        $('randomFixedGroup').insertBefore(new Option(c.randomSpan.slice(6) + ' mois', c.randomSpan), $('randomFixedGroup').querySelector('option[value="exact:x"]'));
+      }
+      $('randomSpan').value = c.randomSpan;
+    }
     if (c.period === 'custom' && c.dateFrom && c.dateTo) { $('dateFrom').value = c.dateFrom; $('dateTo').value = c.dateTo; }
     // Le fichier CSV n'est pas conservé par le navigateur : on ne restaure que les autres sources.
     const src = c.source !== 'csv' && document.querySelector('input[name=source][value="' + c.source + '"]');
@@ -469,6 +474,10 @@
   function randomDurations() {
     const [kind, v] = ($('randomSpan').value || ':').split(':');
     const n = Number(v);
+    if (kind === 'exact' && n > 0) {
+      const known = RANDOM_DURATIONS.find(([m]) => m === n);
+      return [known || [n, n % 12 === 0 ? n / 12 + ' an' + (n > 12 ? 's' : '') : n + ' mois']];
+    }
     if (kind === 'min') return RANDOM_DURATIONS.filter(([m]) => m >= n);
     if (kind === 'max') return RANDOM_DURATIONS.filter(([m]) => m <= n);
     return RANDOM_DURATIONS.filter(([m]) => m <= 24);
@@ -497,12 +506,26 @@
     setDates(start, end);
     $('randomPeriodNote').hidden = false;
     $('randomPeriodNote').textContent = '🎲 Période tirée au hasard : ' + label + ', du ' + frDate(F.data.iso(start)) + ' au ' + frDate(F.data.iso(end)) +
-      ($('randomSpan').value ? ' (' + $('randomSpan').selectedOptions[0].textContent.toLowerCase() + ')' : '') +
+      (/^exact:/.test($('randomSpan').value) ? ' (durée fixe)' : $('randomSpan').value ? ' (' + $('randomSpan').selectedOptions[0].textContent.toLowerCase() + ')' : '') +
       (short ? ', historique trop court pour cette durée : période raccourcie' : '') +
       '. Cliquez de nouveau sur « Période aléatoire » pour en tirer une autre.';
   }
   // changer la contrainte de durée retire tout de suite une nouvelle période
-  $('randomSpan').addEventListener('change', () => { if (!$('randomPeriodNote').hidden) pickRandomPeriod(); });
+  let lastSpan = $('randomSpan').value;
+  $('randomSpan').addEventListener('change', () => {
+    // « x mois… » : durée fixe saisie, ajoutée à la liste
+    if ($('randomSpan').value === 'exact:x') {
+      const x = Math.round(Number(prompt('Durée fixe de la période aléatoire, en mois (1 à 120) :', '9')));
+      if (!(x >= 1 && x <= 120)) { $('randomSpan').value = lastSpan; return; }
+      if (![...$('randomSpan').options].some((o) => o.value === 'exact:' + x)) {
+        const o = new Option(x + ' mois', 'exact:' + x);
+        $('randomFixedGroup').insertBefore(o, $('randomFixedGroup').querySelector('option[value="exact:x"]'));
+      }
+      $('randomSpan').value = 'exact:' + x;
+    }
+    lastSpan = $('randomSpan').value;
+    if (!$('randomPeriodNote').hidden) pickRandomPeriod();
+  });
 
   // Lot de tests aléatoires : N backtests sur N périodes tirées au hasard, tous enregistrés dans « Évaluation ».
   let batchRunning = false, batchStop = false;

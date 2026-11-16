@@ -1,12 +1,12 @@
 <!doctype html>
-<html lang="fr" data-version="1.2.10">
+<html lang="fr" data-version="1.2.11">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Forexia Backtest</title>
   <meta name="description" content="Backtesting de stratégies de trading Forex basées sur RSI, MACD, stochastique, moyennes mobiles…">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%232563eb'/><path d='M6 22l6-7 5 4 9-11' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
-  <link rel="stylesheet" href="css/style.css?v=1.2.10">
+  <link rel="stylesheet" href="css/style.css?v=1.2.11">
 </head>
 <body>
   <div class="auth-gate" id="authGate" hidden>
@@ -283,6 +283,14 @@
           <label class="field random-span">Durée de la période aléatoire
             <select id="randomSpan">
               <option value="">Toutes durées (1 mois à 2 ans)</option>
+              <optgroup label="Durée fixe (seule la date est aléatoire)" id="randomFixedGroup">
+                <option value="exact:1">1 mois</option>
+                <option value="exact:2">2 mois</option>
+                <option value="exact:3">3 mois</option>
+                <option value="exact:6">6 mois</option>
+                <option value="exact:12">1 an</option>
+                <option value="exact:x">x mois…</option>
+              </optgroup>
               <optgroup label="Au moins (long terme)">
                 <option value="min:3">Au moins 3 mois</option>
                 <option value="min:6">Au moins 6 mois</option>
@@ -672,7 +680,7 @@
             <p class="hint">La passerelle est un petit programme qui tourne sur votre PC : elle dépose l'EA dans MT5, le compile, lance le testeur et peut l'ouvrir sur un graphique. Installation unique :</p>
             <ol class="steps">
               <li>Installez <a href="https://www.python.org/downloads/" target="_blank" rel="noopener">Python</a> (cochez « Add python.exe to PATH »).</li>
-              <li>Téléchargez <a href="bridge/forexia_bridge.py?v=1.2.10" download="forexia_bridge.py">forexia_bridge.py</a> et <a href="bridge/demarrer-passerelle.bat?v=1.2.10" download="demarrer-passerelle.bat">demarrer-passerelle.bat</a> dans un même dossier.</li>
+              <li>Téléchargez <a href="bridge/forexia_bridge.py?v=1.2.11" download="forexia_bridge.py">forexia_bridge.py</a> et <a href="bridge/demarrer-passerelle.bat?v=1.2.11" download="demarrer-passerelle.bat">demarrer-passerelle.bat</a> dans un même dossier.</li>
               <li>Double-cliquez sur <code>demarrer-passerelle.bat</code> et laissez la fenêtre ouverte. Si le navigateur demande l'accès au « réseau local », acceptez.</li>
               <li>Collez le code d'appairage affiché dans cette fenêtre :</li>
             </ol>
@@ -747,19 +755,19 @@
     <br>Forexia <span id="appVersion">1.2</span>
   </footer>
 
-  <script src="js/cloud.js?v=1.2.10"></script>
-  <script src="js/indicators.js?v=1.2.10"></script>
-  <script src="js/expr.js?v=1.2.10"></script>
-  <script src="js/trade.js?v=1.2.10"></script>
-  <script src="js/advisor.js?v=1.2.10"></script>
-  <script src="js/backtest.js?v=1.2.10"></script>
-  <script src="js/data.js?v=1.2.10"></script>
-  <script src="js/presets.js?v=1.2.10"></script>
-  <script src="js/french.js?v=1.2.10"></script>
-  <script src="js/enhancer.js?v=1.2.10"></script>
-  <script src="js/mql5.js?v=1.2.10"></script>
-  <script src="js/broker.js?v=1.2.10"></script>
-  <script src="js/chart.js?v=1.2.10"></script>
-  <script src="js/app.js?v=1.2.10"></script>
+  <script src="js/cloud.js?v=1.2.11"></script>
+  <script src="js/indicators.js?v=1.2.11"></script>
+  <script src="js/expr.js?v=1.2.11"></script>
+  <script src="js/trade.js?v=1.2.11"></script>
+  <script src="js/advisor.js?v=1.2.11"></script>
+  <script src="js/backtest.js?v=1.2.11"></script>
+  <script src="js/data.js?v=1.2.11"></script>
+  <script src="js/presets.js?v=1.2.11"></script>
+  <script src="js/french.js?v=1.2.11"></script>
+  <script src="js/enhancer.js?v=1.2.11"></script>
+  <script src="js/mql5.js?v=1.2.11"></script>
+  <script src="js/broker.js?v=1.2.11"></script>
+  <script src="js/chart.js?v=1.2.11"></script>
+  <script src="js/app.js?v=1.2.11"></script>
 </body>
 </html>
