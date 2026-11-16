@@ -2253,7 +2253,8 @@
     $('evalFStratField').hidden = evalScope === 'current';
     $('evalFSearch').closest('label').hidden = evalScope === 'current';
     $('evalFilters').hidden = !all.length;
-    $('evalClear').disabled = !all.length;
+    $('evalClear').disabled = $('evalResetAll').disabled = !all.length;
+    $('evalFReset').hidden = !['evalFStrat', 'evalFPair', 'evalFData', 'evalFResult'].some((id) => $(id).value) && !$('evalFSearch').value;
     if (!all.length) { $('evalExport').disabled = true; $('evalBody').innerHTML = '<p class="eval-empty">Aucune simulation pour l\'instant : lancez un backtest, il s\'ajoutera ici.</p>'; return; }
     const shown = evalFiltered(all);
     $('evalExport').disabled = !shown.length;
@@ -2527,6 +2528,15 @@
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('evalModal').hidden) closeEvaluation(); });
   $('evalClear').addEventListener('click', () => { $('evalConfirmN').textContent = evalList().length; $('evalConfirm').hidden = false; });
+  // « Réinitialiser » : efface toutes les simulations (après confirmation) et remet les filtres à zéro
+  $('evalResetAll').addEventListener('click', () => {
+    ['evalFStrat', 'evalFPair', 'evalFData', 'evalFResult'].forEach((id) => { $(id).value = ''; });
+    $('evalFSearch').value = '';
+    $('evalConfirmN').textContent = evalList().length;
+    $('evalConfirm').hidden = false;
+    $('evalClearGo').focus();
+    $('evalConfirm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
   $('evalClearCancel').addEventListener('click', () => { $('evalConfirm').hidden = true; });
   $('evalClearGo').addEventListener('click', () => {
     pushUndo('Effacement du tableau d\'évaluation');
@@ -2535,6 +2545,7 @@
     evalSave([]);
     dbPush('simulations/clear', {});
     cloudPush(() => C.clearSimulations());
+    checkReport = '';
     logEvent('simulation.cleared', 'Tableau d\'évaluation effacé (' + n + ' simulations)');
     $('evalConfirm').hidden = true;
     renderEvaluation();

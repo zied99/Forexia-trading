@@ -1,12 +1,12 @@
 <!doctype html>
-<html lang="fr" data-version="1.2.8">
+<html lang="fr" data-version="1.2.9">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Forexia Backtest</title>
   <meta name="description" content="Backtesting de stratégies de trading Forex basées sur RSI, MACD, stochastique, moyennes mobiles…">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%232563eb'/><path d='M6 22l6-7 5 4 9-11' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
-  <link rel="stylesheet" href="css/style.css?v=1.2.8">
+  <link rel="stylesheet" href="css/style.css?v=1.2.9">
 </head>
 <body>
   <div class="auth-gate" id="authGate" hidden>
@@ -596,7 +596,8 @@
         <label class="field">Résultat
           <select id="evalFResult"><option value="">Tous</option><option value="win">Gagnantes</option><option value="loss">Perdantes</option></select>
         </label>
-        <button type="button" class="secondary small" id="evalFReset">Réinitialiser</button>
+        <button type="button" class="secondary small" id="evalFReset" hidden>Effacer les filtres</button>
+        <button type="button" class="secondary small danger" id="evalResetAll" title="Effacer toutes les simulations du tableau">Réinitialiser</button>
       </div>
       <div class="eval-scope eval-views" role="tablist" aria-label="Affichage">
         <button type="button" role="tab" class="scope-tab" data-view="table" aria-selected="true">Tableau</button>
@@ -606,7 +607,7 @@
       <div class="modal-body" id="evalBody"></div>
       <footer class="modal-foot">
         <div class="bridge-confirm" id="evalConfirm" hidden>
-          <p><b>Effacer les <span id="evalConfirmN"></span> simulations du tableau ?</b> Cette action est définitive.</p>
+          <p><b>Effacer les <span id="evalConfirmN"></span> simulations du tableau ?</b> Toutes les stratégies sont concernées (Ctrl+Z juste après pour annuler).</p>
           <div class="row buttons"><button type="button" class="primary" id="evalClearGo">Tout effacer</button><button type="button" class="secondary" id="evalClearCancel">Annuler</button></div>
         </div>
         <div class="modal-actions">
@@ -671,7 +672,7 @@
             <p class="hint">La passerelle est un petit programme qui tourne sur votre PC : elle dépose l'EA dans MT5, le compile, lance le testeur et peut l'ouvrir sur un graphique. Installation unique :</p>
             <ol class="steps">
               <li>Installez <a href="https://www.python.org/downloads/" target="_blank" rel="noopener">Python</a> (cochez « Add python.exe to PATH »).</li>
-              <li>Téléchargez <a href="bridge/forexia_bridge.py?v=1.2.8" download="forexia_bridge.py">forexia_bridge.py</a> et <a href="bridge/demarrer-passerelle.bat?v=1.2.8" download="demarrer-passerelle.bat">demarrer-passerelle.bat</a> dans un même dossier.</li>
+              <li>Téléchargez <a href="bridge/forexia_bridge.py?v=1.2.9" download="forexia_bridge.py">forexia_bridge.py</a> et <a href="bridge/demarrer-passerelle.bat?v=1.2.9" download="demarrer-passerelle.bat">demarrer-passerelle.bat</a> dans un même dossier.</li>
               <li>Double-cliquez sur <code>demarrer-passerelle.bat</code> et laissez la fenêtre ouverte. Si le navigateur demande l'accès au « réseau local », acceptez.</li>
               <li>Collez le code d'appairage affiché dans cette fenêtre :</li>
             </ol>
@@ -746,19 +747,19 @@
     <br>Forexia <span id="appVersion">1.2</span>
   </footer>
 
-  <script src="js/cloud.js?v=1.2.8"></script>
-  <script src="js/indicators.js?v=1.2.8"></script>
-  <script src="js/expr.js?v=1.2.8"></script>
-  <script src="js/trade.js?v=1.2.8"></script>
-  <script src="js/advisor.js?v=1.2.8"></script>
-  <script src="js/backtest.js?v=1.2.8"></script>
-  <script src="js/data.js?v=1.2.8"></script>
-  <script src="js/presets.js?v=1.2.8"></script>
-  <script src="js/french.js?v=1.2.8"></script>
-  <script src="js/enhancer.js?v=1.2.8"></script>
-  <script src="js/mql5.js?v=1.2.8"></script>
-  <script src="js/broker.js?v=1.2.8"></script>
-  <script src="js/chart.js?v=1.2.8"></script>
-  <script src="js/app.js?v=1.2.8"></script>
+  <script src="js/cloud.js?v=1.2.9"></script>
+  <script src="js/indicators.js?v=1.2.9"></script>
+  <script src="js/expr.js?v=1.2.9"></script>
+  <script src="js/trade.js?v=1.2.9"></script>
+  <script src="js/advisor.js?v=1.2.9"></script>
+  <script src="js/backtest.js?v=1.2.9"></script>
+  <script src="js/data.js?v=1.2.9"></script>
+  <script src="js/presets.js?v=1.2.9"></script>
+  <script src="js/french.js?v=1.2.9"></script>
+  <script src="js/enhancer.js?v=1.2.9"></script>
+  <script src="js/mql5.js?v=1.2.9"></script>
+  <script src="js/broker.js?v=1.2.9"></script>
+  <script src="js/chart.js?v=1.2.9"></script>
+  <script src="js/app.js?v=1.2.9"></script>
 </body>
 </html>
