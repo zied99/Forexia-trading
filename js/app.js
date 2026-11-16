@@ -486,10 +486,11 @@
     let short = false;
     if (!choices.length) { choices = [pool[0]]; short = true; }
     const [months, label] = choices[Math.floor(Math.random() * choices.length)];
-    const latestStart = F.data.addMonths(max, -months);
+    const latestStart = new Date(Math.min(F.data.addMonths(max, -months).getTime(), max.getTime() - 32 * day));
     const span = Math.max(0, latestStart - min);
     const start = new Date(min.getTime() + Math.floor((Math.random() * span) / day) * day);
-    let end = new Date(F.data.addMonths(start, months).getTime() - day);
+    // au moins 31 jours (un « mois » de février en fait 28, sous le minimum de 30 jours)
+    let end = new Date(Math.max(F.data.addMonths(start, months).getTime() - day, start.getTime() + 31 * day));
     if (end > max) end = max;
     document.querySelector('input[name=period][value=custom]').checked = true;
     syncPeriodUI();
@@ -502,6 +503,40 @@
   }
   // changer la contrainte de durée retire tout de suite une nouvelle période
   $('randomSpan').addEventListener('change', () => { if (!$('randomPeriodNote').hidden) pickRandomPeriod(); });
+
+  // Lot de tests aléatoires : N backtests sur N périodes tirées au hasard, tous enregistrés dans « Évaluation ».
+  let batchRunning = false, batchStop = false;
+  $('batchRun').addEventListener('click', async () => {
+    if (batchRunning) { batchStop = true; $('batchRun').textContent = 'Arrêt…'; return; }
+    const n = Math.max(1, Math.min(100, Math.round(Number($('batchCount').value) || 10)));
+    $('batchCount').value = n;
+    batchRunning = true; batchStop = false;
+    $('batchRun').textContent = 'Arrêter';
+    const res = [];
+    let fails = 0;
+    let attempts = 0;
+    for (let k = 0; k < n && !batchStop && attempts++ < n * 3; k++) {
+      $('batchStatus').textContent = 'Test ' + (k + 1) + ' sur ' + n + '…';
+      pickRandomPeriod();
+      const before = evalList().length;
+      const ok = await runFromForm();
+      if (ok && lastRun && evalList().length > before) res.push(lastRun.stats.returnPct);
+      else if (ok) k--; // même simulation que la précédente (période identique) : on en tire une autre
+      else if (++fails >= Math.max(3, Math.ceil(n / 3))) { $('batchStatus').textContent = 'Lot interrompu : ' + $('formError').textContent; break; }
+      else { console.warn('Test du lot ignoré :', $('formError').textContent); k--; } // période inutilisable : on en tire une autre
+      await new Promise((r) => setTimeout(r, 30)); // laisse la page se redessiner
+    }
+    batchRunning = false;
+    $('batchRun').textContent = 'Lancer le lot';
+    if (res.length) {
+      const pos = res.filter((v) => v > 0).length, avg = res.reduce((a, b) => a + b, 0) / res.length;
+      $('batchStatus').innerHTML = '<b>' + res.length + ' test' + (res.length > 1 ? 's' : '') + ' enregistré' + (res.length > 1 ? 's' : '') + '</b> dans « Évaluation » : ' +
+        pos + ' gagnant' + (pos > 1 ? 's' : '') + ' sur ' + res.length + ', résultat moyen <span class="' + cls(avg) + '">' + signed(avg, num1) + ' %</span> (de ' + signed(Math.min(...res), num1) + ' à ' + signed(Math.max(...res), num1) + ' %). ' +
+        '<button type="button" class="link" id="batchOpenEval">Voir les recommandations</button>';
+      $('batchOpenEval').addEventListener('click', () => { openEvaluation(); document.querySelector('.eval-views [data-view="reco"]').click(); });
+      logEvent('simulation.batch', 'Lot de ' + res.length + ' tests aléatoires : ' + pos + ' gagnants, moyenne ' + signed(avg, num1) + ' %', { results: res });
+    }
+  });
   $('quickRanges').addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
@@ -690,19 +725,20 @@
   }
 
   // ---------- Lancement ----------
-  $('form').addEventListener('submit', async (e) => {
-    e.preventDefault();
+  $('form').addEventListener('submit', (e) => { e.preventDefault(); if (!batchRunning) runFromForm(); });
+  /** Lance le backtest du formulaire. Renvoie true si la simulation a abouti. */
+  async function runFromForm() {
     $('formError').textContent = '';
     if (frenchDirty && $('frenchText').value.trim()) {
       const r = translateFrench();
-      if (!r.longEntry && !r.shortEntry) { $('formError').textContent = 'Je n\'ai pas compris votre stratégie en français : voir les remarques sous le texte.'; return; }
+      if (!r.longEntry && !r.shortEntry) { $('formError').textContent = 'Je n\'ai pas compris votre stratégie en français : voir les remarques sous le texte.'; return false; }
     }
     const strat = currentStrategy();
-    if (!validateAll()) { $('rulesDetails').open = true; $('formError').textContent = 'Corrigez les règles en rouge.'; return; }
-    if (!strat.longEntry && !strat.shortEntry) { $('formError').textContent = 'Indiquez au moins une règle d\'entrée (achat ou vente).'; return; }
+    if (!validateAll()) { $('rulesDetails').open = true; $('formError').textContent = 'Corrigez les règles en rouge.'; return false; }
+    if (!strat.longEntry && !strat.shortEntry) { $('formError').textContent = 'Indiquez au moins une règle d\'entrée (achat ou vente).'; return false; }
     const capital = Number($('capital').value), exposure = Number($('exposure').value), spread = Number($('spread').value) || 0;
-    if (!(capital >= 100)) { $('formError').textContent = 'Le capital doit être d\'au moins 100.'; return; }
-    if (!(exposure > 0 && exposure <= 100)) { $('formError').textContent = 'L\'exposition doit être comprise entre 1 et 100 %.'; return; }
+    if (!(capital >= 100)) { $('formError').textContent = 'Le capital doit être d\'au moins 100.'; return false; }
+    if (!(exposure > 0 && exposure <= 100)) { $('formError').textContent = 'L\'exposition doit être comprise entre 1 et 100 %.'; return false; }
 
     const pair = $('pair').value, periodKey = periodValue(), leverage = Number($('leverage').value);
     const btn = $('runBtn');
@@ -791,12 +827,14 @@
       try { localStorage.setItem('forexia.lastRun', JSON.stringify(lastRunRec)); } catch (e) { /* ignoré */ }
       cloudPush(() => C.putSettings({ lastRun: lastRunRec }));
       refreshPresetSelect($('preset').value);
+      return true;
     } catch (err) {
       $('formError').textContent = err.message;
+      return false;
     } finally {
       btn.disabled = false; btn.textContent = 'Lancer le backtest';
     }
-  });
+  }
 
   // ---------- Rendu des résultats ----------
   function splitTopLevel(text) {
@@ -2211,6 +2249,8 @@
       return;
     }
     const list = shown.map((x) => x.e);
+    if (evalView === 'charts') return renderEvalCharts(list, shown.length < all.length);
+    if (evalView === 'reco') return renderEvalReco(list, shown.length < all.length);
     const p = (v) => '<span class="' + cls(v) + '">' + signed(v, num2) + ' %</span>';
     const rows = shown.map(({ e, i }) => '<tr>' +
       '<td>' + (i + 1) + '</td><td class="l">' + new Date(e.at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) + '</td>' +
@@ -2230,6 +2270,73 @@
     $('evalBody').innerHTML = (filtered ? '<p class="eval-count">' + shown.length + ' simulation(s) affichée(s) sur ' + all.length + '</p>' : '') + '<div class="table-wrap"><table class="eval"><thead><tr><th>#</th><th class="l">Date</th><th class="l">Stratégie</th><th class="l">Paire</th>' +
       '<th class="l">Période testée</th><th class="l">Durée</th><th class="l">Données</th><th>Levier</th><th>Capital</th><th>Résultat</th><th class="avg-col">Gain moyen</th><th>Par mois</th><th>Retiré</th>' +
       '<th>Trades</th><th>Gagnants</th><th>Drawdown</th><th></th><th></th></tr></thead><tbody>' + rows + '</tbody><tfoot>' + foot + '</tfoot></table></div>';
+  }
+  // ---------- Graphiques et recommandations (sur les simulations affichées) ----------
+  let evalView = 'table';
+  document.querySelectorAll('.eval-views [data-view]').forEach((b) => b.addEventListener('click', () => {
+    evalView = b.dataset.view;
+    document.querySelectorAll('.eval-views [data-view]').forEach((x) => x.setAttribute('aria-selected', x === b));
+    renderEvaluation();
+  }));
+  const pctTxt = (v) => signed(v, num1) + ' %';
+  /** Barres horizontales : résultat médian par groupe (vert gagnant, rouge perdant), avec le détail en clair. */
+  function hbars(title, groups, note) {
+    if (!groups.length) return '';
+    const max = Math.max(1e-9, ...groups.map((g) => Math.abs(g.medianRet)));
+    const neg = groups.some((g) => g.medianRet < 0);
+    return '<section class="eval-chart"><h4>' + esc(title) + '</h4>' + (note ? '<p class="hint">' + note + '</p>' : '') + '<div class="hbars' + (neg ? ' has-neg' : '') + '">' +
+      groups.slice(0, 12).map((g) => {
+        const w = (Math.abs(g.medianRet) / max) * (neg ? 50 : 100);
+        const detail = g.n + ' simulation' + (g.n > 1 ? 's' : '') + ' · ' + Math.round(g.posRate) + ' % gagnantes · drawdown moyen −' + num1.format(g.meanDD) + ' %';
+        return '<div class="hbar" title="' + esc(g.label + ' : médiane ' + pctTxt(g.medianRet) + ' (moyenne ' + pctTxt(g.meanRet) + ') · ' + detail) + '">' +
+          '<div class="hb-label"><span class="nm">' + esc(g.label) + '</span><span class="dt">' + esc(detail) + '</span></div>' +
+          '<div class="hb-track"><span class="hb-fill ' + (g.medianRet >= 0 ? 'up' : 'down') + '" style="' + (neg ? (g.medianRet >= 0 ? 'left:50%;' : 'right:50%;') : 'left:0;') + 'width:' + w.toFixed(1) + '%"></span></div>' +
+          '<div class="hb-val ' + cls(g.medianRet) + '">' + pctTxt(g.medianRet) + '</div></div>';
+      }).join('') + '</div></section>';
+  }
+  function renderEvalCharts(list, filtered) {
+    const A = F.advisor.analyze(list), G = A.groups;
+    $('evalBody').innerHTML = (filtered ? '<p class="eval-count">Graphiques sur les ' + list.length + ' simulations affichées (filtres appliqués).</p>' : '') +
+      '<section class="eval-chart"><h4>Résultat de chaque simulation</h4><p class="hint">Dans l\'ordre où elles ont été lancées ; survolez une barre pour le détail.</p><div id="evalRunsChart"></div></section>' +
+      '<p class="hint">Les barres ci-dessous montrent le résultat <b>médian</b> (la moitié des simulations fait mieux, l\'autre moins bien) : un résultat extrême ne fausse pas la comparaison. La moyenne est dans l\'info-bulle.</p>' +
+      '<div class="eval-charts-grid">' +
+      hbars('Résultat médian par stratégie', G.strategy) +
+      hbars('Résultat médian par paire', G.pair) +
+      hbars('Selon la durée de la période', G.horizon, 'Une stratégie de long terme réussit surtout sur les longues périodes, une de court terme sur les courtes.') +
+      hbars('Selon le retrait', G.withdraw, 'Résultat « compte + retraits ».') +
+      hbars('Selon le levier', G.leverage) +
+      hbars('Selon les données', G.data) + '</div>';
+    // valeurs extrêmes coupées pour que les autres barres restent lisibles (valeur exacte dans l'info-bulle)
+    const absSorted = list.map((e) => Math.abs(e.returnPct)).sort((a, b) => a - b);
+    const cap = Math.max(20, 2 * absSorted[Math.floor(absSorted.length * 0.9)] || 20);
+    const clipped = list.filter((e) => Math.abs(e.returnPct) > cap).length;
+    if (clipped) $('evalRunsChart').insertAdjacentHTML('beforebegin', '<p class="hint">' + clipped + ' barre' + (clipped > 1 ? 's coupées' : ' coupée') + ' à ±' + Math.round(cap) + ' % (résultat extrême, valeur exacte au survol).</p>');
+    F.chart.mountBars($('evalRunsChart'), {
+      labels: list.map((e, i) => '#' + (i + 1)), values: list.map((e) => Math.max(-cap, Math.min(cap, e.returnPct))), format: (v) => num1.format(v) + ' %', height: 200,
+      titles: list.map((e, i) => '#' + (i + 1) + ' ' + e.name + ' · ' + e.pair + ' · ' + frDate(e.from) + ' → ' + frDate(e.to) + ' : ' + pctTxt(e.returnPct) + ', drawdown −' + num1.format(e.maxDrawdownPct) + ' %'),
+      ariaLabel: 'Résultat de chaque simulation',
+    });
+  }
+  function renderEvalReco(list, filtered) {
+    const A = F.advisor.analyze(list);
+    const conf = { forte: 'Confiance forte', moyenne: 'Confiance moyenne', faible: 'Confiance faible' };
+    $('evalBody').innerHTML = '<div class="reco-head"><p>Analyse de ' + (filtered ? 'vos ' + list.length + ' simulations affichées' : 'vos ' + list.length + ' simulations') +
+      ', calculée dans votre navigateur à partir de l\'historique : moyenne, médiane, part de simulations gagnantes et drawdown, en donnant moins de poids aux groupes testés peu de fois. Ce n\'est pas une garantie pour l\'avenir.</p></div>' +
+      A.warnings.map((w) => '<p class="reco-warn">⚠ ' + esc(w) + '</p>').join('') +
+      '<div class="reco-grid">' + A.recos.map((r) => '<article class="reco ' + r.level + '"><header><h4>' + esc(r.title) + '</h4>' + (r.confidence ? '<span class="conf ' + r.confidence + '">' + conf[r.confidence] + '</span>' : '') + '</header>' +
+        (r.pick ? '<p class="pick">' + esc(r.pick) + '</p>' : '') + '<p>' + esc(r.text) + '</p>' +
+        (r.id === 'strategy' ? '<button type="button" class="secondary small" id="recoLoad">Recharger cette stratégie (meilleure simulation)</button>' : '') + '</article>').join('') + '</div>' +
+      '<div class="reco-actions"><button type="button" class="secondary" id="recoBatch">Lancer un lot de tests aléatoires</button>' +
+      '<button type="button" class="secondary danger" id="recoReset">Réinitialiser les évaluations</button></div>';
+    const best = A.groups.strategy && A.groups.strategy[0];
+    const load = $('recoLoad');
+    if (load && best) load.addEventListener('click', () => {
+      const e = best.entries.slice().sort((a, b) => F.advisor.scoreOf(b) - F.advisor.scoreOf(a))[0];
+      const i = evalList().indexOf(e);
+      const btn = document.createElement('button'); btn.dataset.reload = String(i); $('evalBody').appendChild(btn); btn.click();
+    });
+    $('recoReset').addEventListener('click', () => { $('evalClear').click(); $('evalConfirm').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
+    $('recoBatch').addEventListener('click', () => { closeEvaluation(); $('batchCount').focus(); $('batchCount').scrollIntoView({ behavior: 'smooth', block: 'center' }); });
   }
   $('evalScopeCurrent').addEventListener('click', () => setEvalScope('current'));
   $('evalScopeAll').addEventListener('click', () => setEvalScope('all'));

@@ -1,7 +1,7 @@
 /* Tests du moteur : node tests/run-tests.js */
 'use strict';
 const path = require('path');
-for (const f of ['indicators', 'expr', 'trade', 'backtest', 'data', 'presets', 'french', 'enhancer', 'mql5', 'broker']) require(path.join(__dirname, '..', 'js', f + '.js'));
+for (const f of ['indicators', 'expr', 'trade', 'backtest', 'data', 'presets', 'french', 'enhancer', 'mql5', 'broker', 'advisor']) require(path.join(__dirname, '..', 'js', f + '.js'));
 const { indicators: I, rules: R, backtest: B, data: D, presets: P, french: FR, enhancer: E, mql5: MQ, broker: BK } = globalThis.Forexia;
 
 let failed = 0, passed = 0;
@@ -338,6 +338,26 @@ test('Retrait régulier : mensuel, tous les X jours, % / somme / excédent', () 
   const rb = BK.runBrokerBacktest(bb, { longEntry: 'CLOSE > 2' }, { capital: 10000, leverage: 10, sizing: 'fixed', fixedLots: 0.1, maxLots: 1, maxSpreadPips: 0, startIndex: 1,
     withdrawMode: 'periodic', withdrawEvery: 'month', withdrawType: 'pct', withdrawValue: 100 }, { spec });
   near(rb.withdrawals[0].amount, 10000, 1e-6);
+});
+
+test('Recommandations : meilleure stratégie, paire, horizon, retrait', () => {
+  const A = globalThis.Forexia.advisor;
+  const mk = (name, pair, from, to, ret, dd, w) => ({ name, pair, from, to, returnPct: ret, maxDrawdownPct: dd, data: 'Cours BCE', leverage: 10, withdrawn: 0, config: { withdraw: w || { on: false } } });
+  const list = [];
+  // « Tendance » : gagne sur les longues périodes, perd sur les courtes ; « RSI » : moyen partout
+  for (let k = 0; k < 6; k++) list.push(mk('Tendance', 'EUR/USD', '2019-01-01', '2021-01-01', 30 + k, 10));
+  for (let k = 0; k < 2; k++) list.push(mk('Tendance', 'EUR/USD', '2022-01-01', '2022-03-01', -3 - k, 4));
+  // un résultat extrême ne doit pas faire gagner une stratégie perdante la plupart du temps
+  list.push(mk('Chanceuse', 'USD/JPY', '2019-01-01', '2020-01-01', 1600, 60), mk('Chanceuse', 'USD/JPY', '2020-01-01', '2021-01-01', -40, 50), mk('Chanceuse', 'USD/JPY', '2021-01-01', '2022-01-01', -45, 55));
+  for (let k = 0; k < 4; k++) list.push(mk('RSI', 'GBP/USD', '2019-01-01', '2020-01-01', 2, 8, { on: true, mode: 'periodic', every: 'month', type: 'fixed', value: 100 }));
+  list.push(mk('Tendance', 'GBP/USD', '2019-01-01', '2021-01-01', -20, 30));
+  const r = A.analyze(list), by = (id) => r.recos.find((x) => x.id === id);
+  eq(by('strategy').pick, 'Tendance'); eq(by('pair').pick, 'EUR/USD');
+  eq(by('horizon').pick, A.HORIZON_LABEL.long);
+  if (!by('withdraw') || !/Régulier|Sans retrait/.test(by('withdraw').pick)) throw new Error('retrait');
+  eq(A.horizonOf(mk('x', 'a', '2024-01-01', '2024-03-31', 0, 0)), 'court');
+  eq(A.withdrawOf(mk('x', 'a', '2024-01-01', '2024-02-01', 0, 0, { on: true, pct: 20, share: 100, when: 'immediate' })).kind, 'gain');
+  eq(A.analyze([]).recos.length, 0);
 });
 
 console.log('Données');

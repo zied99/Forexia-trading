@@ -206,6 +206,17 @@ qui n'ont pas servi à la choisir (contrôle « walk-forward ») ; elle est « c
   affiché, puis **Ajouter à la stratégie** : la règle devient `CROSS_UP(CLOSE, 1.0850)`, `CLOSE > LINE(t1, prix1, t2, prix2)`…
   (`LINE` = la droite qui passe par les deux points, prolongée vers la droite), reprise telle quelle par l'EA MT5.
 
+## Évaluation : graphiques, recommandations et lots de tests
+
+- **Lot de tests aléatoires** (section « Période de backtesting ») : N backtests de la stratégie, chacun sur une période tirée
+  au hasard (avec la contrainte « au moins / au plus » choisie), tous enregistrés dans « Évaluation ». Bouton « Arrêter » en cours de lot.
+- **Graphiques** : résultat de chaque simulation, puis résultat **médian** par stratégie, paire, durée de période, retrait,
+  levier et source de données (la médiane n'est pas faussée par un résultat extrême ; la moyenne est dans l'info-bulle).
+- **Recommandations** : meilleure stratégie, meilleure paire, court ou long terme, quel retrait (au seuil, régulier, aucun),
+  quel levier, avec un niveau de confiance selon le nombre de simulations. Calcul local et transparent (médiane, part de
+  simulations gagnantes, drawdown, moins de poids aux groupes peu testés), pas un modèle d'IA externe ni une garantie.
+  Bouton « Réinitialiser les évaluations ».
+
 ## Calendrier économique (1.2)
 
 Le calendrier vient de **MetaTrader 5** : la passerelle (1.5 ou plus) compile et lance un petit script MQL5 (`ForexiaCalendar`)
