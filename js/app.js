@@ -2178,6 +2178,7 @@
       rules: [c.strat.longEntry, c.strat.longExit, c.strat.shortEntry, c.strat.shortExit, c.strat.stopLossPips, c.strat.takeProfitPips].concat(TM_FIELDS.map((f) => c.strat[f] || 0)).join('|'),
       strategy: c.strat, config: c.config,
     };
+    if (evalTag) entry.tag = evalTag;
     entry.key = entry.at + '|' + entry.name;
     const list = evalList();
     const last = list[list.length - 1];
@@ -2254,7 +2255,7 @@
     const p = (v) => '<span class="' + cls(v) + '">' + signed(v, num2) + ' %</span>';
     const rows = shown.map(({ e, i }) => '<tr>' +
       '<td>' + (i + 1) + '</td><td class="l">' + new Date(e.at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) + '</td>' +
-      '<td class="name" title="' + esc(e.name) + '">' + esc(e.name) + '</td><td class="l">' + esc(e.pair) + '</td>' +
+      '<td class="name" title="' + esc(e.name + (e.tag ? ' — ' + e.tag : '')) + '">' + esc(e.name) + (e.tag ? '<small class="eval-tag">' + esc(e.tag) + '</small>' : '') + '</td><td class="l">' + esc(e.pair) + '</td>' +
       '<td class="l">' + frDate(e.from) + ' → ' + frDate(e.to) + '</td><td class="l" title="' + durationDays(e.from, e.to) + ' jours">' + durationLabel(e.from, e.to) + '</td>' +
       '<td class="l">' + esc(e.data) + '</td>' +
       '<td>1:' + e.leverage + '</td><td>' + money.format(e.capital) + '</td>' +
@@ -2297,7 +2298,8 @@
   function renderEvalCharts(list, filtered) {
     const A = F.advisor.analyze(list), G = A.groups;
     $('evalBody').innerHTML = (filtered ? '<p class="eval-count">Graphiques sur les ' + list.length + ' simulations affichées (filtres appliqués).</p>' : '') +
-      '<section class="eval-chart"><h4>Résultat de chaque simulation</h4><p class="hint">Dans l\'ordre où elles ont été lancées ; survolez une barre pour le détail.</p><div id="evalRunsChart"></div></section>' +
+      '<section class="eval-chart"><h4>Résultat de chaque simulation</h4><p class="hint">Dans l\'ordre où elles ont été lancées ; survolez une barre pour le détail.</p><div id="evalRunsChart"></div>' +
+      checkToolsHtml(list) + '</section>' +
       '<p class="hint">Les barres ci-dessous montrent le résultat <b>médian</b> (la moitié des simulations fait mieux, l\'autre moins bien) : un résultat extrême ne fausse pas la comparaison. La moyenne est dans l\'info-bulle.</p>' +
       '<div class="eval-charts-grid">' +
       hbars('Résultat médian par stratégie', G.strategy) +
@@ -2317,6 +2319,121 @@
       ariaLabel: 'Résultat de chaque simulation',
     });
   }
+  // ---------- Vérifier long terme / court terme sur les simulations affichées ----------
+  let evalTag = '', checkRunning = false, checkStop = false, checkReport = '';
+  const MONTH_CHOICES = [[1, '1 mois'], [2, '2 mois'], [3, '3 mois'], [6, '6 mois'], [12, '1 an'], [24, '2 ans']];
+  function monthsSelect(id, def, list) {
+    return '<select id="' + id + '">' + list.map(([m, l]) => '<option value="' + m + '"' + (m === def ? ' selected' : '') + '>' + l + '</option>').join('') + '<option value="x">x mois…</option></select>';
+  }
+  function checkToolsHtml(list) {
+    const base = list.filter((e) => !e.tag); // les simulations déjà prolongées / découpées ne sont pas reprises
+    const red = base.filter((e) => e.returnPct <= 0).length, green = base.length - red;
+    const which = (id, def) => '<select id="' + id + '"><option value="red"' + (def === 'red' ? ' selected' : '') + '>rouges (' + red + ')</option><option value="green"' + (def === 'green' ? ' selected' : '') + '>vertes (' + green + ')</option><option value="all"' + (def === 'all' ? ' selected' : '') + '>toutes (' + list.length + ')</option></select>';
+    return '<div class="check-tools">' +
+      '<div class="check-row"><b>Long terme ?</b> Prolonger les simulations ' + which('extWhich', 'red') + ' de ' + monthsSelect('extMonths', 6, MONTH_CHOICES.slice(2)) +
+      '<button type="button" class="secondary small" id="extRun">Prolonger</button>' +
+      '<span class="hint">Même début, fin repoussée : une stratégie de long terme doit rattraper ses pertes avec le temps.</span></div>' +
+      '<div class="check-row"><b>Court terme ?</b> Découper les simulations ' + which('cutWhich', 'all') + ' en tranches de ' + monthsSelect('cutMonths', 1, MONTH_CHOICES.slice(0, 4)) +
+      '<button type="button" class="secondary small" id="cutRun">Découper</button>' +
+      '<span class="hint">Chaque tranche est simulée seule : une stratégie de court terme doit gagner sur la plupart des tranches.</span></div>' +
+      '<p class="hint" id="checkStatus"></p>' + (checkReport ? '<div class="check-report">' + checkReport + '</div>' : '') + '</div>';
+  }
+  function monthsValue(id) {
+    const v = $(id).value;
+    if (v !== 'x') return +v;
+    const x = Math.round(Number(prompt('Nombre de mois :', '9')));
+    return x >= 1 && x <= 120 ? x : 0;
+  }
+  const isoD = (d) => F.data.iso(d), dateOf = (s) => new Date(s.slice(0, 10) + 'T00:00:00Z');
+  /** Relance une simulation de l'historique (même stratégie, mêmes réglages) sur d'autres dates ; renvoie ses statistiques. */
+  async function rerunEntry(e, from, to, tag) {
+    loadStrategy(e.strategy);
+    applyConfig(Object.assign({}, e.config, { period: 'custom', dateFrom: isoD(from), dateTo: isoD(to) }));
+    document.querySelector('input[name=period][value=custom]').checked = true;
+    $('dateFrom').value = isoD(from); $('dateTo').value = isoD(to);
+    evalTag = tag;
+    try { const ok = await runFromForm(); return ok && lastRun ? lastRun.stats : null; } finally { evalTag = ''; }
+  }
+  async function runChecks(kind) {
+    if (checkRunning) { checkStop = true; return; }
+    const shown = evalFiltered(evalList()).map((x) => x.e);
+    const which = $(kind === 'ext' ? 'extWhich' : 'cutWhich').value;
+    const sel = shown.filter((e) => e.strategy && e.config && !e.tag && (which === 'all' || (which === 'red' ? e.returnPct <= 0 : e.returnPct > 0)));
+    const months = monthsValue(kind === 'ext' ? 'extMonths' : 'cutMonths');
+    if (!months) return;
+    if (!sel.length) { $('checkStatus').textContent = 'Aucune simulation à vérifier (les simulations déjà prolongées ou découpées ne sont pas reprises).'; return; }
+    const saved = captureForm(), today = dateOf(todayIso()), DAYMS = 864e5;
+    // tâches : une prolongation par simulation, ou toutes les tranches de chaque simulation
+    const jobs = [];
+    for (const e of sel) {
+      const idx = evalList().findIndex((x) => x.key === e.key) + 1, f0 = dateOf(e.from), t0 = dateOf(e.to);
+      if (kind === 'ext') {
+        let to = F.data.addMonths(t0, months), from = f0;
+        if (to > today) { const lack = to - today; to = today; from = new Date(f0.getTime() - lack); } // pas d'avenir : on recule le début
+        jobs.push({ e: e, idx: idx, from: from, to: to, tag: 'prolongée +' + months + ' mois (de #' + idx + ')' });
+      } else {
+        for (let a = f0; a < t0;) {
+          const b = new Date(Math.min(Math.max(F.data.addMonths(a, months).getTime() - DAYMS, a.getTime() + 30 * DAYMS), t0.getTime()));
+          if (b - a >= 30 * DAYMS) jobs.push({ e: e, idx: idx, from: a, to: b, tag: 'tranche ' + months + ' mois de #' + idx });
+          a = new Date(b.getTime() + DAYMS);
+        }
+      }
+    }
+    if (jobs.length > 150 && !confirm(jobs.length + ' simulations à lancer : continuer ?')) return;
+    checkRunning = true; checkStop = false;
+    const btn = $(kind === 'ext' ? 'extRun' : 'cutRun'); btn.textContent = 'Arrêter';
+    const out = new Map();
+    try {
+      for (let k = 0; k < jobs.length && !checkStop; k++) {
+        const j = jobs[k];
+        if ($('checkStatus')) $('checkStatus').textContent = (kind === 'ext' ? 'Prolongation ' : 'Tranche ') + (k + 1) + ' sur ' + jobs.length + '…';
+        const st = await rerunEntry(j.e, j.from, j.to, j.tag);
+        if (!out.has(j.e)) out.set(j.e, []);
+        out.get(j.e).push({ from: j.from, to: j.to, st: st });
+        await new Promise((r) => setTimeout(r, 20));
+      }
+    } finally {
+      checkRunning = false;
+      // le formulaire revient à son état d'avant la vérification
+      restoring = true;
+      try { loadStrategy(saved.strat); applyConfig(saved.config); $('style').value = saved.style; $('preset').value = [...$('preset').options].some((o) => o.value === saved.preset) ? saved.preset : 'mine'; $('presetDesc').textContent = saved.desc; updateWithdrawUI(); syncFormState(); }
+      finally { restoring = false; }
+    }
+    // rapport
+    const p = (v) => '<span class="' + cls(v) + '">' + signed(v, num1) + ' %</span>';
+    let rows = '', good = 0, total = 0;
+    for (const [e, rs] of out) {
+      const idx = evalList().findIndex((x) => x.key === e.key) + 1;
+      if (kind === 'ext') {
+        const r = rs[0]; if (!r.st) continue; total++;
+        const ok = r.st.returnPct > 0; if (ok) good++;
+        rows += '<tr><td>#' + idx + '</td><td class="l">' + frDate(e.from) + ' → ' + frDate(e.to) + '</td><td>' + p(e.returnPct) + '</td><td class="l">' + frDate(isoD(r.from)) + ' → ' + frDate(isoD(r.to)) +
+          '</td><td>' + p(r.st.returnPct) + '</td><td class="l">' + (ok ? (e.returnPct <= 0 ? '✓ pertes rattrapées' : '✓ reste gagnante') : e.returnPct > 0 ? '✗ gain perdu' : '✗ toujours perdante') + '</td></tr>';
+      } else {
+        const ok = rs.filter((r) => r.st), pos = ok.filter((r) => r.st.returnPct > 0).length; if (!ok.length) continue;
+        total += ok.length; good += pos;
+        const med = ok.map((r) => r.st.returnPct).sort((a, b) => a - b)[ok.length >> 1];
+        rows += '<tr><td>#' + idx + '</td><td class="l">' + frDate(e.from) + ' → ' + frDate(e.to) + '</td><td>' + p(e.returnPct) + '</td><td>' + ok.length + '</td><td>' + pos + ' / ' + ok.length +
+          '</td><td>' + p(med) + '</td></tr>';
+      }
+    }
+    const rate = total ? Math.round((good / total) * 100) : 0;
+    const verdict = kind === 'ext'
+      ? (rate >= 60 ? 'Prolongées, ' + good + ' sur ' + total + ' finissent gagnantes : la stratégie se comporte comme une stratégie de <b>long terme</b> (les pertes se rattrapent avec le temps).'
+        : 'Prolongées, seulement ' + good + ' sur ' + total + ' finissent gagnantes : allonger la durée ne suffit pas, ce n\'est pas (seulement) une question de long terme.')
+      : (rate >= 60 ? good + ' tranches gagnantes sur ' + total + ' (' + rate + ' %) : la stratégie fonctionne aussi sur des périodes <b>courtes</b>.'
+        : 'Seulement ' + good + ' tranches gagnantes sur ' + total + ' (' + rate + ' %) : sur des périodes courtes, le résultat dépend beaucoup du moment ; plutôt une stratégie de long terme (ou à revoir).');
+    checkReport = '<p class="val ' + (rate >= 60 ? 'ok' : 'ko') + '">' + verdict + (checkStop ? ' (vérification arrêtée avant la fin)' : '') + '</p><div class="table-wrap"><table class="eval mini">' +
+      (kind === 'ext' ? '<thead><tr><th>#</th><th class="l">Période d\'origine</th><th>Résultat</th><th class="l">Période prolongée (+' + months + ' mois)</th><th>Résultat</th><th class="l">Verdict</th></tr></thead>'
+        : '<thead><tr><th>#</th><th class="l">Période d\'origine</th><th>Résultat</th><th>Tranches de ' + months + ' mois</th><th>Gagnantes</th><th>Médiane</th></tr></thead>') +
+      '<tbody>' + rows + '</tbody></table></div><p class="hint">Les simulations relancées sont enregistrées dans le tableau, marquées « ' + (kind === 'ext' ? 'prolongée' : 'tranche') + ' ».</p>';
+    logEvent('evaluation.check', (kind === 'ext' ? 'Prolongation de ' : 'Découpage de ') + out.size + ' simulations : ' + good + '/' + total + ' gagnantes', { kind: kind, months: months });
+    if (!$('evalModal').hidden) renderEvaluation();
+  }
+  $('evalBody').addEventListener('click', (ev) => {
+    if (ev.target.id === 'extRun') runChecks('ext');
+    if (ev.target.id === 'cutRun') runChecks('cut');
+  });
   function renderEvalReco(list, filtered) {
     const A = F.advisor.analyze(list);
     const conf = { forte: 'Confiance forte', moyenne: 'Confiance moyenne', faible: 'Confiance faible' };
