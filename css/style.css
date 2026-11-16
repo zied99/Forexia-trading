@@ -475,3 +475,16 @@ a.btn-link:hover { border-color: var(--accent); color: var(--accent); }
 .lg-up { color: var(--up); font-weight: 600; } .lg-blue { color: #2563eb; font-weight: 600; }
 .chart .bar-top { font-size: 10.5px; fill: var(--muted); font-weight: 600; pointer-events: auto; }
 .check-row input#capValue { width: 110px; min-height: 32px; padding: 3px 8px; font-size: 13px; }
+.chart .bar-hit { fill: transparent; cursor: pointer; }
+.chart .bar-hit:hover { fill: var(--accent); fill-opacity: .06; }
+.chart .selected { fill: none; stroke: var(--accent); stroke-width: 2; }
+.bar-hint { margin: 4px 0 0; }
+.bar-panel { margin-top: 10px; border: 2px solid var(--accent); border-radius: 12px; padding: 10px 12px; background: var(--panel); display: grid; gap: 8px; }
+.bar-panel .bp-head { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; font-size: 13px; }
+.bar-panel .bp-close { margin-left: auto; min-height: 0; padding: 2px 8px; }
+.bar-panel .bp-row { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; font-size: 13px; }
+.bar-panel .bp-row b { min-width: 130px; }
+.bar-panel select, .bar-panel input { width: auto; min-height: 32px; padding: 3px 8px; font-size: 13px; }
+.bar-panel input { width: 110px; }
+.bar-panel .hint { margin: 0; }
+.chart .bar-hit.dragsel { fill: var(--accent); fill-opacity: .14; }

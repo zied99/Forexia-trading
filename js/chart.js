@@ -270,6 +270,7 @@
     const slot = innerW / Math.max(1, n), bw = Math.max(2, Math.min(38, slot * 0.68));
     // barres « fantômes » en pointillé (ex. résultat après prolongation), et barre en cours de calcul
     const ghostAt = new Map((opts.ghosts || []).map((g) => [g.i, g]));
+    const hits = [];
     const stars = new Set(opts.stars || []);
     const every = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(innerW / 64))));
     for (let i = 0; i < n; i++) {
@@ -291,6 +292,14 @@
         tl.textContent = slot < 34 ? opts.topLabels[i].short : opts.topLabels[i].long;
         if (opts.titles) { const ti = el('title', {}, tl); ti.textContent = opts.titles[i]; }
       }
+      if (opts.selected && opts.selected.includes(i)) el('rect', { x: cx - bw / 2 - 5, y: m.t - 2, width: bw + 10, height: innerH + 4, rx: 4, class: 'selected' }, svg);
+      if (opts.onBarClick) {
+        // zone cliquable sur toute la hauteur de la colonne ; glisser pour sélectionner plusieurs barres
+        const hz = el('rect', { x: cx - slot / 2, y: 0, width: slot, height: H, class: 'bar-hit' }, svg);
+        hz.dataset.i = i;
+        if (opts.titles) { const ti = el('title', {}, hz); ti.textContent = opts.titles[i] + ' — cliquer pour modifier (glisser ou Ctrl+clic pour en choisir plusieurs)'; }
+        hits.push(hz);
+      }
       if (opts.pending === i) el('rect', { x: cx - bw / 2 - 4, y: m.t, width: bw + 8, height: innerH, rx: 3, class: 'pending' }, svg);
       if (stars.has(i)) {
         const sy = top - 9;
@@ -308,14 +317,33 @@
       }
     }
   }
+  // Sélection à la souris : clic, ou appui maintenu en glissant sur plusieurs barres
+  function wireBarSelection(container, opts) {
+    const svg = container.querySelector('svg');
+    if (!svg || !opts.onBarClick) return;
+    let start = null, cur = null;
+    const hitAt = (ev) => { const t = document.elementFromPoint(ev.clientX, ev.clientY); return t && t.classList && t.classList.contains('bar-hit') ? +t.dataset.i : null; };
+    const paint = () => svg.querySelectorAll('.bar-hit').forEach((h) => h.classList.toggle('dragsel', start !== null && cur !== null && +h.dataset.i >= Math.min(start, cur) && +h.dataset.i <= Math.max(start, cur)));
+    svg.addEventListener('pointerdown', (ev) => { const i = hitAt(ev); if (i === null || ev.button !== 0) return; start = cur = i; paint(); ev.preventDefault(); });
+    svg.addEventListener('pointermove', (ev) => { if (start === null) return; const i = hitAt(ev); if (i !== null && i !== cur) { cur = i; paint(); } });
+    const end = (ev) => {
+      if (start === null) return;
+      const a = start, b = cur; start = cur = null; paint();
+      if (a === b) opts.onBarClick(a, ev); else if (opts.onBarRange) opts.onBarRange(Math.min(a, b), Math.max(a, b), ev);
+    };
+    svg.addEventListener('pointerup', end);
+    svg.addEventListener('pointerleave', (ev) => { if (start !== null) end(ev); });
+  }
   function mountBars(container, opts) {
     renderBars(container, opts);
+    wireBarSelection(container, opts);
     if (container._ro) container._ro.disconnect();
     let lastW = container.clientWidth;
     container._ro = new ResizeObserver(() => {
       if (Math.abs(container.clientWidth - lastW) < 2) return;
       lastW = container.clientWidth;
       renderBars(container, opts);
+      wireBarSelection(container, opts);
     });
     container._ro.observe(container);
   }

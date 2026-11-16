@@ -100,21 +100,26 @@
   }
   function hash(s) { let h = 2166136261; for (const c of s) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
 
+  // Données simulées : une seule série par paire, générée depuis une date fixe, pour que la même date donne
+  // toujours le même prix quelle que soit la période demandée (relancer ou prolonger une simulation reste comparable).
+  const SYNTH_ORIGIN = Date.UTC(1995, 0, 2);
   function generateSynthetic(pair, from, to) {
-    const rand = rng(hash(pair + iso(to)));
+    const rand = rng(hash('synth|' + pair));
     const gauss = () => { const u = rand() || 1e-9, v = rand(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
     const dailyVol = (/JPY/.test(pair) ? 0.0065 : 0.005);
-    let price = TYPICAL[pair] || 1, drift = 0;
-    const bars = [];
-    for (let d = new Date(from); d <= to; d = addDays(d, 1)) {
+    const typical = TYPICAL[pair] || 1;
+    let price = typical, drift = 0;
+    const bars = [], fromT = new Date(from).getTime();
+    for (let d = new Date(Math.min(SYNTH_ORIGIN, fromT)); d <= to; d = addDays(d, 1)) {
       const wd = d.getUTCDay();
       if (wd === 0 || wd === 6) continue;
       drift = 0.97 * drift + 0.03 * gauss() * dailyVol * 0.6; // régimes de tendance
       const open = price;
-      const close = open * Math.exp(drift + gauss() * dailyVol);
+      // léger rappel vers le prix habituel de la paire, pour rester réaliste sur 30 ans
+      const close = open * Math.exp(drift + gauss() * dailyVol - 0.0015 * Math.log(open / typical));
       const high = Math.max(open, close) * (1 + Math.abs(gauss()) * dailyVol * 0.5);
       const low = Math.min(open, close) * (1 - Math.abs(gauss()) * dailyVol * 0.5);
-      bars.push({ date: iso(d), open: open, high: high, low: low, close: close });
+      if (d.getTime() >= fromT) bars.push({ date: iso(d), open: open, high: high, low: low, close: close });
       price = close;
     }
     return bars;

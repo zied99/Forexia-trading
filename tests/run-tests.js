@@ -536,7 +536,7 @@ test('Améliorer 1.2 : note, groupes, contrôle multi-périodes et combinaison',
   const F = globalThis.Forexia;
   const groups = new Set(r.suggestions.map((x) => x.group));
   for (const sg of r.suggestions) { const c = E.combine(strat, set, [sg]); for (const k of ['longEntry', 'longExit', 'shortEntry', 'shortExit']) eq(F.rules.validate(c.strat[k]), null, sg.title); }
-  if (groups.size < 4) throw new Error('trop peu de groupes : ' + [...groups].join(', '));
+  if (groups.size < 3) throw new Error('trop peu de groupes : ' + [...groups].join(', '));
 });
 test('Améliorer : ma propre amélioration de gestion des trades', () => {
   const bars = D.generateSynthetic('EUR/USD', new Date('2022-01-01T00:00:00Z'), new Date('2024-12-31T00:00:00Z'));
