@@ -193,6 +193,11 @@ qui n'ont pas servi à la choisir (contrôle « walk-forward ») ; elle est « c
 
 ## Graphique : indicateurs et repères dessinés
 
+- **Unités de temps** (comme MT4 / MT5) : M1 … H4, D1, W1, MN au-dessus du graphique des cours. Avec les données du courtier,
+  chaque unité est demandée directement à MT5 ; avec les cours BCE (journaliers), D1, W1 et MN sont regroupés à partir des jours.
+- **Historique** : période testée, 1 an, 3 ans, 10 ans ou tout (depuis 1999 en BCE) ; la période testée reste grisée.
+  Molette : zoom ; glisser : défiler ; ⟲ : revenir à l'historique choisi. Pratique pour tracer des tendances de long terme :
+  un repère dessiné en W1 se retrouve au même endroit en D1 ou H4.
 - **+ Indicateur** (au-dessus du graphique des cours) : RSI, MACD, stochastique, ADX, ATR… s'affichent chacun dans un panneau
   sous la courbe ; moyennes, Bollinger, SuperTrend… se superposent aux cours. Le × retire un indicateur. « Autre (formule) » accepte
   toute expression (`RSI(9)`, `ATR(14) / CLOSE * 100`…).

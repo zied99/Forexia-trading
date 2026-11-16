@@ -75,6 +75,12 @@
         tx.textContent = fmt(t);
       }
       el('rect', { x: m.l, y: t0, width: innerW, height: h, class: 'frame' }, g);
+      // zone grisée (ex. période testée) : opts.shade = {from, to, label}
+      if (opts.shade && opts.shade.to >= opts.shade.from && !panelInfo.length) {
+        const x0 = x(Math.max(0, opts.shade.from)), x1 = x(Math.min(n - 1, opts.shade.to));
+        el('rect', { x: x0, y: t0, width: Math.max(1, x1 - x0), height: h, class: 'shade' }, g);
+        if (opts.shade.label && x1 - x0 > 90) { const st = el('text', { x: x0 + 6, y: t0 + h - 6, class: 'shade-label' }, g); st.textContent = opts.shade.label; }
+      }
       for (const r of p.refLines || []) {
         el('line', { x1: m.l, x2: m.l + innerW, y1: y(r.value), y2: y(r.value), class: 'ref' + (r.strong ? ' strong' : ''), style: 'stroke:' + (r.color || 'var(--muted)') }, g);
         if (r.label) {
@@ -103,7 +109,8 @@
           // numéro du repère au dernier point visible dans le cadre
           const last = s.values.reduce((k, v, i) => (Number.isFinite(v) && v >= lo && v <= hi ? i : k), -1);
           if (last >= 0) {
-            const tl = el('text', { x: x(last) - 4, y: y(s.values[last]) - 5, class: 'ref-label', 'text-anchor': 'end', style: 'fill:' + s.color }, g);
+            const ly = y(s.values[last]) - 5 < t0 + 12 ? y(s.values[last]) + 14 : y(s.values[last]) - 5;
+            const tl = el('text', { x: x(last) - 4, y: ly, class: 'ref-label', 'text-anchor': 'end', style: 'fill:' + s.color }, g);
             tl.textContent = s.label;
           }
         }
@@ -204,6 +211,22 @@
         dr.onPoint(pt.i, P0.inv(pt.py));
       });
     } else hit.addEventListener('pointerdown', move);
+    // Zoom (molette) et défilement (glisser) : opts.onZoom(facteur, position 0..1), opts.onPan(décalage en fraction de largeur)
+    const frac = (ev) => { const r = svg.getBoundingClientRect(); return Math.max(0, Math.min(1, ((((ev.clientX - r.left) / r.width) * W) - m.l) / innerW)); };
+    if (opts.onZoom) {
+      hit.addEventListener('wheel', (ev) => { ev.preventDefault(); opts.onZoom(ev.deltaY > 0 ? 1.25 : 0.8, frac(ev)); }, { passive: false });
+    }
+    if (opts.onPan && !dr) {
+      let start = null;
+      hit.addEventListener('pointerdown', (ev) => { if (ev.pointerType === 'mouse' && ev.button === 0) { start = frac(ev); svg.classList.add('panning'); } });
+      const end = (ev) => {
+        if (start === null) return;
+        const d = frac(ev) - start; start = null; svg.classList.remove('panning');
+        if (Math.abs(d) > 0.01) opts.onPan(-d);
+      };
+      hit.addEventListener('pointerup', end);
+      hit.addEventListener('pointerleave', end);
+    }
     hit.addEventListener('pointerleave', () => { cross.setAttribute('visibility', 'hidden'); tip.hidden = true; });
   }
 

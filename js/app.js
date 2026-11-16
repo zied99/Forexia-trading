@@ -832,6 +832,12 @@
       '<span><i style="background:var(--muted)"></i>Capital initial</span></div></div><div id="equityChart"></div></div>';
 
     html += '<div class="panel card"><div class="card-head"><h3>Cours et positions</h3><div class="legend" id="priceLegend"></div></div>' +
+      '<div class="chart-tools"><div class="tf-bar" id="tfBar" role="group" aria-label="Unité de temps du graphique"></div>' +
+      '<select id="histPick" aria-label="Historique affiché"><option value="test">Période testée</option><option value="1y">1 an</option><option value="3y">3 ans</option>' +
+      '<option value="10y">10 ans</option><option value="all">Tout l\'historique</option></select>' +
+      '<button type="button" class="chip" id="zoomOut" title="Dézoomer">−</button><button type="button" class="chip" id="zoomIn" title="Zoomer">+</button>' +
+      '<button type="button" class="chip" id="zoomReset" title="Revenir à l\'historique choisi">⟲</button></div>' +
+      '<p class="hint" id="chartNote"></p>' +
       '<div class="chart-tools"><select id="indPick" aria-label="Ajouter un indicateur"><option value="">+ Indicateur…</option>' +
       IND_CHOICES.map(([g, list]) => '<optgroup label="' + g + '">' + list.map((x) => '<option value="' + esc(x[1]) + '">' + esc(x[0]) + '</option>').join('') + '</optgroup>').join('') +
       '<option value="?">Autre (formule)…</option></select><span id="indChips"></span></div>' +
@@ -898,37 +904,74 @@
       }],
     });
 
-    // Graphique des cours, indicateurs et trades (redessiné seul quand on ajoute un indicateur ou un repère)
+    // Graphique des cours, indicateurs et trades : unité de temps, historique et zoom au choix (comme MT4 / MT5).
     const ctxR = F.rules.makeContext(bars);
-    chartView = { bars: bars, st: st, ctxR: ctxR, pair: settings.pair, dec: dec, pfmt: pfmt };
-    drawPrice = () => {
+    const baseTf = loaded.timeframe || 'D1';
+    chartView = {
+      bars: bars, st: st, ctxR: ctxR, pair: settings.pair, dec: dec, pfmt: pfmt, baseTf: baseTf, src: config.source,
+      symbol: settings.symbol || loaded.symbol || $('brokerSymbol').value, runT: ctxR.t, testFromT: ctxR.t[st], testToT: ctxR.t[ctxR.t.length - 1],
+      trades: result.trades, visT: [],
+    };
+    if (chartState.pair !== settings.pair || chartState.baseTf !== baseTf || chartState.src !== config.source) {
+      Object.assign(chartState, { pair: settings.pair, baseTf: baseTf, src: config.source, tf: baseTf, hist: 'test', win: null });
+    }
+    let drawToken = 0;
+    drawPrice = async () => {
+    const token = ++drawToken;
+    renderChartTools();
+    let got;
+    try { got = await chartBars(); } catch (e) { got = { bars: bars, tf: baseTf, note: 'Historique indisponible : ' + e.message }; chartState.tf = baseTf; }
+    if (token !== drawToken) return;
+    const cb = got.bars, ctxC = F.rules.makeContext(cb), tC = ctxC.t;
+    const endT = tC[tC.length - 1];
+    const def = { t0: Math.max(tC[0], histFrom()), t1: endT };
+    const win = chartState.win || def;
+    let i0 = tC.findIndex((t) => t >= win.t0); if (i0 < 0) i0 = 0;
+    let i1 = tC.length - 1; while (i1 > 0 && tC[i1] > win.t1) i1--;
+    if (i1 - i0 < 10) { i0 = Math.max(0, i1 - 10); }
+    let capped = false;
+    if (!chartState.win && i1 - i0 > 2000) { i0 = i1 - 2000; capped = true; } // comme MT4 : les plus récentes d'abord
+    chartView.cbFirstT = tC[0]; chartView.cbLastT = endT; chartView.win = { t0: tC[i0], t1: tC[i1] };
+    const vis = cb.slice(i0, i1 + 1), visT = tC.slice(i0, i1 + 1);
+    chartView.visT = visT;
+    const vdates = vis.map((b) => b.date);
     const overlays = [], oscillators = [];
-    const closes = view.map((b) => b.close);
+    const closes = vis.map((b) => b.close);
     const pMin = Math.min(...closes), pMax = Math.max(...closes);
     let colorIdx = 0;
     for (const expr of splitTopLevel($('plots').value || '')) {
       let values;
-      try { values = F.rules.evaluateSeries(expr, ctxR).slice(st); } catch (e) { continue; }
+      try { values = F.rules.evaluateSeries(expr, ctxC).slice(i0, i1 + 1); } catch (e) { continue; }
       const finite = values.filter(Number.isFinite).sort((a, b) => a - b);
       if (!finite.length) continue;
       const med = finite[Math.floor(finite.length / 2)];
       const ser = { name: expr.replace(/\s+/g, ''), values: values, color: SERIES_COLORS[colorIdx++ % SERIES_COLORS.length], width: 1.4 };
       if (med > pMin * 0.7 && med < pMax * 1.3) overlays.push(ser); else oscillators.push(ser);
     }
-    const markers = [];
+    // trades placés sur la bougie (de l'unité affichée) qui contient leur heure
+    const idxOf = (t) => { let lo = 0, hi = visT.length - 1, r = -1; while (lo <= hi) { const m = (lo + hi) >> 1; if (visT[m] <= t) { r = m; lo = m + 1; } else hi = m - 1; } return r; };
+    const markers = [], tipAt = new Map();
+    const inView = (t) => t >= visT[0] && t <= visT[visT.length - 1] + (F.data.TF_SECONDS[got.tf] || 86400);
     for (const t of result.trades) {
-      const ei = t.entryIndex - st, xi = t.exitIndex - st;
-      markers.push({ i: ei, value: t.entryPrice, shape: t.dir > 0 ? 'up' : 'down', color: t.dir > 0 ? 'var(--up)' : 'var(--down)',
-        title: (t.dir > 0 ? 'Achat' : 'Vente') + ' ' + frDate(t.entryDate) + ' à ' + pfmt(t.entryPrice) });
-      markers.push({ i: xi, value: t.exitPrice, shape: 'dot', color: t.pnl > 0 ? 'var(--up)' : 'var(--down)',
-        title: 'Sortie (' + t.reason + ') ' + frDate(t.exitDate) + ' à ' + pfmt(t.exitPrice) + ' : ' + signed(t.pnl, money) });
+      const te = chartView.runT[t.entryIndex], tx = chartView.runT[t.exitIndex];
+      if (inView(te)) {
+        const ei = idxOf(te);
+        markers.push({ i: ei, value: t.entryPrice, shape: t.dir > 0 ? 'up' : 'down', color: t.dir > 0 ? 'var(--up)' : 'var(--down)',
+          title: (t.dir > 0 ? 'Achat' : 'Vente') + ' ' + frDate(t.entryDate) + ' à ' + pfmt(t.entryPrice) });
+        tipAt.set(ei, '<b class="' + (t.dir > 0 ? 'pos' : 'neg') + '">' + (t.dir > 0 ? '▲ Achat' : '▼ Vente') + '</b>');
+      }
+      if (inView(tx)) {
+        const xi = idxOf(tx);
+        markers.push({ i: xi, value: t.exitPrice, shape: 'dot', color: t.pnl > 0 ? 'var(--up)' : 'var(--down)',
+          title: 'Sortie (' + t.reason + ') ' + frDate(t.exitDate) + ' à ' + pfmt(t.exitPrice) + ' : ' + signed(t.pnl, money) });
+        tipAt.set(xi, '<b class="' + cls(t.pnl) + '">● Sortie : ' + signed(t.pnl, money) + '</b>');
+      }
     }
-    const tView = ctxR.t.slice(st);
     const drawSeries = drawingsFor(settings.pair).map((d, k) => ({
-      name: drawingName(d, k), values: tView.map((t) => drawingValue(d, t)), color: DRAW_COLORS[k % DRAW_COLORS.length],
+      name: drawingName(d, k), values: visT.map((t) => drawingValue(d, t)), color: DRAW_COLORS[k % DRAW_COLORS.length],
       dash: d.type === 'h' ? '6 4' : '', noScale: true, label: String(k + 1), width: 2.2,
     }));
-    const panels = [{ height: 280, format: pfmt, series: [{ name: settings.pair, values: closes, color: 'var(--price)', width: 1.5 }].concat(overlays, drawSeries), markers: markers }];
+    const panels = [{ height: 300, format: pfmt, series: [{ name: settings.pair + ' ' + got.tf, values: closes, color: 'var(--price)', width: 1.5 }].concat(overlays, drawSeries), markers: markers }];
     // Regroupe les oscillateurs de même famille (ex. MACD + signal) dans un même panneau.
     const groups = new Map();
     for (const o of oscillators) {
@@ -944,18 +987,20 @@
         format: (v) => (small ? v.toFixed(dec) : num2.format(v)),
       });
     }
+    // période testée grisée
+    const sFrom = visT.findIndex((t) => t >= chartView.testFromT);
+    const intraday = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4'].includes(got.tf);
     F.chart.mount($('priceChart'), {
-      labels: dates, formatLabel: shortDate, panels: panels, ariaLabel: 'Cours de ' + settings.pair + ' avec les trades',
+      labels: vdates, formatLabel: (d) => (intraday && vis.length < 400 ? frDate(String(d).slice(0, 10)).slice(0, 5) + (String(d).length > 10 ? ' ' + String(d).slice(11, 16) : '') : shortDate(d)),
+      panels: panels, ariaLabel: 'Cours de ' + settings.pair + ' en ' + got.tf + ' avec les trades',
+      shade: sFrom >= 0 && (chartState.hist !== 'test' || chartState.win) ? { from: sFrom, to: vis.length - 1, label: 'Période testée' } : null,
       draw: drawMode ? { mode: drawMode, pending: drawPending, onPoint: onDrawPoint } : null,
-      extraTip: (i) => {
-        const t = result.trades.find((tr) => tr.entryIndex - st === i || tr.exitIndex - st === i);
-        if (!t) return '';
-        const isEntry = t.entryIndex - st === i;
-        return '<div style="margin-top:4px"><b class="' + (isEntry ? (t.dir > 0 ? 'pos' : 'neg') : cls(t.pnl)) + '">' +
-          (isEntry ? (t.dir > 0 ? '▲ Achat' : '▼ Vente') : '● Sortie : ' + signed(t.pnl, money)) + '</b></div>';
-      },
+      onZoom: chartZoom, onPan: chartPan,
+      extraTip: (i) => (tipAt.has(i) ? '<div style="margin-top:4px">' + tipAt.get(i) + '</div>' : ''),
     });
-    $('priceLegend').innerHTML = '<span><i style="background:var(--price)"></i>' + esc(settings.pair) + '</span>' +
+    $('chartNote').textContent = (got.note ? got.note + ' ' : '') + (capped ? 'Les 2 000 dernières bougies (dézoomez ou défilez pour voir plus) : ' : '') + vis.length + ' bougies ' + got.tf + ', du ' + frDate(String(vdates[0]).slice(0, 10)) + ' au ' + frDate(String(vdates[vdates.length - 1]).slice(0, 10)) +
+      ' · molette : zoom, glisser : défiler';
+    $('priceLegend').innerHTML = '<span><i style="background:var(--price)"></i>' + esc(settings.pair) + ' ' + got.tf + '</span>' +
       overlays.map((o) => '<span><i style="background:' + o.color + '"></i>' + esc(o.name) + '</span>').join('') +
       '<span><i class="tri-up"></i>Achat</span><span><i class="tri-dn"></i>Vente</span><span><i class="dot" style="background:var(--muted)"></i>Sortie</span>';
     renderIndChips();
@@ -963,6 +1008,10 @@
     };
     drawPrice();
     $('indPick').addEventListener('change', onIndPick);
+    $('histPick').addEventListener('change', () => { chartState.hist = $('histPick').value; chartState.win = null; drawPrice(); });
+    $('zoomIn').addEventListener('click', () => chartZoom(0.6, 0.5));
+    $('zoomOut').addEventListener('click', () => chartZoom(1.6, 0.5));
+    $('zoomReset').addEventListener('click', () => { chartState.win = null; drawPrice(); });
     $('drawLine').addEventListener('click', () => setDrawMode(drawMode === 'line' ? null : 'line'));
     $('drawH').addEventListener('click', () => setDrawMode(drawMode === 'h' ? null : 'h'));
     setDrawMode(null, true);
@@ -1032,6 +1081,71 @@
   ];
   const DRAW_COLORS = ['#ea580c', '#16a34a', '#e11d48', '#4f46e5', '#65a30d', '#b45309'];
   let chartView = null, drawPrice = () => {}, drawMode = null, drawPending = null;
+  // Unité de temps, historique et fenêtre visible du graphique des cours
+  const chartState = { tf: 'D1', hist: 'test', win: null, pair: null, baseTf: null, src: null };
+  const chartCache = new Map();
+  const YEAR = 365 * 86400;
+  function histFrom() {
+    const v = chartView, end = v.testToT;
+    return { test: v.testFromT, '1y': end - YEAR, '3y': end - 3 * YEAR, '10y': end - 10 * YEAR, all: Date.parse(F.data.ECB_FIRST_DATE + 'T00:00:00Z') / 1000 }[chartState.hist];
+  }
+  function tfAllowed(tf) {
+    const v = chartView;
+    if (v.src === 'broker') return true; // MT5 fournit toutes les unités de temps
+    return F.data.TF_ORDER.indexOf(tf) >= F.data.TF_ORDER.indexOf(v.baseTf);
+  }
+  function renderChartTools() {
+    if (!$('tfBar')) return;
+    $('tfBar').innerHTML = F.data.TF_ORDER.map((tf) => '<button type="button" data-tf="' + tf + '"' + (tf === chartState.tf ? ' class="on"' : '') +
+      (tfAllowed(tf) ? '' : ' disabled title="Données trop peu détaillées : unité plus fine disponible avec la source « Mon courtier (MetaTrader 5) »"') + '>' + tf + '</button>').join('');
+    $('tfBar').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { chartState.tf = b.dataset.tf; drawPrice(); }));
+    $('histPick').value = chartState.hist;
+  }
+  /** Bougies du graphique dans l'unité choisie, avec l'historique demandé (récupéré si besoin). */
+  async function chartBars() {
+    const v = chartView, tf = chartState.tf, want = histFrom();
+    const firstT = F.data.barTime(v.bars[0]), endDay = new Date(v.testToT * 1000 + 86400000);
+    if (v.src === 'broker' && (tf !== v.baseTf || want < firstT)) {
+      // MT5 : bougies demandées directement dans l'unité choisie (au plus ~40 000 bougies)
+      const sec = F.data.TF_SECONDS[tf], from = Math.max(Math.min(want, firstT), v.testToT - 40000 * sec * 1.4);
+      const body = { terminalId: (bridgeTerms[0] || {}).id, symbol: v.symbol, timeframe: tf === 'MN' ? 'MN1' : tf, from: F.data.iso(new Date(from * 1000)), to: F.data.iso(endDay), intrabar: false };
+      const key = 'mt5|' + JSON.stringify(body);
+      if (!chartCache.has(key)) {
+        $('chartNote').textContent = 'Chargement des bougies ' + tf + ' depuis MT5…';
+        const r = await bridgeCall('POST', '/bars', body);
+        if (!r.ok) throw new Error(r.message || 'données MT5 indisponibles');
+        chartCache.set(key, r.bars.map((x) => toBar(x, !['D1', 'W1', 'MN'].includes(tf))));
+      }
+      return { bars: chartCache.get(key), tf: tf };
+    }
+    let base = v.bars, note = '';
+    if (want < firstT - 5 * 86400) {
+      if (v.src === 'online') {
+        const from = new Date(Math.max(want, Date.parse(F.data.ECB_FIRST_DATE + 'T00:00:00Z') / 1000) * 1000);
+        const key = v.pair + '|' + F.data.iso(from) + '|' + F.data.iso(endDay);
+        if (!onlineCache.has(key)) { $('chartNote').textContent = 'Téléchargement de l\'historique BCE…'; onlineCache.set(key, await F.data.fetchFrankfurter(v.pair, from, endDay)); }
+        base = $('estimateWicks').checked ? F.data.estimateWicks(onlineCache.get(key)) : onlineCache.get(key);
+      } else note = 'Historique limité aux données chargées (' + (v.src === 'csv' ? 'fichier CSV' : 'données simulées') + ').';
+    }
+    return { bars: tf === v.baseTf ? base : F.data.resample(base, tf), tf: tf, note: note };
+  }
+  let zoomRaf = 0;
+  function chartZoom(f, frac) {
+    const v = chartView; if (!v || !v.win) return;
+    const span = v.win.t1 - v.win.t0, minSpan = 20 * (F.data.TF_SECONDS[chartState.tf] || 86400);
+    const ns = Math.max(minSpan, Math.min(v.cbLastT - v.cbFirstT, span * f));
+    let t0 = v.win.t0 + frac * span - frac * ns;
+    t0 = Math.max(v.cbFirstT, Math.min(t0, v.cbLastT - ns));
+    chartState.win = { t0: t0, t1: t0 + ns };
+    cancelAnimationFrame(zoomRaf); zoomRaf = requestAnimationFrame(() => drawPrice());
+  }
+  function chartPan(d) {
+    const v = chartView; if (!v || !v.win) return;
+    const span = v.win.t1 - v.win.t0;
+    let t0 = Math.max(v.cbFirstT, Math.min(v.win.t0 + d * span, v.cbLastT - span));
+    chartState.win = { t0: t0, t1: t0 + span };
+    drawPrice();
+  }
   function plotList() { return splitTopLevel($('plots').value || '').map((x) => x.trim()).filter(Boolean); }
   function renderIndChips() {
     $('indChips').innerHTML = plotList().map((p, k) => '<span class="ind-chip">' + esc(p.replace(/\s+/g, '')) + '<button type="button" data-k="' + k + '" aria-label="Retirer ' + esc(p) + '">×</button></span>').join(' ');
@@ -1101,7 +1215,7 @@
     if (!silent) drawPrice();
   }
   function onDrawPoint(i, value) {
-    const v = chartView, t = v.ctxR.t[v.st + i], pair = v.pair, list = drawingsFor(pair);
+    const v = chartView, t = v.visT[i], pair = v.pair, list = drawingsFor(pair);
     const round = (x) => +x.toFixed(v.dec + 1);
     if (drawMode === 'h') {
       undoable('Repère ajouté', () => { list.push({ type: 'h', v: round(value) }); saveDrawings(pair, list); setDrawMode(null); });

@@ -417,3 +417,11 @@ a.btn-link:hover { border-color: var(--accent); color: var(--accent); }
 .draw-item .acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .draw-item select { flex: 1 1 220px; min-height: 36px; font-size: 13px; }
 .draw-item .preview { font-size: 12.5px; }
+.chart .shade { fill: var(--s1); opacity: 0.06; pointer-events: none; }
+.chart .shade-label { font-size: 11px; fill: var(--muted); }
+.chart svg.panning { cursor: grabbing; }
+.tf-bar { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.tf-bar button { border: 0; border-right: 1px solid var(--border); background: none; color: var(--text); font-size: 12.5px; font-weight: 600; padding: 6px 9px; min-height: 0; cursor: pointer; border-radius: 0; }
+.tf-bar button:last-child { border-right: 0; }
+.tf-bar button.on { background: var(--s1); color: #fff; }
+.tf-bar button:disabled { color: var(--muted); opacity: 0.45; cursor: not-allowed; }

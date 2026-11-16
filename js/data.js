@@ -205,6 +205,38 @@
   };
 
   /** Index de la première barre dont la date >= start (les barres précédentes servent d'historique). */
+  // ---------- Unités de temps (graphique) ----------
+  const TF_SECONDS = { M1: 60, M5: 300, M15: 900, M30: 1800, H1: 3600, H4: 14400, D1: 86400, W1: 604800, MN: 2592000 };
+  const TF_ORDER = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1', 'W1', 'MN'];
+  function barTime(b) {
+    if (b.t !== undefined) return b.t;
+    const d = String(b.date);
+    return Date.parse(d.length > 10 ? d.slice(0, 10) + 'T' + d.slice(11, 16) + ':00Z' : d.slice(0, 10) + 'T00:00:00Z') / 1000;
+  }
+  function tfBucket(t, tf) {
+    if (tf === 'W1') return Math.floor((t / 86400 + 3) / 7); // semaines du lundi au dimanche
+    if (tf === 'MN') { const d = new Date(t * 1000); return d.getUTCFullYear() * 12 + d.getUTCMonth(); }
+    return Math.floor(t / TF_SECONDS[tf]);
+  }
+  /** Regroupe des bougies dans une unité de temps supérieure (H4, D1, W1, MN…), comme MT4 / MT5. */
+  function resample(bars, tf) {
+    const out = [];
+    let key = null;
+    for (const b of bars) {
+      const t = barTime(b), k = tfBucket(t, tf);
+      if (k !== key) {
+        key = k;
+        out.push({ date: tf === 'D1' || tf === 'W1' || tf === 'MN' ? String(b.date).slice(0, 10) : b.date, t: t, open: b.open, high: b.high, low: b.low, close: b.close, spread: b.spread });
+      } else {
+        const x = out[out.length - 1];
+        if (b.high > x.high) x.high = b.high;
+        if (b.low < x.low) x.low = b.low;
+        x.close = b.close;
+      }
+    }
+    return out;
+  }
+
   function indexFrom(bars, startDate) {
     const s = iso(startDate);
     const i = bars.findIndex((b) => b.date.slice(0, 10) >= s);
@@ -212,6 +244,7 @@
   }
 
   root.Forexia.data = {
+    TF_SECONDS, TF_ORDER, barTime, resample,
     PAIRS, PERIODS, ECB_FIRST_DATE, TYPICAL_SPREAD, WICK_FACTOR, periodRange, customRange, estimateWicks, hasRealRange, detectTimeframe, fetchFrankfurter, generateSynthetic, parseCSV, indexFrom, barsFromCloses, iso, addMonths,
   };
 })(typeof window !== 'undefined' ? window : globalThis);
