@@ -179,6 +179,19 @@
     renderTranslation(s.frenchText ? F.french.parse(s.frenchText) : null);
     validateAll();
     try { updateEvalCount(); } catch (e) { /* pas encore initialisé au tout premier chargement */ }
+    updateSaveCard();
+  }
+  /** La carte « Cette stratégie vous plaît ? » suit la stratégie choisie dans la liste ; si ce n'est pas celle des résultats affichés, on le signale. */
+  function updateSaveCard() {
+    const d = document.getElementById('saveCardDesc');
+    try { if (!d || !lastRunCtx) return; } catch (e) { return; } // tout premier chargement : variable pas encore initialisée
+    const s = currentStrategy();
+    d.innerHTML = esc(s.frenchText || [s.longEntry, s.shortEntry].filter(Boolean).join('  ·  ')).replace(/\n/g, '<br>');
+    $('saveCardConfig').textContent = 'Configuration : ' + describeConfig(currentConfig());
+    const r = lastRunCtx.strat, same = RULE_FIELDS.every((k) => (r[k] || '') === (s[k] || '')) && r.name === s.name;
+    $('saveCardStale').hidden = same;
+    $('saveCardStale').innerHTML = same ? '' : '« ' + esc(s.name) + ' » n\'est pas encore simulée : les résultats ci-dessous sont ceux de « ' + esc(r.name) + ' ». <button type="button" class="link" id="saveCardRun">Lancer le backtest</button>';
+    const b = document.getElementById('saveCardRun'); if (b) b.addEventListener('click', () => $('form').requestSubmit());
   }
   // ---------- Configuration (paire, levier, capital…) enregistrée avec la stratégie ----------
   function currentConfig() {
@@ -994,12 +1007,14 @@
 
     let html = '';
     for (const w of warnings) html += '<div class="banner ' + (w.info ? 'info' : 'warn') + '">' + (w.info ? w.html : w) + '</div>';
-    html += '<div class="panel card save-card"><div><b>Cette stratégie vous plaît ?</b> <span class="hint">Sinon, « Améliorer » propose des réglages testés.</span><div class="hint">' + esc(strat.frenchText || strat.longEntry || strat.shortEntry).replace(/\n/g, '<br>') + '</div>' +
-      '<div class="hint save-config">Configuration enregistrée avec : ' + esc(describeConfig(config)) + '</div>' +
+    html += '<div class="panel card save-card"><div><b>Cette stratégie vous plaît ?</b> <span class="hint">Sinon, « Améliorer » propose des réglages testés.</span><div class="hint" id="saveCardDesc">' + esc(strat.frenchText || strat.longEntry || strat.shortEntry).replace(/\n/g, '<br>') + '</div>' +
+      '<div class="hint save-config" id="saveCardConfig">Configuration enregistrée avec : ' + esc(describeConfig(config)) + '</div><div class="stale-note" id="saveCardStale" hidden></div>' +
       '</div><div class="save-actions">' +
       '<button type="button" class="enhance" id="enhanceBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/></svg>Améliorer</button>' +
       '<button type="button" class="deploy" id="deployBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>Déployer</button>' +
-      '<button type="button" class="primary inline-save" id="saveFromResults">Enregistrer</button></div></div>';
+      '<button type="button" class="primary inline-save" id="saveFromResults">Enregistrer</button>' +
+      '<button type="button" class="secondary small edit-conds" id="editConds">✎ Modifier les conditions</button></div></div>' +
+      '<div class="panel card cond-panel" id="condPanel" hidden></div>';
     html += '<div class="summary-head"><h2>' + esc(strat.name) + ' · ' + esc(settings.pair) + '</h2>' +
       '<span class="meta">' + PERIOD_LABEL[periodKey] + ' · du ' + frDate(dates[0]) + ' au ' + frDate(dates[dates.length - 1]) +
       ' · levier 1:' + settings.leverage + ' · ' + esc(loaded.source) + ' · ' + view.length + ' bougies</span></div>';
@@ -1191,7 +1206,12 @@
       name: drawingName(d, k), values: visT.map((t) => drawingValue(d, t)), color: DRAW_COLORS[k % DRAW_COLORS.length],
       dash: d.type === 'h' ? '6 4' : '', noScale: true, label: String(k + 1), width: 2.2,
     }));
-    const panels = [{ height: 300, format: pfmt, series: [{ name: settings.pair + ' ' + got.tf, values: closes, color: 'var(--price)', width: 1.5 }].concat(overlays, drawSeries), markers: markers }];
+    // repères utilisés par les règles de la stratégie (lignes de tendance LINE(...) et niveaux de prix), en violet : R1, R2…
+    const ruleSeries = ruleMarks(currentStrategy(), pMin, pMax).map((m, k) => ({
+      name: 'R' + (k + 1) + ' · ' + m.label, values: visT.map((t) => (m.type === 'line' ? (t >= m.t1 ? m.v1 + ((m.v2 - m.v1) * (t - m.t1)) / (m.t2 - m.t1) : NaN) : m.v)),
+      color: '#9333ea', dash: m.type === 'line' ? '7 3' : '3 3', noScale: true, label: 'R' + (k + 1), width: 2,
+    }));
+    const panels = [{ height: 300, format: pfmt, series: [{ name: settings.pair + ' ' + got.tf, values: closes, color: 'var(--price)', width: 1.5 }].concat(overlays, drawSeries, ruleSeries), markers: markers }];
     // Regroupe les oscillateurs de même famille (ex. MACD + signal) dans un même panneau.
     const groups = new Map();
     for (const o of oscillators) {
@@ -1222,6 +1242,7 @@
       ' · molette : zoom, glisser : défiler';
     $('priceLegend').innerHTML = '<span><i style="background:var(--price)"></i>' + esc(settings.pair) + ' ' + got.tf + '</span>' +
       overlays.map((o) => '<span><i style="background:' + o.color + '"></i>' + esc(o.name) + '</span>').join('') +
+      ruleSeries.map((o) => '<span title="Repère utilisé par les règles de la stratégie"><i style="background:#9333ea"></i>' + esc(o.name) + '</span>').join('') +
       '<span><i class="tri-up"></i>Achat</span><span><i class="tri-dn"></i>Vente</span><span><i class="dot" style="background:var(--muted)"></i>Sortie</span>';
     renderIndChips();
     renderDrawList();
@@ -1239,6 +1260,7 @@
 
     $('enhanceBtn').addEventListener('click', openEnhancer);
     $('deployBtn').addEventListener('click', openDeploy);
+    $('editConds').addEventListener('click', () => { $('condPanel').hidden = !$('condPanel').hidden; if (!$('condPanel').hidden) { renderCondPanel(); $('condPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } });
     $('saveFromResults').addEventListener('click', () => {
       let saved = null;
       undoable('Enregistrement de « ' + strat.name + ' »', () => { saved = saveStrategy(strat, config, s); });
@@ -1486,6 +1508,86 @@
     });
   }
 
+  // ---------- Conditions des règles : afficher, retirer une condition, voir les repères sur le graphique ----------
+  const RULE_LABEL = { longEntry: 'Entrée achat', longExit: 'Sortie achat', shortEntry: 'Entrée vente', shortExit: 'Sortie vente' };
+  // règle -> groupes OU de conditions ET
+  function ruleGroups(rule) {
+    if (!rule || !rule.trim()) return [];
+    const R = F.rules, split = (n, op) => (n.k === 'bin' && n.op === op ? split(n.a, op).concat(split(n.b, op)) : [n]);
+    return split(R.parse(rule), 'OR').map((g) => split(g, 'AND').map((n) => R.stringify(n)));
+  }
+  function groupsRule(groups) {
+    const gs = groups.filter((g) => g.length);
+    const wrap = (c) => (/\b(OR|AND)\b/.test(F.rules.canonical(c)) && !/^\(.*\)$/.test(c) ? '(' + c + ')' : c);
+    return gs.map((g) => (g.length > 1 && gs.length > 1 ? '(' + g.map(wrap).join(' AND ') + ')' : g.map(wrap).join(' AND '))).join(' OR ');
+  }
+  function lineInfo(txt) {
+    const m = /LINE\(\s*(\d+)\s*,\s*(-?[\d.]+)\s*,\s*(\d+)\s*,\s*(-?[\d.]+)\s*\)/.exec(txt);
+    return m ? { type: 'line', t1: +m[1], v1: +m[2], t2: +m[3], v2: +m[4] } : null;
+  }
+  const dayFr = (t) => frDate(new Date(t * 1000).toISOString().slice(0, 10));
+  function condLabel(c) {
+    const L = lineInfo(c), pf = (v) => (chartView ? chartView.pfmt(v) : String(v));
+    if (L) return c.replace(/LINE\([^)]*\)/g, 'ligne de tendance (' + dayFr(L.t1) + ' ' + pf(L.v1) + ' → ' + dayFr(L.t2) + ' ' + pf(L.v2) + ')');
+    return c;
+  }
+  /** Repères des règles : lignes LINE(...) et niveaux de prix comparés à CLOSE / HIGH / LOW. */
+  function ruleMarks(strat, pMin, pMax) {
+    const out = [], seen = new Set();
+    for (const k of RULE_FIELDS) {
+      const txt = strat[k] || '';
+      for (const m of txt.matchAll(/LINE\([^)]*\)/g)) {
+        const L = lineInfo(m[0]);
+        if (L && !seen.has(m[0])) { seen.add(m[0]); out.push(Object.assign(L, { label: 'ligne ' + dayFr(L.t1) + ' → ' + dayFr(L.t2) })); }
+      }
+      for (const m of txt.matchAll(/\b(?:CLOSE|HIGH|LOW|OPEN)\s*(?:[<>]=?|==)\s*(\d+\.\d+)|CROSS_(?:UP|DOWN)\(\s*CLOSE\s*,\s*(\d+\.\d+)\s*\)/g)) {
+        const v = +(m[1] || m[2]);
+        if (v > pMin * 0.8 && v < pMax * 1.2 && !seen.has('h' + v)) { seen.add('h' + v); out.push({ type: 'h', v: v, label: 'niveau ' + (chartView ? chartView.pfmt(v) : v) }); }
+      }
+    }
+    return out;
+  }
+  function renderCondPanel() {
+    const box = $('condPanel'), st = currentStrategy();
+    let html = '<div class="cond-head"><h3>Conditions de la stratégie</h3><span class="hint">Cliquez sur × pour retirer une condition. Les lignes et niveaux des règles sont tracés en violet (R1, R2…) sur le graphique des cours.</span></div>';
+    let any = false;
+    for (const k of RULE_FIELDS) {
+      let groups;
+      try { groups = ruleGroups(st[k]); } catch (e) { groups = null; }
+      if (!groups || !groups.length) continue;
+      any = true;
+      html += '<div class="cond-rule"><b>' + RULE_LABEL[k] + '</b>' + groups.map((g, gi) => (gi ? '<span class="cond-or">OU</span>' : '') + '<span class="cond-group">' +
+        g.map((c, ci) => (ci ? '<span class="cond-and">ET</span>' : '') + '<span class="cond-chip' + (lineInfo(c) ? ' line' : '') + '" title="' + esc(c) + '">' + esc(condLabel(c)) +
+          '<button type="button" data-cond="' + k + ':' + gi + ':' + ci + '" aria-label="Retirer cette condition">×</button></span>').join('') + '</span>').join('') + '</div>';
+    }
+    if (!any) html += '<p class="hint">Aucune condition.</p>';
+    html += '<div class="row buttons cond-actions"><button type="button" class="primary small" id="condRun">▶ Relancer le backtest</button>' +
+      '<button type="button" class="secondary small" id="condDraw">╱ Dessiner un nouveau repère</button></div>';
+    box.innerHTML = html;
+  }
+  document.addEventListener('click', (ev) => {
+    const b = ev.target.closest('#condPanel [data-cond]');
+    if (b) {
+      const [k, gi, ci] = b.dataset.cond.split(':'), groups = ruleGroups($(k).value);
+      const removed = groups[+gi][+ci];
+      undoable('Condition retirée', () => {
+        groups[+gi].splice(+ci, 1);
+        const rule = groupsRule(groups);
+        if ((k === 'longEntry' || k === 'shortEntry') && !rule && !$(k === 'longEntry' ? 'shortEntry' : 'longEntry').value.trim()) { toast('Il faut au moins une règle d\'entrée.'); return; }
+        $(k).value = rule;
+        $('frenchText').value = F.french.toFrench(currentStrategy()) || ''; // texte français impossible avec des repères LINE : on l'efface plutôt que de le laisser faux
+        $('plots').value = F.french.derivePlots(currentStrategy()) || $('plots').value;
+        markCustom();
+        validateAll();
+        $('presetDesc').textContent = 'Condition retirée (' + RULE_LABEL[k].toLowerCase() + ') : ' + condLabel(removed) + '. Relancez le backtest pour voir l\'effet.';
+      });
+      renderCondPanel();
+      drawPrice();
+      return;
+    }
+    if (ev.target.id === 'condRun') { $('form').requestSubmit(); return; }
+    if (ev.target.id === 'condDraw') { $('drawLine').scrollIntoView({ behavior: 'smooth', block: 'center' }); setDrawMode('line'); }
+  });
   function withdrawLabel(se) {
     if (se.withdrawMode !== 'periodic') return 'seuil +' + se.withdrawPct + ' %, ' + (se.withdrawWhen === 'immediate' ? 'dès le seuil' : 'à la clôture');
     const v = se.withdrawType === 'fixed' ? money.format(se.withdrawValue) : se.withdrawValue + ' %' + (se.withdrawType === 'excess' ? ' de l\'excédent' : ' du compte');
