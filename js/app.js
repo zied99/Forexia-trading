@@ -4,6 +4,8 @@
   const F = window.Forexia;
   const $ = (id) => document.getElementById(id);
   const RULE_FIELDS = ['longEntry', 'longExit', 'shortEntry', 'shortExit'];
+  // Gestion des trades (Forexia 1.2) : champ du formulaire = propriété de la stratégie.
+  const TM_FIELDS = ['stopAtr', 'takeAtr', 'atrPeriod', 'trailPips', 'trailAtr', 'breakevenPips', 'breakevenAtr', 'maxBars', 'pauseLosses', 'pauseBars'];
   const STORE_KEY = 'forexia.strategies';
   const LEVERAGES = [1, 2, 5, 10, 20, 30, 50, 100, 200, 500];
   const SERIES_COLORS = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)'];
@@ -61,6 +63,7 @@
     for (const f of RULE_FIELDS) s[f] = $(f).value.trim();
     s.stopLossPips = Number($('stopLoss').value) || 0;
     s.takeProfitPips = Number($('takeProfit').value) || 0;
+    for (const f of TM_FIELDS) { const v = Number($(f).value); if (v > 0) s[f] = v; }
     return s;
   }
   function loadStrategy(s) {
@@ -68,6 +71,8 @@
     for (const f of RULE_FIELDS) $(f).value = s[f] || '';
     $('stopLoss').value = s.stopLossPips || '';
     $('takeProfit').value = s.takeProfitPips || '';
+    for (const f of TM_FIELDS) $(f).value = s[f] || '';
+    if (TM_FIELDS.some((f) => s[f] > 0 && f !== 'atrPeriod')) $('tradeMgmt').open = true;
     $('plots').value = s.plots || '';
     $('frenchText').value = s.frenchText || '';
     $('presetDesc').textContent = s.description || '';
@@ -86,7 +91,8 @@
       period: periodValue(), dateFrom: $('dateFrom').value, dateTo: $('dateTo').value, source: sourceValue(),
       estimateWicks: $('estimateWicks').checked,
       withdraw: { on: $('withdrawOn').checked, pct: $('withdrawPct').value, share: $('withdrawShare').value, when: $('withdrawWhen').value },
-      spreadMode: $('spreadMode').value,
+      spreadMode: $('spreadMode').value, commission: Number($('commission').value) || 0,
+      news: { on: $('newsOn').checked, mode: $('newsMode').value, impact: $('newsImpact').value, before: Number($('newsBefore').value) || 0, after: Number($('newsAfter').value) || 0 },
       broker: { symbol: $('brokerSymbol').value, tf: $('brokerTf').value, sizing: $('brokerSizing').value, lots: $('brokerLots').value,
         risk: $('brokerRisk').value, maxLots: $('brokerMaxLots').value, maxSpread: $('brokerMaxSpread').value, intrabar: $('brokerIntrabar').checked },
     };
@@ -106,6 +112,12 @@
     if (src) { src.checked = true; $('csvField').hidden = true; }
     if (c.estimateWicks !== undefined) $('estimateWicks').checked = c.estimateWicks;
     if (c.spreadMode) $('spreadMode').value = c.spreadMode;
+    if (c.commission !== undefined) $('commission').value = c.commission;
+    if (c.news) {
+      $('newsOn').checked = !!c.news.on; $('newsMode').value = c.news.mode || 'block'; $('newsImpact').value = c.news.impact || 'high';
+      $('newsBefore').value = c.news.before ?? 30; $('newsAfter').value = c.news.after ?? 30;
+    }
+    updateNewsUI();
     if (c.withdraw) {
       $('withdrawOn').checked = !!c.withdraw.on; $('withdrawPct').value = c.withdraw.pct; $('withdrawShare').value = c.withdraw.share;
       $('withdrawWhen').value = c.withdraw.when || 'close';
@@ -133,6 +145,34 @@
   }
   ['withdrawOn', 'withdrawPct', 'withdrawShare', 'withdrawWhen', 'capital'].forEach((id) => { $(id).addEventListener('input', updateWithdrawUI); $(id).addEventListener('change', updateWithdrawUI); });
   updateWithdrawUI();
+  function updateNewsUI() {
+    $('newsFields').hidden = !$('newsOn').checked;
+    const p = $('pair').value.split('/');
+    $('newsHint').textContent = 'Annonces de ' + p.join(' et ') + ' seulement. Le calendrier vient de MetaTrader 5 (passerelle lancée et connectée) ; ' +
+      'l\'EA déployé utilise le calendrier en direct, et dans le testeur MT5 le fichier exporté par la passerelle.';
+  }
+  $('newsOn').addEventListener('change', updateNewsUI);
+  $('pair').addEventListener('change', updateNewsUI);
+  updateNewsUI();
+
+  // ---------- Calendrier économique (MT5, via la passerelle) ----------
+  const calendarCache = new Map();
+  /** Annonces [{t, currency, importance}] entre deux dates (secondes), ou null si la passerelle ne répond pas. */
+  async function loadCalendar(from, to) {
+    const key = from + '|' + to;
+    if (calendarCache.has(key)) return calendarCache.get(key);
+    if (!bridgeToken) return null;
+    try {
+      const r = await bridgeCall('GET', '/calendar?from=' + from + '&to=' + to);
+      if (!r || !r.ok) return null;
+      calendarCache.set(key, r.events || []);
+      return r.events || [];
+    } catch (e) { return null; }
+  }
+  function newsTimes(events, pair, impact) {
+    const cur = pair.split('/'), min = impact === 'medium' ? 2 : 3;
+    return events.filter((e) => cur.includes(e.currency) && e.importance >= min).map((e) => e.t).sort((a, b) => a - b);
+  }
   function describeConfig(c) {
     if (!c) return '';
     const per = c.period === 'custom' ? 'du ' + frDate(c.dateFrom) + ' au ' + frDate(c.dateTo) : PERIOD_LABEL[c.period];
@@ -204,12 +244,15 @@
   }));
   $('preset').addEventListener('change', applyPresetSelection);
 
+  function runKey(s, config) {
+    return JSON.stringify([s.longEntry, s.longExit, s.shortEntry, s.shortExit, s.stopLossPips, s.takeProfitPips].concat(TM_FIELDS.map((f) => s[f] || 0), [config]));
+  }
   // Enregistre la stratégie du formulaire (ou celle du dernier backtest) dans le navigateur.
   function saveStrategy(strat, config, stats) {
     const s = Object.assign({}, strat || currentStrategy());
     if (!strat && frenchDirty && s.frenchText) { translateFrench(); Object.assign(s, currentStrategy()); }
     s.config = config || currentConfig();
-    if (!stats && lastRun && lastRun.key === JSON.stringify([s.longEntry, s.longExit, s.shortEntry, s.shortExit, s.stopLossPips, s.takeProfitPips, s.config])) stats = lastRun.stats;
+    if (!stats && lastRun && lastRun.key === runKey(s, s.config)) stats = lastRun.stats;
     s.lastResult = stats ? { returnPct: stats.returnPct, trades: stats.trades, winRate: stats.winRate, maxDrawdownPct: stats.maxDrawdownPct, finalEquity: stats.finalEquity } : null;
     s.savedAt = new Date().toISOString();
     if (!strat && !validateAll()) { $('formError').textContent = 'Corrigez les règles en rouge avant d\'enregistrer.'; return null; }
@@ -286,6 +329,8 @@
       for (const f of RULE_FIELDS) $(f).value = r[f];
       $('stopLoss').value = r.stopLossPips || '';
       $('takeProfit').value = r.takeProfitPips || '';
+      for (const f of TM_FIELDS) $(f).value = r[f] || '';
+      if (TM_FIELDS.some((f) => r[f] > 0)) $('tradeMgmt').open = true;
       $('plots').value = r.plots;
       validateAll();
     }
@@ -312,7 +357,12 @@
   const CHIPS = [
     ['Indicateurs', ['RSI(14)', 'MACD(12,26,9)', 'MACD_SIGNAL(12,26,9)', 'MACD_HIST(12,26,9)', 'SMA(50)', 'EMA(20)',
       'STOCH_K(14,3,3)', 'STOCH_D(14,3,3)', 'BB_UPPER(20,2)', 'BB_MIDDLE(20,2)', 'BB_LOWER(20,2)', 'CCI(20)', 'WILLR(14)', 'ATR(14)', 'MOM(10)', 'ROC(10)']],
-    ['Prix et outils', ['CLOSE', 'OPEN', 'HIGH', 'LOW', 'PREV(CLOSE, 1)', 'HIGHEST(HIGH, 20)', 'LOWEST(LOW, 20)']],
+    ['Tendance (1.2)', ['ADX(14)', 'PLUS_DI(14)', 'MINUS_DI(14)', 'PSAR(0.02, 0.2)', 'SUPERTREND(10, 3)', 'SUPERTREND_DIR(10, 3)', 'SLOPE(EMA(50), 5)',
+      'TENKAN(9)', 'KIJUN(26)', 'SENKOU_A(9, 26)', 'SENKOU_B(52, 26)']],
+    ['Canaux et niveaux', ['DONCHIAN_UPPER(20)', 'DONCHIAN_LOWER(20)', 'KELTNER_UPPER(20, 2, 10)', 'KELTNER_LOWER(20, 2, 10)', 'PIVOT', 'PIVOT_R1', 'PIVOT_S1']],
+    ['Bougies', ['HA_CLOSE', 'HA_OPEN', 'BULL_ENGULF', 'BEAR_ENGULF', 'HAMMER', 'SHOOTING_STAR', 'BULL_DIV(RSI(14), 14)', 'BEAR_DIV(RSI(14), 14)']],
+    ['Prix et outils', ['CLOSE', 'OPEN', 'HIGH', 'LOW', 'PREV(CLOSE, 1)', 'HIGHEST(HIGH, 20)', 'LOWEST(LOW, 20)', 'ATR(14) * 2']],
+    ['Temps', ['HOUR', 'WEEKDAY', 'DAY', 'MONTH', 'CLOSE@H4', 'EMA(50)@D1']],
     ['Croisements', ['CROSS_UP(a, b)', 'CROSS_DOWN(a, b)']],
     ['Logique', ['AND', 'OR', 'NOT', '>', '<', '>=', '<=']],
   ];
@@ -567,7 +617,21 @@
         throw new Error('Pas assez de cotations sur la période choisie. Données disponibles du ' + frDate(all[0].date.slice(0, 10)) +
           ' au ' + frDate(all[all.length - 1].date.slice(0, 10)) + '.');
       }
-      const settings = { capital, leverage, exposurePct: exposure, spreadPips: spread, pair, startIndex };
+      const settings = {
+        capital, leverage, exposurePct: exposure, spreadPips: spread, pair, startIndex, timeframe: loaded.timeframe || 'D1',
+        sizing: $('brokerSizing').value, fixedLots: Number($('brokerLots').value) || 0.01, riskPct: Number($('brokerRisk').value) || 1,
+        commissionPerLot: Number($('commission').value) || 0,
+      };
+      // Calendrier économique : chargé si la passerelle est là (filtre coché, ou pour le proposer dans « Améliorer »).
+      const t0 = Math.floor(Date.parse(bars[0].date.slice(0, 10) + 'T00:00:00Z') / 1000), t1 = Math.floor(Date.parse(bars[bars.length - 1].date.slice(0, 10) + 'T00:00:00Z') / 1000) + 2 * 86400;
+      const cal = await loadCalendar(t0, t1);
+      if (cal) {
+        settings.newsCalendar = newsTimes(cal, pair, $('newsImpact').value);
+        settings.newsCurrencies = pair.split('/').join(' et ');
+      }
+      if ($('newsOn').checked) {
+        if (cal) settings.news = { times: settings.newsCalendar, before: Number($('newsBefore').value) || 0, after: Number($('newsAfter').value) || 0, mode: $('newsMode').value };
+      }
       if ($('withdrawOn').checked) {
         settings.withdrawPct = Number($('withdrawPct').value) || 0;
         settings.withdrawShare = Number($('withdrawShare').value) || 100;
@@ -575,8 +639,8 @@
       }
       if (loaded.broker) {
         Object.assign(settings, {
-          broker: loaded.broker, symbol: loaded.symbol, spreadMode: $('spreadMode').value, sizing: $('brokerSizing').value, fixedLots: Number($('brokerLots').value) || 0.01,
-          riskPct: Number($('brokerRisk').value) || 1, maxLots: Number($('brokerMaxLots').value) || 1, maxSpreadPips: Number($('brokerMaxSpread').value) || 0,
+          broker: loaded.broker, symbol: loaded.symbol, spreadMode: $('spreadMode').value,
+          maxLots: Number($('brokerMaxLots').value) || 1, maxSpreadPips: Number($('brokerMaxSpread').value) || 0,
         });
       }
       const result = loaded.broker ? F.broker.runBrokerBacktest(bars, strat, settings, loaded.broker) : F.backtest.runBacktest(bars, strat, settings);
@@ -599,10 +663,19 @@
             ' : choix volontaire, le résultat ne sera pas identique au testeur MT5 (qui utilise le spread historique).' });
         }
       }
+      if ($('newsOn').checked && !settings.news) {
+        warnings.push({ info: true, html: '<b>Annonces économiques non prises en compte</b> : le calendrier vient de MetaTrader 5, lancez et connectez la passerelle (source « Mon courtier » ou fenêtre « Déployer »).' });
+      } else if (settings.news) {
+        warnings.push({ info: true, html: 'Calendrier économique : ' + settings.news.times.length + ' annonces de ' + settings.newsCurrencies + ' sur la période' +
+          (result.diag && result.diag.newsBlocked ? ', ' + result.diag.newsBlocked + ' entrée(s) évitée(s)' : '') + '.' +
+          (loaded.broker ? '' : ' Heures du calendrier = heure du serveur MT5 ; les cours BCE sont journaliers, le filtre bloque donc toute la journée de l\'annonce.') });
+      }
+      if (result.diag && result.diag.paused) warnings.push({ info: true, html: 'Pause après des pertes : ' + result.diag.paused + ' entrée(s) évitée(s).' });
+      if (settings.sizing === 'risk' && !(strat.stopLossPips > 0 || strat.stopAtr > 0)) warnings.push({ info: true, html: 'Taille « % du capital risqué » sans stop-loss : ' + (loaded.broker ? 'lots fixes utilisés.' : 'taille « capital × exposition × levier » utilisée.') });
       if (result.ruined) warnings.push('<b>Compte liquidé</b> : le capital a été entièrement perdu. Réduisez le levier ou l\'exposition.');
       const config = currentConfig();
       lastRunCtx = { bars, strat, settings, config, timeframe: loaded.timeframe || 'D1', lastTrades: result.trades, diag: result.diag };
-      lastRun = { key: JSON.stringify([strat.longEntry, strat.longExit, strat.shortEntry, strat.shortExit, strat.stopLossPips, strat.takeProfitPips, config]), stats: result.stats };
+      lastRun = { key: runKey(strat, config), stats: result.stats };
       render({ bars, strat, settings, result, loaded, periodKey, warnings, config });
       syncFormState();
       recordEvaluation({ bars, strat, settings, result, loaded, periodKey, config });
@@ -915,14 +988,18 @@
         '<div class="row buttons custom-actions"><select id="customMode" aria-label="Comment appliquer cette amélioration">' +
         '<option value="and">Ajouter comme condition (ET)</option><option value="or">Ajouter comme alternative (OU)</option><option value="replace">Remplacer la règle</option></select>' +
         '<button type="button" class="secondary" id="customTest">Tester</button></div><p class="err" id="customError"></p><p class="hint" id="customNotes"></p></div>' +
-        '<div id="suggList"></div>';
+        '<div id="suggList"></div>' +
+        '<div class="custom-box"><b>Robustesse : tester sur d\'autres paires</b><p class="hint">Une bonne stratégie gagne aussi sur des paires proches, pas seulement sur celle qui a servi à la régler. ' +
+        'Même période, cours BCE (les améliorations cochées sont incluses).</p><div class="row buttons"><button type="button" class="secondary" id="robustTest">Tester sur d\'autres paires</button></div><div id="robustOut"></div></div>';
       if (enh.suggestions.length) {
-        if (enh.validation) html += '<p class="modal-note">Chaque suggestion est aussi testée sur la <b>période précédente</b> de même durée, qui n\'a pas servi à la choisir. Privilégiez les suggestions « confirmées ».</p>';
+        if (enh.validation) html += '<p class="modal-note">Chaque suggestion est aussi testée sur ' + (enh.folds.length > 1 ? 'les <b>' + enh.folds.length + ' périodes précédentes</b>' : 'la <b>période précédente</b>') +
+          ' de même durée, qui n\'ont pas servi à la choisir (contrôle « walk-forward »). Privilégiez les suggestions « confirmées ». La note tient compte du rendement, du drawdown, de la régularité (mois gagnants), du facteur de profit et du nombre de trades.</p>';
         html += '<p class="modal-note">Ces améliorations sont calculées sur la période testée. Plus vous en cumulez, plus le risque de « sur-optimisation » est grand : la stratégie colle au passé sans être meilleure à l\'avenir. Vérifiez ensuite le résultat sur une autre période (bouton « Dates »).</p>';
       }
       $('enhanceBody').innerHTML = html;
       renderSuggList(new Set());
       $('customTest').addEventListener('click', testCustom);
+      $('robustTest').addEventListener('click', testOtherPairs);
       $('customText').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) testCustom(); });
       updateCombined();
     }, 30);
@@ -958,7 +1035,38 @@
     const worseNow = sg && sg.custom && sg.score <= E.score(enh.base);
     const verdict = worseNow ? (v.confirmed ? ' : moins bonne sur la période testée, meilleure sur la précédente' : ' : moins bonne sur les deux périodes')
       : v.confirmed ? ' : confirmée' : ' : non confirmée, peut-être un hasard';
-    return '<div class="val ' + (v.confirmed && !worseNow ? 'ok' : 'ko') + '">Période précédente : ' + pct(v.stats.returnPct) + ' au lieu de ' + pct(v.base.returnPct) + verdict + '</div>';
+    const many = v.total > 1;
+    return '<div class="val ' + (v.confirmed && !worseNow ? 'ok' : 'ko') + '">' + (many ? 'Meilleure sur ' + v.wins + ' période(s) de contrôle sur ' + v.total + ' · ' : '') +
+      'période précédente : ' + pct(v.stats.returnPct) + ' au lieu de ' + pct(v.base.returnPct) + (many ? verdict.replace('les deux périodes', 'la période testée et les contrôles').replace('la précédente', 'les contrôles') : verdict) + '</div>';
+  }
+  // Robustesse : stratégie (avec les améliorations cochées) sur les autres grandes paires, même période, cours BCE.
+  async function testOtherPairs() {
+    const btn = $('robustTest'), out = $('robustOut');
+    const { strat, settings, bars } = lastRunCtx;
+    const c = E.combine(strat, settings, selectedSuggestions());
+    btn.disabled = true; out.innerHTML = '<div class="modal-loading"><span class="spinner"></span>Téléchargement des cours et simulations…</div>';
+    const from = new Date(bars[0].date.slice(0, 10) + 'T00:00:00Z'), to = new Date(bars[bars.length - 1].date.slice(0, 10) + 'T00:00:00Z');
+    const start = new Date(bars[settings.startIndex].date.slice(0, 10) + 'T00:00:00Z');
+    const pairs = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CHF', 'USD/CAD', 'EUR/GBP', 'NZD/USD'].filter((p) => F.data.PAIRS.includes(p));
+    const runs = [];
+    for (const p of pairs) {
+      try {
+        const key = p + '|' + F.data.iso(from) + '|' + F.data.iso(to);
+        if (!onlineCache.has(key)) onlineCache.set(key, await F.data.fetchFrankfurter(p, from, to));
+        const b = F.data.estimateWicks(onlineCache.get(key));
+        const se = Object.assign({}, c.settings, { pair: p, startIndex: F.data.indexFrom(b, start), timeframe: 'D1', pipSize: undefined });
+        delete se.broker; delete se.news; delete se.newsCalendar;
+        if (se.sizing === 'fixed') se.sizing = 'backtest';
+        runs.push({ pair: p, stats: E.run(b, c.strat, se), same: p === settings.pair });
+      } catch (e) { runs.push({ pair: p, stats: null, error: e.message }); }
+    }
+    const r = E.robustness(runs);
+    out.innerHTML = '<table class="mini"><thead><tr><th>Paire</th><th>Résultat</th><th>Drawdown</th><th>Trades</th><th>Mois gagnants</th></tr></thead><tbody>' +
+      runs.map((x) => '<tr' + (x.same ? ' class="same"' : '') + '><td>' + esc(x.pair) + (x.same ? ' (testée)' : '') + '</td>' + (x.stats
+        ? '<td class="' + cls(x.stats.returnPct) + '">' + pct(x.stats.returnPct) + '</td><td>−' + num1.format(x.stats.maxDrawdownPct) + ' %</td><td>' + x.stats.trades + '</td><td>' + Math.round(x.stats.winMonthsPct) + ' %</td>'
+        : '<td colspan="4" class="hint">' + esc(x.error || 'simulation impossible') + '</td>') + '</tr>').join('') + '</tbody></table>' +
+      '<p class="val ' + (r.robust ? 'ok' : 'ko') + '">Gagnante sur ' + r.positive + ' paire(s) sur ' + r.tested + (r.robust ? ' : stratégie plutôt robuste.' : ' : résultat probablement propre à cette paire ou à cette période.') + '</p>';
+    btn.disabled = false;
   }
   function selectedSuggestions() {
     return [...$('enhanceBody').querySelectorAll('input[type=checkbox]:checked')].map((c) => enh.suggestions[+c.dataset.i]);
@@ -972,9 +1080,10 @@
     const st = E.run(bars, c.strat, c.settings);
     let html = st ? '<b>Avec ' + (sel.length > 1 ? 'ces ' + sel.length + ' améliorations' : 'cette amélioration') + ' :</b> ' + statLine(st) +
       ' <span class="hint">(au lieu de ' + pct(enh.base.returnPct) + ')</span>' : '';
-    if (st && enh.validation) {
-      const v = enh.validation, cv = E.combine(strat, v.settings, sel), vs = E.run(v.bars, cv.strat, cv.settings);
-      if (vs) html += '<div class="val ' + (E.score(vs) > E.score(v.base) ? 'ok' : 'ko') + '">Sur la période précédente : ' + pct(vs.returnPct) + ' au lieu de ' + pct(v.base.returnPct) + '</div>';
+    if (st && enh.folds && enh.folds.length) {
+      const v = E.validateOn(enh.folds, strat, (ctx) => E.combine(ctx.strat, ctx.settings, sel));
+      if (v) html += '<div class="val ' + (v.confirmed ? 'ok' : 'ko') + '">' + (v.total > 1 ? 'Meilleure sur ' + v.wins + ' période(s) de contrôle sur ' + v.total + ' · ' : '') +
+        'période précédente : ' + pct(v.stats.returnPct) + ' au lieu de ' + pct(v.base.returnPct) + '</div>';
     }
     $('enhanceCombined').innerHTML = html;
   }
@@ -993,12 +1102,19 @@
     s.frenchText = F.french.toFrench(s) || '';
     loadStrategy(s);
     if (c.settings.leverage !== settings.leverage) $('leverage').value = String(c.settings.leverage);
+    if (c.settings.sizing !== settings.sizing || c.settings.riskPct !== settings.riskPct) {
+      $('brokerSizing').value = c.settings.sizing; $('brokerRisk').value = c.settings.riskPct; $('brokerSizing').dispatchEvent(new Event('change'));
+    }
+    if (c.settings.news && !settings.news) {
+      $('newsOn').checked = true; $('newsMode').value = c.settings.news.mode; $('newsBefore').value = c.settings.news.before; $('newsAfter').value = c.settings.news.after;
+      updateNewsUI();
+    }
     $('preset').value = 'mine';
     $('deleteStrat').hidden = true;
     $('presetDesc').textContent = 'Améliorations appliquées : ' + sel.map((x) => x.title).join(' ; ') + '.' +
       (s.frenchText ? '' : ' Le texte français ne peut pas décrire ces réglages : voir « Règles techniques ».');
     if (!s.frenchText) $('rulesDetails').open = true;
-    logEvent('strategy.enhanced', 'Améliorations appliquées à ' + strat.name + ' : ' + sel.map((x) => x.title).join(' ; '), { before: strat, after: s, leverage: c.settings.leverage });
+    logEvent('strategy.enhanced', 'Améliorations appliquées à ' + strat.name + ' : ' + sel.map((x) => x.title).join(' ; '), { before: strat, after: s, leverage: c.settings.leverage, sizing: c.settings.sizing, riskPct: c.settings.riskPct, news: c.settings.news ? { mode: c.settings.news.mode, before: c.settings.news.before, after: c.settings.news.after } : null });
     updateStyleHint();
     closeEnhancer();
     $('form').requestSubmit();
@@ -1014,6 +1130,7 @@
       stats: lastRun && lastRun.stats, timeframe: $('depTimeframe').value, sizing: $('depSizing').value,
       fixedLots: Number($('depLots').value) || 0.01, riskPct: Number($('depRisk').value) || 1,
       maxLots: Number($('depMaxLots').value) || 1, maxSpreadPips: Number($('depSpread').value) || 0, strat: strat,
+      news: { enabled: $('newsOn').checked, mode: $('newsMode').value, before: Number($('newsBefore').value) || 0, after: Number($('newsAfter').value) || 0, impact: $('newsImpact').value },
     };
   }
   function refreshDeploy() {
@@ -1024,8 +1141,9 @@
     $('depSizingHint').textContent = o.sizing === 'backtest'
       ? 'Taille = capital du compte × ' + o.exposurePct + ' % × levier ' + o.leverage + '. Avec ' + money.format(o.capital) + ' : ≈ ' + num2.format(notional / 100000) +
         ' lot(s) standard (' + Math.round(notional).toLocaleString('fr-FR') + ' unités), limité par le plafond.'
-      : o.sizing === 'risk' ? 'La taille est calculée pour perdre ' + num1.format(o.riskPct) + ' % du capital si le stop-loss (' + (o.strat.stopLossPips || 0) + ' pips) est touché.' +
-        (o.strat.stopLossPips ? '' : ' Cette stratégie n\'a pas de stop-loss : l\'EA utilisera les lots fixes.')
+      : o.sizing === 'risk' ? 'La taille est calculée pour perdre ' + num1.format(o.riskPct) + ' % du capital si le stop-loss (' +
+          (o.strat.stopAtr > 0 ? num1.format(o.strat.stopAtr) + ' ATR' : (o.strat.stopLossPips || 0) + ' pips') + ') est touché.' +
+        (o.strat.stopLossPips || o.strat.stopAtr ? '' : ' Cette stratégie n\'a pas de stop-loss : l\'EA utilisera les lots fixes.')
       : 'Chaque position fait ' + num2.format(o.fixedLots) + ' lot(s), quel que soit le capital.';
     $('depError').textContent = '';
     try {
@@ -1046,9 +1164,9 @@
     document.querySelectorAll('.dep-pair').forEach((e) => { e.textContent = settings.pair.replace('/', ''); });
     $('depTimeframe').value = 'PERIOD_' + (lastRunCtx.timeframe || 'D1');
     $('depNotice').textContent = '';
+    $('depSizing').value = settings.sizing || 'backtest'; $('depLots').value = settings.fixedLots || 0.01; $('depRisk').value = settings.riskPct || 1;
     if (settings.broker) {
       // Mêmes réglages que la simulation « courtier », pour que l'EA et le testeur MT5 fassent pareil.
-      $('depSizing').value = settings.sizing; $('depLots').value = settings.fixedLots; $('depRisk').value = settings.riskPct;
       $('depMaxLots').value = settings.maxLots; $('depSpread').value = settings.maxSpreadPips;
       const cur = settings.broker.account.currency;
       if (![...$('bridgeCurrency').options].some((o) => o.value === cur)) $('bridgeCurrency').add(new Option(cur, cur));
@@ -1549,6 +1667,7 @@
     applyConfig({
       pair: config.pair, leverage: config.leverage, exposurePct: config.exposurePct, period: config.period, dateFrom: config.dateFrom, dateTo: config.dateTo,
       broker: Object.assign({ symbol: (config.pair || $('pair').value).replace('/', ''), tf: tfOk ? config.timeframe : 'D1', intrabar: true }, config.broker),
+      news: config.news ? Object.assign({ on: true }, config.news) : { on: false },
     });
     $('preset').value = 'mine';
     $('deleteStrat').hidden = true;
@@ -1632,7 +1751,7 @@
       data: dataLabel(c.loaded, c.settings), leverage: c.settings.leverage, capital: c.settings.capital,
       returnPct: s.returnPct, avgGainPct: avg.pct, withdrawn: s.totalWithdrawn || 0, monthlyGain: monthlyStats(c.result, c.settings.capital).avg, trades: s.trades, winRate: s.winRate, maxDrawdownPct: s.maxDrawdownPct,
       profitFactor: Number.isFinite(s.profitFactor) ? s.profitFactor : null,
-      rules: [c.strat.longEntry, c.strat.longExit, c.strat.shortEntry, c.strat.shortExit, c.strat.stopLossPips, c.strat.takeProfitPips].join('|'),
+      rules: [c.strat.longEntry, c.strat.longExit, c.strat.shortEntry, c.strat.shortExit, c.strat.stopLossPips, c.strat.takeProfitPips].concat(TM_FIELDS.map((f) => c.strat[f] || 0)).join('|'),
       strategy: c.strat, config: c.config,
     };
     entry.key = entry.at + '|' + entry.name;

@@ -150,6 +150,48 @@
             <input id="takeProfit" type="number" min="0" step="1" placeholder="aucun">
           </label>
         </div>
+        <details class="rules" id="tradeMgmt">
+          <summary>Gestion des trades <span class="hint-inline">(stops selon la volatilité, stop suiveur, équilibre, durée, pause)</span></summary>
+          <p class="hint">L'ATR mesure la volatilité moyenne d'une bougie. Une distance en ATR remplace la distance en pips ; 0 ou vide = non utilisé.</p>
+          <div class="row">
+            <label class="field">Stop-loss (× ATR)
+              <input id="stopAtr" type="number" min="0" step="0.1" placeholder="—">
+            </label>
+            <label class="field">Take-profit (× ATR)
+              <input id="takeAtr" type="number" min="0" step="0.1" placeholder="—">
+            </label>
+            <label class="field">Période de l'ATR
+              <input id="atrPeriod" type="number" min="2" max="200" step="1" placeholder="14">
+            </label>
+          </div>
+          <div class="row">
+            <label class="field">Stop suiveur (pips)
+              <input id="trailPips" type="number" min="0" step="1" placeholder="—">
+            </label>
+            <label class="field">Stop suiveur (× ATR)
+              <input id="trailAtr" type="number" min="0" step="0.1" placeholder="—">
+            </label>
+          </div>
+          <div class="row">
+            <label class="field">Stop à l'entrée après un gain de (pips)
+              <input id="breakevenPips" type="number" min="0" step="1" placeholder="—">
+            </label>
+            <label class="field">… ou de (× ATR)
+              <input id="breakevenAtr" type="number" min="0" step="0.1" placeholder="—">
+            </label>
+          </div>
+          <div class="row">
+            <label class="field">Fermer après (bougies)
+              <input id="maxBars" type="number" min="0" step="1" placeholder="jamais">
+            </label>
+            <label class="field">Pause après (pertes de suite)
+              <input id="pauseLosses" type="number" min="0" step="1" placeholder="—">
+            </label>
+            <label class="field">Durée de la pause (bougies)
+              <input id="pauseBars" type="number" min="0" step="1" placeholder="—">
+            </label>
+          </div>
+        </details>
         <label class="field">Indicateurs à afficher sur le graphique
           <input id="plots" type="text" spellcheck="false" placeholder="ex. SMA(20), SMA(50), RSI(14)">
         </label>
@@ -183,7 +225,10 @@
           <div class="chips" id="chips"></div>
           <p class="hint">Les signaux sont calculés à la clôture d'une bougie et exécutés à l'ouverture de la suivante.
             Un signal d'entrée inverse ferme la position et la retourne.
-            <code>SMA(RSI(14), 9)</code> : un indicateur peut prendre une autre série comme source.</p>
+            <code>SMA(RSI(14), 9)</code> : un indicateur peut prendre une autre série comme source.
+            <code>EMA(50)@H4</code> : l'indicateur calculé sur une unité de temps supérieure (bougies closes seulement, sans regarder le futur).
+            <code>WEEKDAY</code> : 1 = lundi … 5 = vendredi ; <code>HOUR</code> : heure de la bougie.
+            Seuils relatifs à la volatilité : <code>CLOSE - PREV(CLOSE, 1) <code>SMA(RSI(14), 9)</code> : un indicateur peut prendre une autre série comme source.</p>gt; 1.5 * ATR(14)</code>.</p>
         </details>
       </section>
 
@@ -204,6 +249,24 @@
           <label class="field">Exposition (% du capital)
             <input id="exposure" type="number" min="1" max="100" step="1" value="100">
           </label>
+        </div>
+        <div class="row">
+            <label class="field">Taille des positions
+              <select id="brokerSizing">
+                <option value="backtest">Capital × exposition × levier</option>
+                <option value="fixed">Lots fixes</option>
+                <option value="risk">% du capital risqué (jusqu'au stop-loss)</option>
+              </select>
+            </label>
+            <label class="field" id="brokerLotsField" hidden>Lots
+              <input id="brokerLots" type="number" min="0.01" step="0.01" value="0.10">
+            </label>
+            <label class="field" id="brokerRiskField" hidden>Risque (%)
+              <input id="brokerRisk" type="number" min="0.1" max="10" step="0.1" value="1">
+            </label>
+            <label class="field">Commission par lot
+              <input id="commission" type="number" min="0" step="0.5" value="0" title="Aller-retour, dans la devise du compte (ex. 7 pour un compte ECN)">
+            </label>
         </div>
         <fieldset class="field">
           <legend>Période de backtesting</legend>
@@ -260,6 +323,33 @@
           </select>
         </label>
         <p class="hint" id="withdrawHint" hidden></p>
+        <label class="check"><input type="checkbox" id="newsOn">
+          <span>Éviter les annonces économiques <small>(calendrier économique de MetaTrader 5, via la passerelle)</small></span></label>
+        <div id="newsFields" hidden>
+          <div class="row">
+            <label class="field">Pendant une annonce
+              <select id="newsMode">
+                <option value="block">Ne pas entrer</option>
+                <option value="close">Fermer les positions et ne pas entrer</option>
+              </select>
+            </label>
+            <label class="field">Importance
+              <select id="newsImpact">
+                <option value="high">Fort impact</option>
+                <option value="medium">Impact moyen et fort</option>
+              </select>
+            </label>
+          </div>
+          <div class="row">
+            <label class="field">Minutes avant
+              <input id="newsBefore" type="number" min="0" max="1440" step="5" value="30">
+            </label>
+            <label class="field">Minutes après
+              <input id="newsAfter" type="number" min="0" max="1440" step="5" value="30">
+            </label>
+          </div>
+          <p class="hint" id="newsHint">Seules les annonces des deux devises de la paire comptent.</p>
+        </div>
       </section>
 
       <section>
@@ -296,19 +386,6 @@
             </label>
           </div>
           <div class="row">
-            <label class="field">Taille des positions
-              <select id="brokerSizing">
-                <option value="backtest">Capital × exposition × levier</option>
-                <option value="fixed">Lots fixes</option>
-                <option value="risk">% du capital risqué</option>
-              </select>
-            </label>
-            <label class="field" id="brokerLotsField" hidden>Lots
-              <input id="brokerLots" type="number" min="0.01" step="0.01" value="0.10">
-            </label>
-            <label class="field" id="brokerRiskField" hidden>Risque (%)
-              <input id="brokerRisk" type="number" min="0.1" max="10" step="0.1" value="1">
-            </label>
             <label class="field">Plafond (lots)
               <input id="brokerMaxLots" type="number" min="0.01" step="0.01" value="1">
             </label>

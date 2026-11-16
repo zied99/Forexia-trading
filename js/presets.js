@@ -60,6 +60,33 @@
       stopLossPips: 100, takeProfitPips: 250,
       plots: 'EMA(50), EMA(200), MACD_HIST(12,26,9)',
     },
+    {
+      id: 'supertrend', name: 'SuperTrend + ADX (1.2)',
+      frenchText: "Acheter quand le prix passe au-dessus du SuperTrend (10,3) et que l'ADX 14 est au-dessus de 20.\nVendre dans le cas inverse.\nStop loss 2 ATR, stop suiveur 3 ATR.",
+      description: 'Suivi de tendance : entrée au retournement du SuperTrend si la tendance a de la force (ADX > 20), stop à 2 ATR puis stop suiveur à 3 ATR.',
+      longEntry: 'CROSS_UP(CLOSE, SUPERTREND(10,3)) AND ADX(14) > 20', longExit: '',
+      shortEntry: 'CROSS_DOWN(CLOSE, SUPERTREND(10,3)) AND ADX(14) > 20', shortExit: '',
+      stopLossPips: 0, takeProfitPips: 0, stopAtr: 2, trailAtr: 3,
+      plots: 'SUPERTREND(10,3), ADX(14)',
+    },
+    {
+      id: 'donchian', name: 'Cassure du canal de Donchian 20 (1.2)',
+      frenchText: "Acheter quand le prix passe au-dessus du Donchian haut 20 et que le prix en hebdomadaire est au-dessus de la moyenne mobile exponentielle 20 en hebdomadaire.\nVendre dans le cas inverse.\nStop loss 2 ATR, stop au prix d'entrée après 1 ATR, fermer après 30 bougies.",
+      description: 'Cassure du plus haut / plus bas de 20 bougies, dans le sens de la tendance hebdomadaire ; stop à 2 ATR, remonté au prix d\'entrée après 1 ATR de gain.',
+      longEntry: 'CROSS_UP(CLOSE, DONCHIAN_UPPER(20)) AND CLOSE@W1 > EMA(20)@W1', longExit: '',
+      shortEntry: 'CROSS_DOWN(CLOSE, DONCHIAN_LOWER(20)) AND CLOSE@W1 < EMA(20)@W1', shortExit: '',
+      stopLossPips: 0, takeProfitPips: 0, stopAtr: 2, breakevenAtr: 1, maxBars: 30,
+      plots: 'DONCHIAN_UPPER(20), DONCHIAN_LOWER(20)',
+    },
+    {
+      id: 'ichimoku', name: 'Ichimoku — croisement Tenkan / Kijun (1.2)',
+      frenchText: "Acheter quand la Tenkan 9 passe au-dessus de la Kijun 26 et que la pente de la moyenne mobile exponentielle 50 est positive.\nVendre dans le cas inverse.\nStop loss 2 ATR, take profit 4 ATR.",
+      description: 'Croisement des lignes Tenkan et Kijun d\'Ichimoku, confirmé par la pente de l\'EMA 50 ; objectifs en multiples d\'ATR.',
+      longEntry: 'CROSS_UP(TENKAN(9), KIJUN(26)) AND SLOPE(EMA(50), 5) > 0', longExit: '',
+      shortEntry: 'CROSS_DOWN(TENKAN(9), KIJUN(26)) AND SLOPE(EMA(50), 5) < 0', shortExit: '',
+      stopLossPips: 0, takeProfitPips: 0, stopAtr: 2, takeAtr: 4,
+      plots: 'TENKAN(9), KIJUN(26), EMA(50)',
+    },
   ];
   root.Forexia = root.Forexia || {};
   root.Forexia.presets = { list };

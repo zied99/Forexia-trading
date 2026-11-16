@@ -38,6 +38,8 @@
   const bbMake = (name) => (m) => ind(name, [toInt(m[1], 20), m[2] ? Number(m[2].replace(',', '.')) : 2], 'BB');
   const PERIOD = '(?:\\s*\\(?\\s*(?:sur\\s+|de\\s+)?(\\d+)\\s*\\)?(?:\\s*(?:periodes?|jours|bougies|seances))?)?';
   const MENTIONS = [
+    { re: /divergence\s+haussiere(?:\s+(?:du|sur\s+le|de)\s+rsi(?:\s*\(?\s*(\d+)\s*\)?)?)?/g, make: (m) => raw('BULL_DIV(RSI(' + remember('RSI', m[1], 14)[0] + '), 14)', 'PATTERN') },
+    { re: /divergence\s+baissiere(?:\s+(?:du|sur\s+le|de)\s+rsi(?:\s*\(?\s*(\d+)\s*\)?)?)?/g, make: (m) => raw('BEAR_DIV(RSI(' + remember('RSI', m[1], 14)[0] + '), 14)', 'PATTERN') },
     { re: /(?:le\s+)?(?:%d|stoch\w*\s+%?d\b|ligne\s+%?d\b|signal\s+du\s+stoch\w*)/g, make: () => ind('STOCH_D', stochCtx.slice(), 'STOCH') },
     { re: /histogramme(?:\s+du)?(?:\s+macd)?(?:\s*\(?\s*(\d+)\s*[,;/ ]\s*(\d+)\s*[,;/ ]\s*(\d+)\s*\)?)?/g, make: (m) => {
       if (m[1]) macdCtx = [+m[1], +m[2], +m[3]];
@@ -62,8 +64,34 @@
     { re: /williams(?:\s*%?\s*r)?(?:\s*\(?\s*(\d+)\s*\)?)?/g, make: (m) => ind('WILLR', remember('WILLR', m[1], 14)) },
     { re: /atr(?:\s*\(?\s*(\d+)\s*\)?)?/g, make: (m) => ind('ATR', remember('ATR', m[1], 14)) },
     { re: /momentum(?:\s*\(?\s*(\d+)\s*\)?)?/g, make: (m) => ind('MOM', remember('MOM', m[1], 10)) },
+    // Forexia 1.2
+    { re: /(?:une\s+)?(?:bougie\s+)?(?:englobante\s+haussiere|avalement\s+haussier|engulfing\s+haussier)/g, make: () => ind('BULL_ENGULF', null, 'PATTERN') },
+    { re: /(?:une\s+)?(?:bougie\s+)?(?:englobante\s+baissiere|avalement\s+baissier|engulfing\s+baissier)/g, make: () => ind('BEAR_ENGULF', null, 'PATTERN') },
+    { re: /(?:un\s+)?(?:marteau|hammer)/g, make: () => ind('HAMMER', null, 'PATTERN') },
+    { re: /(?:une\s+)?(?:etoile\s+filante|shooting\s+star)/g, make: () => ind('SHOOTING_STAR', null, 'PATTERN') },
+    { re: /(?:l'\s*)?adx(?:\s*\(?\s*(\d+)\s*\)?)?/g, make: (m) => ind('ADX', remember('ADX', m[1], 14)) },
+    { re: /(?:le\s+)?(?:\+\s*di|di\s*\+|di\s+plus|di\s+positif)(?:\s*\(?\s*(\d+)\s*\)?)?/g, make: (m) => ind('PLUS_DI', remember('DI', m[1], 14), 'DMI') },
+    { re: /(?:le\s+)?(?:-\s*di|−\s*di|di\s*-|di\s+moins|di\s+negatif)(?:\s*\(?\s*(\d+)\s*\)?)?/g, make: (m) => ind('MINUS_DI', remember('DI', m[1], 14), 'DMI') },
+    { re: /(?:le\s+)?(?:sar\s+parabolique|parabolique\s+sar|parabolic\s+sar|psar|sar)\b/g, make: () => ind('PSAR', null, 'PRICE') },
+    { re: /(?:le\s+)?super\s*trend(?:\s*\(?\s*(\d+)\s*[,;/ ]\s*(\d+(?:[.,]\d+)?)\s*\)?)?/g, make: (m) => ind('SUPERTREND', [toInt(m[1], 10), m[2] ? Number(m[2].replace(',', '.')) : 3], 'PRICE') },
+    { re: /(?:le\s+|la\s+)?(?:canal\s+(?:de\s+)?)?donchian\s+(haut|haute|superieur|superieure|bas|basse|inferieur|inferieure|median|mediane)(?:\s*\(?\s*(\d+)\s*\)?)?/g,
+      make: (m) => ind(/^(haut|sup)/.test(m[1]) ? 'DONCHIAN_UPPER' : /^(bas|inf)/.test(m[1]) ? 'DONCHIAN_LOWER' : 'DONCHIAN_MIDDLE', [toInt(m[2], 20)], 'PRICE') },
+    { re: /(?:le\s+|la\s+)?(?:canal\s+(?:de\s+)?|bande\s+(?:de\s+)?)?keltner\s+(haut|haute|superieur|superieure|bas|basse|inferieur|inferieure)/g,
+      make: (m) => ind(/^(haut|sup)/.test(m[1]) ? 'KELTNER_UPPER' : 'KELTNER_LOWER', null, 'PRICE') },
+    { re: /(?:la\s+)?(?:resistance\s*1|r1)\b/g, make: () => ind('PIVOT_R1', null, 'PRICE') },
+    { re: /(?:le\s+)?(?:support\s*1|s1)\b/g, make: () => ind('PIVOT_S1', null, 'PRICE') },
+    { re: /(?:la\s+)?(?:resistance\s*2|r2)\b/g, make: () => ind('PIVOT_R2', null, 'PRICE') },
+    { re: /(?:le\s+)?(?:support\s*2|s2)\b/g, make: () => ind('PIVOT_S2', null, 'PRICE') },
+    { re: /(?:le\s+)?point\s+pivot|(?:le\s+)?pivot\b/g, make: () => ind('PIVOT', null, 'PRICE') },
+    { re: /(?:la\s+)?tenkan(?:\s+sen)?(?:\s*\(?\s*(\d+)\s*\)?)?/g, make: (m) => ind('TENKAN', [toInt(m[1], 9)], 'PRICE') },
+    { re: /(?:la\s+)?kijun(?:\s+sen)?(?:\s*\(?\s*(\d+)\s*\)?)?/g, make: (m) => ind('KIJUN', [toInt(m[1], 26)], 'PRICE') },
+    { re: /(?:la\s+)?(?:cloture\s+)?heikin\s*ashi/g, make: () => ind('HA_CLOSE', null, 'PRICE') },
     { re: /\b(?:le\s+|la\s+)?(?:prix|cours|cloture|close|bougie|paire)\b/g, make: () => ind('CLOSE', null, 'PRICE') },
   ];
+  const raw = (text, fam) => ({ ind: text, raw: text, fam: fam });
+  // Unité de temps citée après un indicateur : « la moyenne mobile 50 en H4 », « le prix en journalier ».
+  const TF_WORDS = { journalier: 'D1', quotidien: 'D1', hebdomadaire: 'W1', hebdo: 'W1', mensuel: 'MN' };
+  const TF_RE = /\b(?:en|sur\s+le|sur\s+l'unite|unite)\s+(m1|m5|m15|m30|h1|h4|d1|w1|mn|journalier|quotidien|hebdomadaire|hebdo|mensuel)\b/g;
 
   function findMentions(clause) {
     // Les paramètres explicites (MACD (5,35,5), stochastique (9,3,3)) valent pour toute la condition,
@@ -74,6 +102,8 @@
     if (sm) stochCtx = [+sm[1], toInt(sm[2], 3), toInt(sm[3], 3)];
     let masked = clause;
     const found = [];
+    const tfs = [];
+    masked = masked.replace(TF_RE, (all, tf, pos) => { tfs.push({ tf: TF_WORDS[tf] || tf.toUpperCase(), pos: pos }); return ' '.repeat(all.length); });
     for (const def of MENTIONS) {
       def.re.lastIndex = 0;
       let m;
@@ -87,13 +117,23 @@
     let m;
     while ((m = numRe.exec(masked))) found.push({ op: { num: Number(m[2].replace(',', '.')) }, pos: m.index + m[1].length });
     found.sort((a, b) => a.pos - b.pos);
+    // l'unité de temps s'applique à l'indicateur cité juste avant
+    for (const t of tfs) {
+      const prev = found.filter((f) => f.op.ind && f.pos < t.pos).pop();
+      if (prev) prev.op = Object.assign({}, prev.op, { tf: t.tf });
+    }
+    // « la pente de la moyenne mobile 50 » : variation de la moyenne sur 5 bougies
+    if (/\bpente\b/.test(clause)) {
+      const ma = found.find((f) => f.op.ind === 'SMA' || f.op.ind === 'EMA');
+      if (ma) ma.op = { ind: 'SLOPE', inner: ma.op, args: [5], fam: 'SLOPE' };
+    }
     return { ops: found.map((f) => f.op), masked: masked };
   }
 
   function renderOp(o) {
     if (o.num !== undefined) return String(o.num);
-    if (!o.args) return o.ind;
-    return o.ind + '(' + o.args.join(',') + ')';
+    const base = o.raw ? o.raw : o.inner ? o.ind + '(' + renderOp(o.inner) + ', ' + o.args.join(', ') + ')' : !o.args ? o.ind : o.ind + '(' + o.args.join(',') + ')';
+    return o.tf ? base + '@' + o.tf : base;
   }
 
   // Zones de surachat / survente usuelles.
@@ -119,6 +159,8 @@
       const nums = ops.filter((o) => o.num !== undefined);
       if (nums.length >= 2) return { kind: 'between', a: a, lo: Math.min(nums[0].num, nums[1].num), hi: Math.max(nums[0].num, nums[1].num) };
     }
+    // figure de bougie ou divergence : vraie (1) ou fausse (0)
+    if (a.fam === 'PATTERN' && !b) return { kind: 'cmp', op: '>', a: a, b: { num: 0 } };
     const zone = ZONES[a.fam] || [30, 70];
     const cross = CROSS_VERB.test(masked);
     if (/surven|survendu/.test(masked)) {
@@ -173,8 +215,14 @@
     if (fam === 'PRICE' || fam === 'BB' || fam === 'ATR') return n;
     return -n;
   }
+  const MIRROR_PAT = { BULL_ENGULF: 'BEAR_ENGULF', BEAR_ENGULF: 'BULL_ENGULF', HAMMER: 'SHOOTING_STAR', SHOOTING_STAR: 'HAMMER', PLUS_DI: 'MINUS_DI', MINUS_DI: 'PLUS_DI',
+    DONCHIAN_UPPER: 'DONCHIAN_LOWER', DONCHIAN_LOWER: 'DONCHIAN_UPPER', KELTNER_UPPER: 'KELTNER_LOWER', KELTNER_LOWER: 'KELTNER_UPPER',
+    PIVOT_R1: 'PIVOT_S1', PIVOT_S1: 'PIVOT_R1', PIVOT_R2: 'PIVOT_S2', PIVOT_S2: 'PIVOT_R2' };
   function mirrorOp(o, fam) {
-    if (o.num !== undefined) return { num: mirrorNum(o.num, fam) };
+    if (o.num !== undefined) return { num: fam === 'PATTERN' ? o.num : mirrorNum(o.num, fam) };
+    if (o.raw && /^BULL_DIV/.test(o.raw)) return Object.assign({}, o, { raw: o.raw.replace('BULL_DIV', 'BEAR_DIV'), ind: o.raw.replace('BULL_DIV', 'BEAR_DIV') });
+    if (o.raw && /^BEAR_DIV/.test(o.raw)) return Object.assign({}, o, { raw: o.raw.replace('BEAR_DIV', 'BULL_DIV'), ind: o.raw.replace('BEAR_DIV', 'BULL_DIV') });
+    if (MIRROR_PAT[o.ind]) return Object.assign({}, o, { ind: MIRROR_PAT[o.ind] });
     if (o.ind === 'BB_UPPER') return ind('BB_LOWER', o.args, 'BB');
     if (o.ind === 'BB_LOWER') return ind('BB_UPPER', o.args, 'BB');
     return o;
@@ -183,7 +231,8 @@
     const fam = c.a.fam;
     switch (c.kind) {
       case 'cross': return { kind: 'cross', dir: -c.dir, a: mirrorOp(c.a, fam), b: mirrorOp(c.b, fam) };
-      case 'cmp': return { kind: 'cmp', op: { '>': '<', '<': '>', '==': '==' }[c.op], a: mirrorOp(c.a, fam), b: mirrorOp(c.b, fam) };
+      case 'cmp': return fam === 'PATTERN' || (fam === 'ADX' && c.b.num !== undefined) || (fam === 'DMI' && c.b.fam === 'DMI') ? { kind: 'cmp', op: c.op, a: mirrorOp(c.a, fam), b: c.b.num !== undefined ? c.b : mirrorOp(c.b, fam) }
+        : { kind: 'cmp', op: { '>': '<', '<': '>', '==': '==' }[c.op], a: mirrorOp(c.a, fam), b: mirrorOp(c.b, fam) };
       case 'between': { const x = mirrorNum(c.lo, fam), y = mirrorNum(c.hi, fam); return { kind: 'between', a: c.a, lo: Math.min(x, y), hi: Math.max(x, y) }; }
       case 'trend': return { kind: 'trend', dir: -c.dir, a: c.a };
     }
@@ -231,6 +280,23 @@
     const num = '(\\d+(?:[.,]\\d+)?)';
     const sl = new RegExp('\\b(?:stop\\s*loss|stop|sl)\\b\\s*(?:de|a|:|=|fixe a|place a)?\\s*' + num + '\\s*(?:pips?|points?)?', 'g');
     const tp = new RegExp('\\b(?:take\\s*profit|tp|objectif(?:\\s+de\\s+gain)?|prise\\s+de\\s+(?:profits?|benefices?)|prendre\\s+(?:les\\s+|le\\s+)?(?:profits?|benefices?|gains?))\\b\\s*(?:de|a|:|=|fixe a|place a)?\\s*' + num + '\\s*(?:pips?|points?)?', 'g');
+    const nv = (v) => Number(v.replace(',', '.'));
+    const UNIT = '\\s*(pips?|points?|x?\\s*atr(?:\\s*(\\d+))?|fois\\s+l\'?\\s*atr(?:\\s*(\\d+))?)';
+    const isAtr = (u) => /atr/.test(u);
+    const atrP = (a, b) => { const p = toInt(a || b, 0); if (p && p !== 14) out.atrPeriod = p; };
+    // Forexia 1.2 : stop suiveur, stop au prix d'entrée, distances en ATR, durée maximale, pause après des pertes
+    t = t.replace(new RegExp('\\b(?:stop\\s+suiveur|trailing(?:\\s+stop)?|stop\\s+glissant)\\b\\s*(?:de|a|:|=)?\\s*' + num + UNIT, 'g'), (_, v, u, p1, p2) => {
+      if (isAtr(u)) { out.trailAtr = nv(v); atrP(p1, p2); } else out.trailPips = nv(v); return ' . ';
+    });
+    t = t.replace(new RegExp('\\b(?:(?:remonter|mettre|placer|deplacer)\\s+)?(?:le\\s+)?(?:stop\\s+)?(?:au\\s+|a\\s+l\'|a\\s+)?(?:point\\s+mort|equilibre|break\\s*even|prix\\s+d\'entree)\\s*(?:apres|des|a\\s+partir\\s+de|au\\s+dela\\s+de)?\\s*(?:un\\s+gain\\s+de\\s*|\\+\\s*)?' + num + UNIT, 'g'), (_, v, u, p1, p2) => {
+      if (isAtr(u)) { out.breakevenAtr = nv(v); atrP(p1, p2); } else out.breakevenPips = nv(v); return ' . ';
+    });
+    t = t.replace(new RegExp('\\b(?:stop\\s*loss|stop|sl)\\b\\s*(?:de|a|:|=)?\\s*' + num + '\\s*(?:x\\s*|fois\\s+l\'?\\s*)?atr(?:\\s*(\\d+))?', 'g'), (_, v, p) => { out.stopAtr = nv(v); atrP(p); return ' . '; });
+    t = t.replace(new RegExp('\\b(?:take\\s*profit|tp|objectif)\\b\\s*(?:de|a|:|=)?\\s*' + num + '\\s*(?:x\\s*|fois\\s+l\'?\\s*)?atr(?:\\s*(\\d+))?', 'g'), (_, v, p) => { out.takeAtr = nv(v); atrP(p); return ' . '; });
+    const BARS = '\\s*(?:bougies?|barres?|periodes?|jours?|seances?)';
+    t = t.replace(new RegExp('\\b(?:(?:fermer|cloturer|sortir|couper)\\w*\\s+(?:de\\s+)?(?:la\\s+position\\s+|les\\s+positions\\s+)?(?:apres|au\\s+bout\\s+de)|duree\\s+max(?:imale)?\\s*(?:de|:)?)\\s*(\\d+)' + BARS, 'g'), (_, v) => { out.maxBars = +v; return ' . '; });
+    t = t.replace(new RegExp('\\bpause\\s+(?:de\\s+)?(\\d+)' + BARS + '\\s+(?:apres|au\\s+bout\\s+de)\\s+(\\d+)\\s+pertes?(?:\\s+(?:consecutives?|de\\s+suite|d\'affilee))?', 'g'), (_, b, l) => { out.pauseBars = +b; out.pauseLosses = +l; return ' . '; });
+    t = t.replace(new RegExp('\\bapres\\s+(\\d+)\\s+pertes?(?:\\s+(?:consecutives?|de\\s+suite|d\'affilee))?\\s*,?\\s*(?:faire\\s+)?(?:une\\s+)?(?:pause\\s+(?:de\\s+)?|ne\\s+plus\\s+(?:entrer|trader|prendre\\s+de\\s+position)\\s+pendant\\s+)(\\d+)' + BARS, 'g'), (_, l, b) => { out.pauseBars = +b; out.pauseLosses = +l; return ' . '; });
     t = t.replace(sl, (_, v) => { out.stopLossPips = Number(v.replace(',', '.')); return ' . '; });
     t = t.replace(tp, (_, v) => { out.takeProfitPips = Number(v.replace(',', '.')); return ' . '; });
 
@@ -276,6 +342,14 @@
     }
     if (out.stopLossPips) out.understood.push({ key: 'sl', label: 'Stop-loss', rule: out.stopLossPips + ' pips' });
     if (out.takeProfitPips) out.understood.push({ key: 'tp', label: 'Take-profit', rule: out.takeProfitPips + ' pips' });
+    const fr = (v) => String(v).replace('.', ',');
+    const atrTxt = ' ATR' + (out.atrPeriod ? ' ' + out.atrPeriod : '');
+    if (out.stopAtr) out.understood.push({ key: 'slAtr', label: 'Stop-loss', rule: fr(out.stopAtr) + atrTxt });
+    if (out.takeAtr) out.understood.push({ key: 'tpAtr', label: 'Take-profit', rule: fr(out.takeAtr) + atrTxt });
+    if (out.trailPips || out.trailAtr) out.understood.push({ key: 'trail', label: 'Stop suiveur', rule: out.trailAtr ? fr(out.trailAtr) + atrTxt : out.trailPips + ' pips' });
+    if (out.breakevenPips || out.breakevenAtr) out.understood.push({ key: 'be', label: 'Stop au prix d\'entrée après', rule: out.breakevenAtr ? fr(out.breakevenAtr) + atrTxt : out.breakevenPips + ' pips' });
+    if (out.maxBars) out.understood.push({ key: 'mb', label: 'Durée maximale', rule: out.maxBars + ' bougies' });
+    if (out.pauseLosses) out.understood.push({ key: 'pz', label: 'Pause', rule: out.pauseBars + ' bougies après ' + out.pauseLosses + ' pertes de suite' });
     if (!out.longEntry && !out.shortEntry) out.warnings.push('Aucune règle d\'entrée trouvée. Commencez une phrase par « Acheter quand… » ou « Vendre quand… ».');
     out.plots = derivePlots(out);
     return out;
@@ -285,11 +359,12 @@
   // ---------- Indicateurs à tracer ----------
   function derivePlots(rules) {
     const seen = [];
-    const re = /\b(SMA|EMA|RSI|MACD_SIGNAL|MACD_HIST|MACD|STOCH_K|STOCH_D|BB_UPPER|BB_MIDDLE|BB_LOWER|CCI|WILLR|ATR|MOM|ROC)\(([^()]*)\)/g;
+    const re = /\b(SMA|EMA|RSI|MACD_SIGNAL|MACD_HIST|MACD|STOCH_K|STOCH_D|BB_UPPER|BB_MIDDLE|BB_LOWER|CCI|WILLR|ATR|MOM|ROC|ADX|PLUS_DI|MINUS_DI|SUPERTREND|DONCHIAN_UPPER|DONCHIAN_MIDDLE|DONCHIAN_LOWER|KELTNER_UPPER|KELTNER_LOWER|TENKAN|KIJUN|SENKOU_A|SENKOU_B)\(([^()]*)\)(?!@)|\b(PSAR|PIVOT|PIVOT_R1|PIVOT_S1|KELTNER_UPPER|KELTNER_LOWER)\b(?![(@])/g;
     for (const k of ['longEntry', 'longExit', 'shortEntry', 'shortExit']) {
       let m;
       re.lastIndex = 0;
       while ((m = re.exec(rules[k] || ''))) {
+        if (m[3]) { if (!seen.includes(m[3])) seen.push(m[3]); continue; }
         const s = m[1] + '(' + m[2].replace(/\s+/g, '') + ')';
         if (!seen.includes(s)) seen.push(s);
         if (/^BB_/.test(m[1])) for (const b of ['BB_UPPER', 'BB_MIDDLE', 'BB_LOWER']) { const x = b + '(' + m[2].replace(/\s+/g, '') + ')'; if (!seen.includes(x)) seen.push(x); }
@@ -363,8 +438,20 @@
 
   // ---------- Règles techniques -> français ----------
   const R = () => root.Forexia.rules;
+  const PAT_FR = { BULL_ENGULF: 'une englobante haussière', BEAR_ENGULF: 'une englobante baissière', HAMMER: 'un marteau', SHOOTING_STAR: 'une étoile filante' };
+  const SIMPLE_FR = { PSAR: 'le SAR parabolique', PIVOT: 'le point pivot', PIVOT_R1: 'la résistance 1', PIVOT_S1: 'le support 1', PIVOT_R2: 'la résistance 2', PIVOT_S2: 'le support 2',
+    HA_CLOSE: 'la clôture Heikin Ashi', KELTNER_UPPER: 'le canal de Keltner haut', KELTNER_LOWER: 'le canal de Keltner bas' };
+  const TF_FR = { D1: 'journalier', W1: 'hebdomadaire', MN: 'mensuel' };
   function opFr(n) {
+    if (n.k === 'tf') return opFr(n.a) + ' en ' + (TF_FR[n.tf] || n.tf);
     if (n.k === 'num') return String(n.v);
+    if (n.k === 'series' && PAT_FR[n.name]) return PAT_FR[n.name];
+    if (n.k === 'call' && PAT_FR[n.name] && !n.args.length) return PAT_FR[n.name];
+    if ((n.k === 'series' || (n.k === 'call' && !n.args.length)) && SIMPLE_FR[n.name]) return SIMPLE_FR[n.name];
+    if (n.k === 'call' && n.name === 'SLOPE' && n.args.length === 2 && n.args[1].k === 'num' && n.args[1].v === 5 && n.args[0].k === 'call' && /^(SMA|EMA)$/.test(n.args[0].name)) return 'la pente de ' + opFr(n.args[0]);
+    if (n.k === 'call' && /^(BULL|BEAR)_DIV$/.test(n.name) && n.args.length === 2 && n.args[0].k === 'call' && n.args[0].name === 'RSI' && n.args[1].v === 14) {
+      return 'une divergence ' + (n.name === 'BULL_DIV' ? 'haussière' : 'baissière') + ' du RSI ' + (n.args[0].args.length ? n.args[0].args[0].v : 14);
+    }
     if (n.k === 'neg' && n.a.k === 'num') return String(-n.a.v);
     if (n.k === 'series' && (n.name === 'CLOSE' || n.name === 'PRICE')) return 'le prix';
     if (n.k !== 'call' || n.args.some((a) => a.k !== 'num')) throw new Error('non traduisible');
@@ -386,6 +473,18 @@
       case 'WILLR': return 'le Williams %R ' + p(14);
       case 'ATR': return "l'ATR " + p(14);
       case 'MOM': return 'le momentum ' + p(10);
+      case 'ADX': return "l'ADX " + p(14);
+      case 'PLUS_DI': return 'le +DI ' + p(14);
+      case 'MINUS_DI': return 'le -DI ' + p(14);
+      case 'SUPERTREND': return 'le SuperTrend (' + (a.length ? a : [10, 3]).join(',') + ')';
+      case 'DONCHIAN_UPPER': return 'le Donchian haut ' + p(20);
+      case 'DONCHIAN_LOWER': return 'le Donchian bas ' + p(20);
+      case 'DONCHIAN_MIDDLE': return 'le Donchian médian ' + p(20);
+      case 'TENKAN': return 'la Tenkan ' + p(9);
+      case 'KIJUN': return 'la Kijun ' + p(26);
+      case 'PSAR': if (!a.length) return 'le SAR parabolique'; break;
+      case 'KELTNER_UPPER': if (!a.length) return 'le canal de Keltner haut'; break;
+      case 'KELTNER_LOWER': if (!a.length) return 'le canal de Keltner bas'; break;
     }
     throw new Error('non traduisible');
   }
@@ -403,13 +502,17 @@
         return opFr(x) + (op === '>' ? ' monte' : ' descend');
       }
       if (isNum(x) && !isNum(y)) { [x, y] = [y, x]; op = { '>': '<', '<': '>', '==': '==' }[op]; }
+      const patName = x.k === 'call' ? x.name : x.k === 'series' ? x.name : '';
+      if (op === '>' && y.k === 'num' && y.v === 0 && (PAT_FR[patName] || /^(BULL|BEAR)_DIV$/.test(patName))) return opFr(x) + ' apparaît';
+      if (x.k === 'call' && x.name === 'SLOPE' && y.k === 'num' && y.v === 0 && op !== '==') return opFr(x) + (op === '>' ? ' est positive' : ' est négative');
       return opFr(x) + (op === '>' ? ' est au-dessus de ' : op === '<' ? ' est en dessous de ' : ' vaut ') + opFr(y);
     }
     throw new Error('non traduisible');
   }
   function splitBin(n, op) { return n.k === 'bin' && n.op === op ? splitBin(n.a, op).concat(splitBin(n.b, op)) : [n]; }
   function conditionFr(rule) {
-    return splitBin(R().parse(rule), 'OR').map((g) => splitBin(g, 'AND').map(clauseFr).join(' et que ')).join(' ou que ');
+    return splitBin(R().parse(rule), 'OR').map((g) => splitBin(g, 'AND').map(clauseFr).join(' et que ')).join(' ou que ')
+      .replace(/\bde le /g, 'du ').replace(/\bà le /g, 'au ');
   }
 
   /** Décrit une stratégie en français. Renvoie null si le texte ne redonne pas exactement les mêmes règles. */
@@ -422,12 +525,24 @@
     const risk = [];
     if (strategy.stopLossPips > 0) risk.push('stop loss ' + strategy.stopLossPips + ' pips');
     if (strategy.takeProfitPips > 0) risk.push('take profit ' + strategy.takeProfitPips + ' pips');
+    const fr = (v) => String(v).replace('.', ',');
+    const atr = ' ATR' + (strategy.atrPeriod && strategy.atrPeriod !== 14 ? ' ' + strategy.atrPeriod : '');
+    if (strategy.stopAtr > 0) risk.push('stop loss ' + fr(strategy.stopAtr) + atr);
+    if (strategy.takeAtr > 0) risk.push('take profit ' + fr(strategy.takeAtr) + atr);
+    if (strategy.trailAtr > 0) risk.push('stop suiveur ' + fr(strategy.trailAtr) + atr); else if (strategy.trailPips > 0) risk.push('stop suiveur ' + strategy.trailPips + ' pips');
+    if (strategy.breakevenAtr > 0) risk.push('stop au prix d\'entrée après ' + fr(strategy.breakevenAtr) + atr); else if (strategy.breakevenPips > 0) risk.push('stop au prix d\'entrée après ' + strategy.breakevenPips + ' pips');
+    if (strategy.maxBars > 0) risk.push('fermer après ' + strategy.maxBars + ' bougies');
+    if (strategy.pauseLosses > 0 && strategy.pauseBars > 0) risk.push('pause de ' + strategy.pauseBars + ' bougies après ' + strategy.pauseLosses + ' pertes de suite');
     if (risk.length) lines.push(risk[0][0].toUpperCase() + risk.join(', ').slice(1) + '.');
     const text = lines.join('\n');
     const back = parse(text);
     if (back.warnings.length) return null;
     for (const k of ['longEntry', 'shortEntry', 'longExit', 'shortExit']) if (R().canonical(back[k]) !== R().canonical(strategy[k] || '')) return null;
     if ((back.stopLossPips || 0) !== (strategy.stopLossPips || 0) || (back.takeProfitPips || 0) !== (strategy.takeProfitPips || 0)) return null;
+    const usesAtr = ['stopAtr', 'takeAtr', 'trailAtr', 'breakevenAtr'].some((k) => strategy[k] > 0);
+    for (const k of ['stopAtr', 'takeAtr', 'trailPips', 'trailAtr', 'breakevenPips', 'breakevenAtr', 'maxBars']) if ((back[k] || 0) !== (strategy[k] || 0)) return null;
+    if (strategy.pauseLosses > 0 && strategy.pauseBars > 0 && (back.pauseLosses !== strategy.pauseLosses || back.pauseBars !== strategy.pauseBars)) return null;
+    if (usesAtr && (back.atrPeriod || 14) !== (strategy.atrPeriod || 14)) return null;
     return text;
   }
 

@@ -456,6 +456,52 @@ test('« Ne prendre que les achats » garde une sortie', () => {
   if (dir) { const o = dir.apply({ strat: macd, settings: base }).strat; if (!o.longExit && !o.shortExit) throw new Error('pas de sortie'); }
 });
 
+test('Améliorer 1.2 : note, groupes, contrôle multi-périodes et combinaison', () => {
+  // note : régularité et facteur de profit comptent
+  const a = { returnPct: 10, maxDrawdownPct: 4, trades: 20, months: 12, winMonthsPct: 75, profitFactor: 2 };
+  const b = Object.assign({}, a, { winMonthsPct: 40, profitFactor: 1.1 });
+  if (!(E.score(a) > E.score(b))) throw new Error('régularité ignorée');
+  eq(E.score(Object.assign({}, a, { trades: 2 })) < -900, true);
+  const rg = D.periodRange('1y', new Date('2024-12-31T00:00:00Z'));
+  const bars = D.generateSynthetic('EUR/USD', new Date('2019-01-01T00:00:00Z'), rg.end);
+  const start = D.indexFrom(bars, rg.start);
+  const strat = { name: 't', longEntry: 'CROSS_UP(RSI(14), 30)', longExit: 'RSI(14) > 70', shortEntry: 'CROSS_DOWN(RSI(14), 70)', shortExit: 'RSI(14) < 30', stopLossPips: 50 };
+  const set = { capital: 10000, leverage: 10, exposurePct: 100, spreadPips: 1, pair: 'EUR/USD', startIndex: start, timeframe: 'D1', newsCalendar: [Date.parse('2024-06-07T12:30:00Z') / 1000] };
+  const r = E.suggest(bars, strat, set, 'none');
+  eq(r.folds.length, 3, 'périodes de contrôle');
+  for (const sg of r.suggestions) {
+    if (!E.ORDER.includes(sg.group)) throw new Error('groupe hors ordre : ' + sg.group);
+    if (sg.validation && sg.validation.total !== 3) throw new Error('contrôle incomplet');
+  }
+  const combo = r.suggestions.find((x) => x.group === 'Combinaison recommandée');
+  if (combo) {
+    // cocher la combinaison et l'une de ses composantes n'applique celle-ci qu'une fois
+    const once = E.combine(strat, set, [combo]), twice = E.combine(strat, set, [combo, combo.combo[0]]);
+    eq(JSON.stringify(once.strat), JSON.stringify(twice.strat));
+  }
+  // les nouveaux groupes produisent des règles valides
+  const F = globalThis.Forexia;
+  const groups = new Set(r.suggestions.map((x) => x.group));
+  for (const sg of r.suggestions) { const c = E.combine(strat, set, [sg]); for (const k of ['longEntry', 'longExit', 'shortEntry', 'shortExit']) eq(F.rules.validate(c.strat[k]), null, sg.title); }
+  if (groups.size < 4) throw new Error('trop peu de groupes : ' + [...groups].join(', '));
+});
+test('Améliorer : ma propre amélioration de gestion des trades', () => {
+  const bars = D.generateSynthetic('EUR/USD', new Date('2022-01-01T00:00:00Z'), new Date('2024-12-31T00:00:00Z'));
+  const start = D.indexFrom(bars, new Date('2024-01-01T00:00:00Z'));
+  const strat = { name: 't', longEntry: 'CROSS_UP(RSI(14), 30)', shortEntry: 'CROSS_DOWN(RSI(14), 70)' };
+  const sg = E.customSuggestion(bars, strat, { capital: 10000, leverage: 10, exposurePct: 100, spreadPips: 1, pair: 'EUR/USD', startIndex: start }, 'Stop suiveur 2 ATR. Fermer après 10 bougies.', 'and');
+  eq(sg.error, undefined); const c = sg.apply({ strat: strat, settings: {} }).strat; eq(c.trailAtr, 2); eq(c.maxBars, 10);
+});
+test('Français 1.2 : nouveaux indicateurs, unité de temps, gestion des trades', () => {
+  const r = FR.parse("Acheter quand le prix est au-dessus de la moyenne mobile 50 en H4 et que l'ADX 14 est au-dessus de 25. Vendre dans le cas inverse. Stop loss 2 ATR, stop suiveur 30 pips, fermer après 10 bougies.");
+  eq(r.longEntry, 'CLOSE > SMA(50)@H4 AND ADX(14) > 25'); eq(r.shortEntry, 'CLOSE < SMA(50)@H4 AND ADX(14) > 25');
+  eq(r.stopAtr, 2); eq(r.trailPips, 30); eq(r.maxBars, 10); eq(r.stopLossPips, 0);
+  const d = FR.parse('Acheter quand le +DI est au-dessus du -DI. Vendre dans le cas inverse. Pause de 5 bougies après 3 pertes de suite.');
+  eq(d.shortEntry, 'MINUS_DI(14) > PLUS_DI(14)'); eq(d.pauseBars, 5); eq(d.pauseLosses, 3);
+  eq(FR.parse('Acheter quand une divergence haussière du RSI 9 apparaît. Vendre dans le cas inverse.').shortEntry, 'BEAR_DIV(RSI(9), 14) > 0');
+  for (const p of P.list) if (/\(1\.2\)/.test(p.name) && !FR.toFrench(p)) throw new Error('toFrench ' + p.id);
+});
+
 console.log('Réalisme des données');
 test('Mèches estimées : amplitude ≈ 2 × variation moyenne, corps conservé', () => {
   const rg = D.periodRange('1y', new Date('2025-06-30'));
@@ -512,7 +558,9 @@ test('Courtier idéal (spread 0, sans swap, lots continus) = moteur standard', (
     const a = B.runBacktest(bars, p, set);
     const b = BK.runBrokerBacktest(bars, p, Object.assign({}, set, { sizing: 'backtest', maxLots: 1e9, maxSpreadPips: 0 }), { spec: idealSpec, account: { marginSoSo: 50 } });
     eq(b.trades.length, a.trades.length, p.id + ' trades');
-    near(b.stats.finalEquity, a.stats.finalEquity, 1e-9 * a.stats.finalEquity, p.id + ' capital final');
+    // stops en ATR : le courtier arrondit les niveaux à 5 décimales (comme MT5), d'où un écart minime
+    const atr = p.stopAtr || p.takeAtr || p.trailAtr || p.breakevenAtr;
+    near(b.stats.finalEquity, a.stats.finalEquity, (atr ? 1e-4 : 1e-9) * a.stats.finalEquity, p.id + ' capital final');
   }
 });
 test('Courtier : spread payé à l\'achat (ask) et à la vente (clôture à l\'ask)', () => {

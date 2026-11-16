@@ -242,7 +242,16 @@
     let streak = 0, maxLossStreak = 0;
     for (const t of trades) { streak = t.pnl <= 0 ? streak + 1 : 0; maxLossStreak = Math.max(maxLossStreak, streak); }
     const first = bars[start].open, last = bars[bars.length - 1].close;
+    // Régularité : part des mois gagnants (fonds propres en fin de mois comparés à la fin du mois précédent).
+    let months = 0, winMonths = 0, prevEnd = capital, curKey = null, curEnd = capital;
+    for (let j = 0; j < equity.length; j++) {
+      const key = String(bars[start + j].date).slice(0, 7);
+      if (curKey !== null && key !== curKey) { months++; if (curEnd > prevEnd) winMonths++; prevEnd = curEnd; }
+      curKey = key; curEnd = equity[j];
+    }
+    if (curKey !== null) { months++; if (curEnd > prevEnd) winMonths++; }
     return {
+      months: months, winMonths: winMonths, winMonthsPct: months ? (winMonths / months) * 100 : 0,
       initialCapital: capital, finalEquity: final, netProfit: final - capital,
       returnPct: ((final - capital) / capital) * 100,
       trades: trades.length, wins: wins.length, losses: losses.length,
