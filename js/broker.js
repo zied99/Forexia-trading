@@ -57,12 +57,14 @@
     const step = spec.volumeStep || 0.01, vmin = spec.volumeMin || 0.01, vmax = spec.volumeMax || 100;
     const volDigits = Math.max(0, Math.ceil(-Math.log10(step) - 1e-9));
     const soLevel = (broker.account && broker.account.marginSoSo ? broker.account.marginSoSo : 50) / 100;
-    const slPips = strategy.stopLossPips > 0 ? strategy.stopLossPips : 0;
-    const tpPips = strategy.takeProfitPips > 0 ? strategy.takeProfitPips : 0;
+    const T = F.trade;
     const { signals: S } = F.backtest.compileStrategy(strategy, bars);
+    const A = T.atrSeries(bars, strategy), pause = T.makePause(strategy), news = T.makeNews(s.news);
+    const commission = s.commissionPerLot || 0;
+    const span = (i) => (i + 1 < n ? bars[i + 1].t - bars[i].t : i > 0 ? bars[i].t - bars[i - 1].t : 86400);
     const sub = broker.sub && broker.sub.length ? broker.sub : null;
     const notes = new Set();
-    const diag = { signals: 0, spreadDelayed: 0, spreadMissed: 0, lotsTooSmall: 0, orderFailed: 0 };
+    const diag = { signals: 0, paused: 0, newsBlocked: 0, spreadDelayed: 0, spreadMissed: 0, lotsTooSmall: 0, orderFailed: 0 };
 
     let balance = s.capital, pos = null, pending = null, ruined = false, barsInMarket = 0, subIdx = 0;
     const trades = [], equity = [], dates = [];
@@ -73,13 +75,13 @@
     const sp = s.spreadMode === 'fixed' ? () => fixedSp : s.spreadMode === 'add' ? (b) => (b.spread || 0) * point + fixedSp : (b) => (b.spread || 0) * point;
     const conv = (t) => convFactor(broker.conv, t);
 
-    function lotsFor(entry, t, eq) {
+    function lotsFor(entry, t, eq, slDist) {
       const k = conv(t);
       const perLot = entry * C * k; // valeur d'un lot dans la devise du compte
       let lots = s.fixedLots || 0.01;
       if (s.sizing === 'backtest') lots = (eq * (s.exposurePct || 100) / 100 * s.leverage) / perLot;
       else if (s.sizing === 'risk') {
-        if (slPips > 0) lots = (eq * (s.riskPct || 1) / 100) / (slPips * pip * C * k);
+        if (slDist > 0) lots = (eq * (s.riskPct || 1) / 100) / (slDist * C * k);
         else notes.add('Mode risque sans stop-loss : lots fixes utilisés.');
       }
       lots = Math.min(lots, s.maxLots || 1);
@@ -89,28 +91,31 @@
       if (lots < vmin) return 0;
       return roundTo(Math.min(lots, vmax), volDigits);
     }
-    function pnlAt(price, t) { return (price - pos.entry) * pos.dir * C * pos.lots * conv(t) + pos.swap; }
+    function pnlAt(price, t) { return (price - pos.entry) * pos.dir * C * pos.lots * conv(t) + pos.swap - pos.comm; }
 
     function open(dir, i, bid, spread, t) {
       const entry = roundTo(dir > 0 ? bid + spread : bid, spec.digits);
-      const lots = lotsFor(entry, t, balance);
+      const d = T.distances(strategy, A ? A[i - 1] : NaN, pip);
+      if (s.sizing === 'risk' && !(d.sl > 0)) notes.add('Mode risque sans stop-loss : lots fixes utilisés.');
+      const lots = lotsFor(entry, t, balance, d.sl);
       if (lots <= 0) { diag.lotsTooSmall++; notes.add('Ordres annulés : taille inférieure au minimum du courtier (' + vmin + ' lot).'); return; }
       pos = {
-        dir: dir, entry: entry, lots: lots, entryIndex: i, entryT: t, swap: 0, lastT: t,
-        sl: slPips ? roundTo(entry - dir * slPips * pip, spec.digits) : null,
-        tp: tpPips ? roundTo(entry + dir * tpPips * pip, spec.digits) : null,
+        dir: dir, entry: entry, lots: lots, entryIndex: i, entryT: t, swap: 0, lastT: t, comm: commission * lots,
+        sl: d.sl ? roundTo(entry - dir * d.sl, spec.digits) : null,
+        tp: d.tp ? roundTo(entry + dir * d.tp, spec.digits) : null, trail: d.trail, be: d.be, beDone: false,
         spreadCost: spread * C * lots * conv(t), margin: (entry * C * conv(t) / s.leverage) * lots,
       };
     }
     function close(i, price, reason, t) {
       const gross = (price - pos.entry) * pos.dir * C * pos.lots * conv(t);
-      const pnl = gross + pos.swap;
+      const pnl = gross + pos.swap - pos.comm;
       balance += pnl;
       trades.push({
         dir: pos.dir, entryDate: bars[pos.entryIndex].date, exitDate: bars[i].date, entryIndex: pos.entryIndex, exitIndex: i,
         entryPrice: pos.entry, exitPrice: price, lots: pos.lots, pips: (price - pos.entry) * pos.dir / pip,
-        pnl: pnl, swap: pos.swap, cost: pos.spreadCost, reason: reason, bars: i - pos.entryIndex, notional: pos.lots * C,
+        pnl: pnl, swap: pos.swap, cost: pos.spreadCost + pos.comm, commission: pos.comm, reason: reason, bars: i - pos.entryIndex, notional: pos.lots * C,
       });
+      pause.onClose(i, pnl);
       pos = null;
       if (balance <= 0) { balance = 0; ruined = true; }
       wd.check(i, balance, (amount) => { balance -= amount; });
@@ -149,7 +154,11 @@
       if (tpOk) { close(i, at(pos.tp), 'Take-profit', b.t); return; }
       // stop-out : fonds propres au pire prix de la bougie fine
       const worst = pos.dir > 0 ? b.low : b.high + spr;
-      if (balance + pnlAt(worst, b.t) < soLevel * pos.margin) close(i, worst, 'Margin call', b.t);
+      if (balance + pnlAt(worst, b.t) < soLevel * pos.margin) { close(i, worst, 'Margin call', b.t); return; }
+      // stop suiveur / passage à l'équilibre (niveaux arrondis au point, comme un OrderModify)
+      const before = pos.sl;
+      T.updateStops(pos, pos.entry, better);
+      if (pos.sl !== before && pos.sl !== null) pos.sl = roundTo(pos.sl, spec.digits);
     }
 
     for (let i = start; i < n; i++) {
@@ -165,10 +174,11 @@
       const first = subs[0], spread0 = sp(first);
       let fromK = 0;
       if (pending && !ruined) {
-        if (pending.exit && pos) close(i, pos.dir > 0 ? first.open : roundTo(first.open + spread0, spec.digits), 'Signal', bar.t);
+        if (pending.exit && pos) close(i, pos.dir > 0 ? first.open : roundTo(first.open + spread0, spec.digits), pending.reason || 'Signal', bar.t);
+        if (pending.enter && !pos && !ruined) diag.signals++;
+        if (pending.enter && !pos && !ruined && news.active && news.hits(bar.t, bar.t + span(i))) { diag.newsBlocked++; pending.enter = 0; }
         if (pending.enter && !pos && !ruined) {
           // Comme l'EA : si le spread est trop large, nouvel essai à la bougie fine suivante, jusqu'à la fin de la bougie.
-          diag.signals++;
           let k = 0;
           while (k < subs.length && s.maxSpreadPips > 0 && sp(subs[k]) / pip > s.maxSpreadPips) k++;
           if (k > 0) diag.spreadDelayed++;
@@ -177,6 +187,7 @@
         }
         pending = null;
       }
+      if (pos && news.closeMode && news.hits(bar.t, bar.t + span(i))) close(i, pos.dir > 0 ? first.open : roundTo(first.open + spread0, spec.digits), 'Annonce', bar.t);
       if (pos) {
         barsInMarket++;
         for (let k = fromK; k < subs.length && pos; k++) {
@@ -188,14 +199,7 @@
       if (i === n - 1) {
         if (pos) close(i, pos.dir > 0 ? bar.close : roundTo(bar.close + sp(last), spec.digits), 'Fin de période', bar.t);
       } else if (!ruined) {
-        const le = S.longEntry[i], se = S.shortEntry[i];
-        const wantLong = le && !se, wantShort = se && !le;
-        if (pos) {
-          const exit = pos.dir > 0 ? S.longExit[i] || wantShort : S.shortExit[i] || wantLong;
-          if (exit) pending = { exit: true, enter: pos.dir > 0 ? (wantShort ? -1 : 0) : wantLong ? 1 : 0 };
-        } else if (wantLong || wantShort) {
-          pending = { exit: false, enter: wantLong ? 1 : -1 };
-        }
+        pending = F.backtest.decide(S, i, pos, pause, diag, strategy);
       }
       equity.push(pos ? balance + pnlAt(pos.dir > 0 ? bar.close : bar.close + sp(last), bar.t) : balance);
       dates.push(bar.date);

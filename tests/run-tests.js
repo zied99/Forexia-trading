@@ -1,7 +1,7 @@
 /* Tests du moteur : node tests/run-tests.js */
 'use strict';
 const path = require('path');
-for (const f of ['indicators', 'expr', 'backtest', 'data', 'presets', 'french', 'enhancer', 'mql5', 'broker']) require(path.join(__dirname, '..', 'js', f + '.js'));
+for (const f of ['indicators', 'expr', 'trade', 'backtest', 'data', 'presets', 'french', 'enhancer', 'mql5', 'broker']) require(path.join(__dirname, '..', 'js', f + '.js'));
 const { indicators: I, rules: R, backtest: B, data: D, presets: P, french: FR, enhancer: E, mql5: MQ, broker: BK } = globalThis.Forexia;
 
 let failed = 0, passed = 0;
@@ -223,6 +223,88 @@ test('Retrait « dès le seuil » : position clôturée quand le compte atteint 
   const spec = { digits: 5, point: 0.00001, contract: 100000, volumeMin: 1e-9, volumeStep: 1e-9, volumeMax: 1e9, swapMode: 0 };
   const rb = BK.runBrokerBacktest(bb, strat, { capital: 10000, leverage: 10, exposurePct: 50, sizing: 'backtest', maxLots: 1e9, maxSpreadPips: 0, startIndex: 1, withdrawPct: 2, withdrawWhen: 'immediate' }, { spec });
   eq(rb.trades[0].reason, 'Retrait'); near(rb.withdrawals[0].amount, 200, 1e-6);
+});
+
+console.log('Gestion des trades 1.2');
+// bougies explicites : [open, high, low, close]
+function ohlc(rows) { return rows.map((r, i) => ({ date: '2024-02-' + String(i + 1).padStart(2, '0'), open: r[0], high: r[1], low: r[2], close: r[3] })); }
+const brokerSpec = { digits: 5, point: 0.00001, contract: 100000, volumeMin: 1e-9, volumeStep: 1e-9, volumeMax: 1e9, swapMode: 0 };
+const brokerSet = { capital: 10000, leverage: 10, exposurePct: 100, sizing: 'backtest', maxLots: 1e9, maxSpreadPips: 0, startIndex: 1 };
+const withT = (bars) => bars.map((b, i) => Object.assign({}, b, { t: 1706745600 + i * 86400, spread: 0 }));
+test('Distances en pips ou en multiples d\'ATR', () => {
+  const T = globalThis.Forexia.trade;
+  const d = T.distances({ stopLossPips: 20, stopAtr: 2, takeProfitPips: 50, trailPips: 10 }, 0.0015, 0.0001);
+  near(d.sl, 0.003, 1e-12); near(d.tp, 0.005, 1e-12); near(d.trail, 0.001, 1e-12); eq(d.be, 0);
+  // ATR indisponible : retour aux pips
+  near(T.distances({ stopLossPips: 20, stopAtr: 2 }, NaN, 0.0001).sl, 0.002, 1e-12);
+});
+test('Stop suiveur, passage à l\'équilibre, durée maximale (moteur standard)', () => {
+  const rows = [[1, 1, 1, 1], [1, 1, 1, 1], [1, 1.01, 1, 1.01], [1.01, 1.03, 1.01, 1.03], [1.03, 1.03, 1.025, 1.028], [1.028, 1.028, 0.99, 0.99], [0.99, 0.99, 0.99, 0.99]];
+  const bars = ohlc(rows), strat = { longEntry: 'PREV(CLOSE, 1) == 1 AND CLOSE == 1' };
+  const set = Object.assign({}, base, { exposurePct: 10 });
+  const tr = B.runBacktest(bars, Object.assign({}, strat, { trailPips: 100 }), set).trades[0];
+  eq(tr.reason, 'Stop-loss'); eq(tr.entryIndex, 2); near(tr.exitPrice, 1.02, 1e-12);
+  const be = B.runBacktest(bars, Object.assign({}, strat, { breakevenPips: 200 }), set).trades[0];
+  eq(be.reason, 'Stop-loss'); near(be.exitPrice, 1, 1e-12);
+  const none = B.runBacktest(bars, strat, set).trades[0];
+  eq(none.reason, 'Fin de période');
+  const mb = B.runBacktest(bars, Object.assign({}, strat, { maxBars: 2 }), set).trades[0];
+  eq(mb.reason, 'Durée max'); eq(mb.exitIndex - mb.entryIndex, 2);
+});
+test('Mêmes règles dans le moteur courtier', () => {
+  const rows = [[1, 1, 1, 1], [1, 1, 1, 1], [1, 1.01, 1, 1.01], [1.01, 1.03, 1.01, 1.03], [1.03, 1.03, 1.025, 1.028], [1.028, 1.028, 0.99, 0.99], [0.99, 0.99, 0.99, 0.99]];
+  const bars = withT(ohlc(rows)), strat = { longEntry: 'PREV(CLOSE, 1) == 1 AND CLOSE == 1' };
+  const run = (x) => BK.runBrokerBacktest(bars, Object.assign({}, strat, x), Object.assign({}, brokerSet, { exposurePct: 10 }), { spec: brokerSpec }).trades[0];
+  const tr = run({ trailPips: 100 }); eq(tr.reason, 'Stop-loss'); near(tr.exitPrice, 1.02, 1e-9);
+  const be = run({ breakevenPips: 200 }); near(be.exitPrice, 1, 1e-9);
+  const mb = run({ maxBars: 2 }); eq(mb.reason, 'Durée max'); eq(mb.exitIndex - mb.entryIndex, 2);
+});
+test('Stops en multiples d\'ATR', () => {
+  // ATR(2) constant = 0.01 ; stop à 1 ATR sous l'entrée
+  const rows = []; for (let i = 0; i < 8; i++) rows.push([1, 1.005, 0.995, 1]);
+  rows.push([1, 1.0, 0.985, 0.985], [0.985, 0.985, 0.985, 0.985]);
+  const r = B.runBacktest(ohlc(rows), { longEntry: 'DAY == 5', stopAtr: 1, atrPeriod: 2 }, Object.assign({}, base, { exposurePct: 10 }));
+  eq(r.trades[0].reason, 'Stop-loss'); near(r.trades[0].exitPrice, 0.99, 1e-9);
+});
+test('Pause après des pertes consécutives', () => {
+  const T = globalThis.Forexia.trade;
+  const p = T.makePause({ pauseLosses: 2, pauseBars: 3 });
+  p.onClose(5, -1); eq(p.blocked(6), false); p.onClose(7, -1);
+  eq(p.blocked(8), true); eq(p.blocked(10), true); eq(p.blocked(11), false);
+  p.onClose(12, -1); p.onClose(13, 5); p.onClose(14, -1); eq(p.blocked(15), false);
+  // dans le moteur : la perte suivante bloque les entrées et l'indique dans le diagnostic
+  const rows = [[1, 1, 1, 1]]; for (let i = 0; i < 12; i++) rows.push(i % 2 ? [0.99, 1, 0.99, 1] : [1, 1, 0.99, 0.99]);
+  const r = B.runBacktest(ohlc(rows), { longEntry: 'CLOSE == 1', longExit: 'CLOSE < 1', pauseLosses: 1, pauseBars: 3 }, Object.assign({}, base, { exposurePct: 10 }));
+  if (!(r.diag.paused > 0)) throw new Error('aucune entrée bloquée');
+  const free = B.runBacktest(ohlc(rows), { longEntry: 'CLOSE == 1', longExit: 'CLOSE < 1' }, Object.assign({}, base, { exposurePct: 10 }));
+  if (!(r.trades.length < free.trades.length)) throw new Error('la pause ne réduit pas le nombre de trades');
+});
+test('Calendrier économique : entrée bloquée ou position fermée', () => {
+  const bars = series([1, 1, 1, 1.01, 1.02, 1.03, 1.03]);
+  const t0 = Date.parse('2024-01-04T00:00:00Z') / 1000; // jour de l'entrée
+  const strat = { longEntry: 'DAY == 3' };
+  const blocked = B.runBacktest(bars, strat, Object.assign({}, base, { news: { times: [t0 + 14 * 3600], before: 30, after: 30, mode: 'block' } }));
+  eq(blocked.trades.length, 0); eq(blocked.diag.newsBlocked, 1);
+  // annonce la veille à 23h50, fenêtre de 30 min après : touche aussi le jour d'entrée
+  eq(B.runBacktest(bars, strat, Object.assign({}, base, { news: { times: [t0 - 600], before: 0, after: 30 } })).trades.length, 0);
+  eq(B.runBacktest(bars, strat, Object.assign({}, base, { news: { times: [t0 - 3600], before: 0, after: 30 } })).trades.length, 1);
+  const closed = B.runBacktest(bars, strat, Object.assign({}, base, { news: { times: [t0 + 86400 * 2 + 3600], before: 30, after: 30, mode: 'close' } }));
+  eq(closed.trades[0].reason, 'Annonce'); eq(closed.trades[0].exitIndex, 5);
+  const bb = withT(bars).map((b, i) => Object.assign(b, { t: Date.parse(b.date + 'T00:00:00Z') / 1000 }));
+  const rb = BK.runBrokerBacktest(bb, strat, Object.assign({}, brokerSet, { news: { times: [t0 + 86400 * 2 + 3600], before: 30, after: 30, mode: 'close' } }), { spec: brokerSpec });
+  eq(rb.trades[0].reason, 'Annonce'); eq(rb.trades[0].exitIndex, 5);
+});
+test('Commission par lot et taille au risque (moteur standard)', () => {
+  const rows = [[1, 1, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1], [1, 1, 0.99, 0.99], [0.99, 0.99, 0.99, 0.99]];
+  const strat = { longEntry: 'DAY == 2', stopLossPips: 50 };
+  const r = B.runBacktest(ohlc(rows), strat, Object.assign({}, base, { sizing: 'risk', riskPct: 2 }));
+  near(r.trades[0].pnl, -200, 1e-6); near(r.trades[0].lots, 0.4, 1e-9);
+  const c = B.runBacktest(ohlc(rows), strat, Object.assign({}, base, { sizing: 'risk', riskPct: 2, commissionPerLot: 7 }));
+  near(c.trades[0].pnl, -202.8, 1e-6);
+  const f = B.runBacktest(ohlc(rows), strat, Object.assign({}, base, { sizing: 'fixed', fixedLots: 0.5 }));
+  near(f.trades[0].pnl, -250, 1e-6);
+  const rb = BK.runBrokerBacktest(withT(ohlc(rows)), strat, Object.assign({}, brokerSet, { sizing: 'risk', riskPct: 2, commissionPerLot: 7 }), { spec: brokerSpec });
+  near(rb.trades[0].pnl, -202.8, 1e-6);
 });
 
 console.log('Données');
@@ -527,7 +609,16 @@ test('EA : accolades et parenthèses équilibrées', () => {
 });
 
 (async () => {
-  console.log('Téléchargement des cours (API simulée)');
+  test('EA 1.2 : gestion des trades et calendrier relus depuis le .mq5', () => {
+  const st = { name: 'T12', longEntry: 'CLOSE > SMA(CLOSE, 20)', longExit: 'CLOSE < SMA(CLOSE, 20)', stopAtr: 2, atrPeriod: 10, trailPips: 15, breakevenAtr: 1, maxBars: 12, pauseLosses: 3, pauseBars: 5 };
+  const ea = MQ.generate(st, { pair: 'EUR/USD', leverage: 10, exposurePct: 50, news: { enabled: true, mode: 'close', before: 45, after: 15 } });
+  for (const k of ['input double InpStopAtr = 2;', 'input int InpMaxBars = 12;', 'input bool InpNewsFilter = true;', 'input ENUM_FX_NEWS InpNewsMode = FX_NEWS_CLOSE;', 'input string InpNewsCurrencies = "EUR,USD";', 'CalendarValueHistory', 'Forexia\\\\calendar.csv', 'void OnTradeTransaction'])
+    if (!ea.code.includes(k)) throw new Error('absent : ' + k);
+  const back = MQ.parseEA(ea.code);
+  for (const k of ['stopAtr', 'atrPeriod', 'trailPips', 'breakevenAtr', 'maxBars', 'pauseLosses', 'pauseBars']) eq(back.strategy[k], st[k], k);
+  eq(back.config.news.mode, 'close'); eq(back.config.news.before, 45); eq(back.config.news.currencies, 'EUR,USD');
+});
+console.log('Téléchargement des cours (API simulée)');
   const calls = [];
   globalThis.fetch = async (url) => {
     calls.push(url);

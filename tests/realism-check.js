@@ -8,7 +8,7 @@
  * Exemple : node tests/realism-check.js GBPUSD_D1.csv GBP/USD */
 'use strict';
 const fs = require('fs'), path = require('path');
-for (const f of ['indicators', 'expr', 'backtest', 'data', 'presets', 'french', 'enhancer']) require(path.join(__dirname, '..', 'js', f + '.js'));
+for (const f of ['indicators', 'expr', 'trade', 'backtest', 'data', 'presets', 'french', 'enhancer']) require(path.join(__dirname, '..', 'js', f + '.js'));
 const { data: D, backtest: B, presets: P, french: FR, enhancer: E } = globalThis.Forexia;
 
 const file = process.argv[2];

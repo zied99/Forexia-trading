@@ -9,7 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { execFileSync } = require('child_process');
-for (const f of ['indicators', 'expr', 'backtest', 'data', 'presets', 'french', 'enhancer', 'mql5']) require(path.join(__dirname, '..', 'js', f + '.js'));
+for (const f of ['indicators', 'expr', 'trade', 'backtest', 'data', 'presets', 'french', 'enhancer', 'mql5']) require(path.join(__dirname, '..', 'js', f + '.js'));
 const { rules: R, data: D, presets: P, french: FR, enhancer: E, mql5: M } = globalThis.Forexia;
 
 try { execFileSync('g++', ['--version'], { stdio: 'ignore' }); } catch (e) { console.log('g++ absent : vérification MQL5 ignorée.'); process.exit(0); }
@@ -145,7 +145,7 @@ static long HistoryDealGetInteger(ulong t, int p) { if (p == DEAL_ENTRY) return 
 static double HistoryDealGetDouble(ulong, int p) { return p == DEAL_PRICE ? 1.27123 : -12.5; }
 static string TimeToString(datetime, int) { return "2025.01.02 00:00"; }
 static void PrintFormat(const char *, ...) {} static int GetLastError() { return 0; }
-static int g_cntSignals = 12, g_cntSpreadDelayed = 9, g_cntSpreadMissed = 3, g_cntLots = 0, g_cntFailed = 0;
+static int g_cntSignals = 12, g_cntSpreadDelayed = 9, g_cntSpreadMissed = 3, g_cntLots = 0, g_cntFailed = 0, g_cntPaused = 2, g_cntNews = 1;
 `;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fxrep-'));
   fs.writeFileSync(path.join(dir, 'r.cpp'), shim + body + '\nint main() { OnTester(); puts(OUT.c_str()); return 0; }\n');

@@ -43,9 +43,12 @@
     const leverage = settings.leverage, exposure = (settings.exposurePct ?? 100) / 100;
     const closeOutRatio = (settings.marginCloseOut ?? 50) / 100;
     const spread = (settings.spreadPips || 0) * pip;
-    const slDist = strategy.stopLossPips > 0 ? strategy.stopLossPips * pip : 0;
-    const tpDist = strategy.takeProfitPips > 0 ? strategy.takeProfitPips * pip : 0;
-    const { signals: S } = compileStrategy(strategy, bars);
+    const T = root.Forexia.trade;
+    const { signals: S, ctx } = compileStrategy(strategy, bars);
+    const tm = ctx.t, A = T.atrSeries(bars, strategy), pause = T.makePause(strategy), news = T.makeNews(settings.news);
+    const span = (i) => (i + 1 < n ? tm[i + 1] - tm[i] : i > 0 ? tm[i] - tm[i - 1] : 86400);
+    const commission = settings.commissionPerLot || 0;
+    const diag = { signals: 0, paused: 0, newsBlocked: 0, lotsTooSmall: 0, spreadDelayed: 0, spreadMissed: 0, orderFailed: 0 };
 
     let cash = settings.capital;
     let pos = null; // {dir, entryPrice, entryIndex, notional, margin, cost, sl, tp}
@@ -57,12 +60,21 @@
 
     function open(dir, i) {
       if (cash <= 0) return;
+      diag.signals++;
+      // Annonce économique pendant la bougie d'entrée : pas de nouvelle position.
+      if (news.active && news.hits(tm[i], tm[i] + span(i))) { diag.newsBlocked++; return; }
       const price = bars[i].open;
-      const notional = cash * exposure * leverage;
-      const cost = notional * (spread / price);
+      const d = T.distances(strategy, A ? A[i - 1] : NaN, pip);
+      // Taille : capital × exposition × levier, lots fixes, ou % du capital risqué jusqu'au stop.
+      let notional = cash * exposure * leverage;
+      if (settings.sizing === 'fixed') notional = (settings.fixedLots || 0.01) * 100000 * price;
+      else if (settings.sizing === 'risk' && d.sl > 0) notional = (cash * (settings.riskPct || 1)) / 100 / (d.sl / price);
+      notional = Math.min(notional, cash * leverage);
+      const lots = notional / (100000 * price);
+      const cost = notional * (spread / price) + commission * lots;
       pos = {
-        dir: dir, entryPrice: price, entryIndex: i, notional: notional, margin: notional / leverage, cost: cost,
-        sl: slDist ? price - dir * slDist : null, tp: tpDist ? price + dir * tpDist : null,
+        dir: dir, entryPrice: price, entryIndex: i, notional: notional, margin: notional / leverage, cost: cost, lots: lots,
+        sl: d.sl ? price - dir * d.sl : null, tp: d.tp ? price + dir * d.tp : null, trail: d.trail, be: d.be, beDone: false,
       };
       cash -= cost;
     }
@@ -75,8 +87,9 @@
         dir: pos.dir, entryDate: bars[pos.entryIndex].date, exitDate: bars[i].date, entryIndex: pos.entryIndex,
         exitIndex: i, entryPrice: pos.entryPrice, exitPrice: price, notional: pos.notional,
         pips: (pos.dir * (price - pos.entryPrice)) / pip, pnl: net, cost: pos.cost,
-        returnPct: (net / pos.margin) * 100 * exposure, reason: reason, bars: i - pos.entryIndex,
+        returnPct: (net / pos.margin) * 100 * exposure, reason: reason, bars: i - pos.entryIndex, lots: pos.lots,
       });
+      pause.onClose(i, net);
       pos = null;
       if (cash <= 0) { cash = 0; ruined = true; }
       wd.check(i, cash, (amount) => { cash -= amount; });
@@ -96,11 +109,12 @@
       const bar = bars[i];
       // 1) ordres en attente à l'ouverture
       if (pending && !ruined) {
-        if (pending.exit && pos) close(i, bar.open, 'Signal');
+        if (pending.exit && pos) close(i, bar.open, pending.reason || 'Signal');
         if (pending.enter && !pos && !ruined) open(pending.enter, i);
         pending = null;
       }
       // 2) stops intra-barre
+      if (pos && news.closeMode && news.hits(tm[i], tm[i] + span(i))) close(i, bar.open, 'Annonce');
       if (pos) {
         barsInMarket++;
         const liq = liquidationPrice();
@@ -124,27 +138,44 @@
           if (wOk && (!tpOk || nearer(wLevel, pos.tp))) close(i, at(wLevel), 'Retrait');
           else if (tpOk) close(i, at(pos.tp), 'Take-profit');
         }
+        // stop suiveur / passage à l'équilibre, pour les bougies suivantes
+        if (pos) T.updateStops(pos, pos.entryPrice, best);
       }
       // 3) fin de période : on solde la position
       if (i === n - 1) {
         if (pos) close(i, bar.close, 'Fin de période');
       } else if (!ruined) {
         // 4) signaux à la clôture -> exécution à l'ouverture suivante
-        const le = S.longEntry[i], se = S.shortEntry[i];
-        const wantLong = le && !se, wantShort = se && !le;
-        if (pos) {
-          const exit = pos.dir > 0 ? S.longExit[i] || wantShort : S.shortExit[i] || wantLong;
-          if (exit) pending = { exit: true, enter: pos.dir > 0 ? (wantShort ? -1 : 0) : wantLong ? 1 : 0 };
-        } else if (wantLong || wantShort) {
-          pending = { exit: false, enter: wantLong ? 1 : -1 };
-        }
+        pending = decide(S, i, pos, pause, diag, strategy);
       }
       equity.push(pos ? cash + pnlAt(bar.close) : cash);
       dates.push(bar.date);
       wd.mark();
     }
 
-    return wd.finish({ trades: trades, equity: equity, dates: dates, startIndex: start, ruined: ruined }, barsInMarket);
+    return wd.finish({ trades: trades, equity: equity, dates: dates, startIndex: start, ruined: ruined, diag: diag }, barsInMarket);
+  }
+
+  /**
+   * Décision à la clôture de la bougie i (exécutée à l'ouverture de i + 1), commune aux deux moteurs :
+   * sortie sur signal ou signal inverse, durée maximale, pause après des pertes.
+   */
+  function decide(S, i, pos, pause, diag, st) {
+    const le = S.longEntry[i], se = S.shortEntry[i];
+    const wantLong = le && !se, wantShort = se && !le;
+    const canEnter = (dir) => {
+      if (!dir) return 0;
+      if (pause.blocked(i + 1)) { diag.paused++; return 0; }
+      return dir;
+    };
+    if (pos) {
+      const exit = pos.dir > 0 ? S.longExit[i] || wantShort : S.shortExit[i] || wantLong;
+      if (exit) return { exit: true, reason: 'Signal', enter: canEnter(pos.dir > 0 ? (wantShort ? -1 : 0) : wantLong ? 1 : 0) };
+      if (st.maxBars > 0 && i + 1 - pos.entryIndex >= st.maxBars) return { exit: true, reason: 'Durée max', enter: 0 };
+      return null;
+    }
+    const dir = canEnter(wantLong ? 1 : wantShort ? -1 : 0);
+    return dir ? { exit: false, enter: dir } : null;
   }
 
   /**
@@ -233,5 +264,5 @@
     };
   }
 
-  root.Forexia.backtest = { runBacktest, compileStrategy, pipSizeFor, computeStats, makeWithdrawals };
+  root.Forexia.backtest = { runBacktest, compileStrategy, pipSizeFor, computeStats, makeWithdrawals, decide };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -814,7 +814,8 @@ void FxSlope(const double &src[], const int p, double &out[])
    js += ",\"symbol\":\"" + _Symbol + "\",\"period\":\"" + EnumToString(InpTimeframe) + "\"";
    js += ",\"diag\":{\"signals\":" + IntegerToString(g_cntSignals) + ",\"spreadDelayed\":" + IntegerToString(g_cntSpreadDelayed) +
          ",\"spreadMissed\":" + IntegerToString(g_cntSpreadMissed) + ",\"lotsTooSmall\":" + IntegerToString(g_cntLots) +
-         ",\"orderFailed\":" + IntegerToString(g_cntFailed) + "}";
+         ",\"orderFailed\":" + IntegerToString(g_cntFailed) + ",\"paused\":" + IntegerToString(g_cntPaused) +
+         ",\"newsBlocked\":" + IntegerToString(g_cntNews) + "}";
    js += ",\"deals\":[";
    bool first = true;
    if(HistorySelect(0, TimeCurrent()))
@@ -868,6 +869,8 @@ void FxSlope(const double &src[], const int p, double &out[])
     const magic = 100000 + (hash(name + pairCode) % 900000);
     const tf = TIMEFRAMES.includes(o.timeframe) ? o.timeframe : 'PERIOD_D1';
     const st = o.stats;
+    const news = o.news || {};
+    const pairCurrencies = /^[A-Z]{3}\/?[A-Z]{3}$/.test(String(o.pair || '')) ? pairCode.slice(0, 3) + ',' + pairCode.slice(3, 6) : 'USD,EUR';
     const date = new Date().toISOString().slice(0, 10);
     const comment = (txt) => String(txt || '').split('\n').map((l) => '//   ' + l).join('\n');
     const header = [
@@ -908,12 +911,44 @@ enum ENUM_FX_SIZING
    FX_SIZING_RISK = 2      // Pourcentage du capital risqué par trade (avec stop-loss)
   };
 
+enum ENUM_FX_NEWS
+  {
+   FX_NEWS_BLOCK = 0, // Bloquer les nouvelles entrées
+   FX_NEWS_CLOSE = 1  // Fermer les positions ouvertes (et bloquer les entrées)
+  };
+
+enum ENUM_FX_IMPACT
+  {
+   FX_IMPACT_HIGH = 3,  // Fort impact seulement
+   FX_IMPACT_MEDIUM = 2 // Impact moyen et fort
+  };
+
 input group "Stratégie"
 input ENUM_TIMEFRAMES InpTimeframe = ${tf}; // Unité de temps des bougies (backtest : D1)
 input double InpStopLossPips = ${strategy.stopLossPips || 0}; // Stop-loss en pips (0 = aucun)
 input double InpTakeProfitPips = ${strategy.takeProfitPips || 0}; // Take-profit en pips (0 = aucun)
 input bool InpAllowLong = ${strategy.longEntry ? 'true' : 'false'}; // Autoriser les achats
 input bool InpAllowShort = ${strategy.shortEntry ? 'true' : 'false'}; // Autoriser les ventes
+
+input group "Gestion des trades"
+input int InpAtrPeriod = ${strategy.atrPeriod || 14}; // Période de l'ATR (stops en multiples d'ATR)
+input double InpStopAtr = ${strategy.stopAtr || 0}; // Stop-loss en multiples d'ATR (0 = en pips)
+input double InpTakeAtr = ${strategy.takeAtr || 0}; // Take-profit en multiples d'ATR (0 = en pips)
+input double InpTrailPips = ${strategy.trailPips || 0}; // Stop suiveur en pips (0 = aucun)
+input double InpTrailAtr = ${strategy.trailAtr || 0}; // Stop suiveur en multiples d'ATR (0 = en pips)
+input double InpBreakevenPips = ${strategy.breakevenPips || 0}; // Stop au prix d'entrée après ce gain en pips (0 = non)
+input double InpBreakevenAtr = ${strategy.breakevenAtr || 0}; // Idem en multiples d'ATR (0 = en pips)
+input int InpMaxBars = ${strategy.maxBars || 0}; // Fermer après ce nombre de bougies (0 = jamais)
+input int InpPauseLosses = ${strategy.pauseLosses || 0}; // Pause après ce nombre de pertes consécutives (0 = non)
+input int InpPauseBars = ${strategy.pauseBars || 0}; // Durée de la pause en bougies
+
+input group "Calendrier économique"
+input bool InpNewsFilter = ${news.enabled ? 'true' : 'false'}; // Éviter les annonces économiques
+input ENUM_FX_NEWS InpNewsMode = ${news.mode === 'close' ? 'FX_NEWS_CLOSE' : 'FX_NEWS_BLOCK'}; // Bloquer les entrées ou fermer les positions
+input int InpNewsBefore = ${news.before ?? 30}; // Minutes avant l'annonce
+input int InpNewsAfter = ${news.after ?? 30}; // Minutes après l'annonce
+input ENUM_FX_IMPACT InpNewsImpact = ${news.impact === 'medium' ? 'FX_IMPACT_MEDIUM' : 'FX_IMPACT_HIGH'}; // Importance minimum
+input string InpNewsCurrencies = ${mqlString(news.currencies || pairCurrencies)}; // Devises surveillées (séparées par des virgules)
 
 input group "Taille des positions"
 input ENUM_FX_SIZING InpSizing = ${SIZING[o.sizing] || 'FX_SIZING_FIXED'}; // Mode de calcul de la taille
@@ -941,6 +976,14 @@ string   g_last = "aucun calcul pour l'instant";
 int      g_pendDir = 0;          // ouverture en attente pendant la bougie en cours (1 achat, -1 vente)
 bool     g_pendDelayed = false;
 int      g_cntSignals = 0, g_cntSpreadDelayed = 0, g_cntSpreadMissed = 0, g_cntLots = 0, g_cntFailed = 0;
+int      g_cntPaused = 0, g_cntNews = 0;
+double   g_atr = 0.0;                // ATR de la dernière bougie close (distances en multiples d'ATR)
+double   g_trailDist = 0.0, g_beDist = 0.0; // distances fixées à l'ouverture de la position
+bool     g_beDone = false;
+int      g_lossStreak = 0;
+datetime g_pauseBar = 0;              // bougie où la pause a commencé
+datetime g_newsT[];                   // annonces retenues (heure du serveur)
+datetime g_newsFrom = 0, g_newsTo = 0;
 
 //--- FX-CALC-BEGIN
 ${CALC_LIB}
@@ -965,6 +1008,19 @@ int FxPositionDir()
    return 0;
   }
 
+// Nombre de bougies depuis l'ouverture de la position (0 = ouverte pendant la bougie en cours).
+int FxPositionAgeBars()
+  {
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol || (ulong)PositionGetInteger(POSITION_MAGIC) != InpMagic) continue;
+      return iBarShift(_Symbol, InpTimeframe, (datetime)PositionGetInteger(POSITION_TIME));
+     }
+   return 0;
+  }
+
 bool FxCloseAll()
   {
    bool ok = true;
@@ -981,6 +1037,14 @@ bool FxCloseAll()
       else PrintFormat("Position %I64u fermée (signal de sortie)", ticket);
      }
    return ok;
+  }
+
+// Distance en prix : multiple d'ATR si demandé, sinon pips ; 0 = aucune.
+double FxDist(const double mult, const double pips)
+  {
+   if(mult > 0.0 && g_atr > 0.0) return mult * g_atr;
+   if(pips > 0.0) return pips * FxPip();
+   return 0.0;
   }
 
 double FxLots(const double price)
@@ -1000,10 +1064,11 @@ double FxLots(const double price)
      }
    else if(InpSizing == FX_SIZING_RISK)
      {
-      if(InpStopLossPips <= 0.0 || tickValue <= 0.0 || tickSize <= 0.0)
+      double slDist = FxDist(InpStopAtr, InpStopLossPips);
+      if(slDist <= 0.0 || tickValue <= 0.0 || tickSize <= 0.0)
          Print("Mode risque sans stop-loss : la taille en lots fixes est utilisée.");
       else
-         lots = equity * InpRiskPct / 100.0 / (InpStopLossPips * FxPip() / tickSize * tickValue);
+         lots = equity * InpRiskPct / 100.0 / (slDist / tickSize * tickValue);
      }
    lots = MathMin(lots, InpMaxLots);
    double margin1 = 0.0;
@@ -1029,8 +1094,9 @@ int FxOpen(const int dir, const MqlTick &tk)
       return 0;
      }
    int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
-   double sl = (InpStopLossPips > 0.0) ? NormalizeDouble(price - dir * InpStopLossPips * pip, digits) : 0.0;
-   double tp = (InpTakeProfitPips > 0.0) ? NormalizeDouble(price + dir * InpTakeProfitPips * pip, digits) : 0.0;
+   double slDist = FxDist(InpStopAtr, InpStopLossPips), tpDist = FxDist(InpTakeAtr, InpTakeProfitPips);
+   double sl = (slDist > 0.0) ? NormalizeDouble(price - dir * slDist, digits) : 0.0;
+   double tp = (tpDist > 0.0) ? NormalizeDouble(price + dir * tpDist, digits) : 0.0;
    bool sent = (dir > 0) ? g_trade.Buy(lots, _Symbol, price, sl, tp, FX_COMMENT)
                          : g_trade.Sell(lots, _Symbol, price, sl, tp, FX_COMMENT);
    uint rc = g_trade.ResultRetcode();
@@ -1039,9 +1105,160 @@ int FxOpen(const int dir, const MqlTick &tk)
       PrintFormat("Échec de l'ordre : %u %s", rc, g_trade.ResultRetcodeDescription());
       return -1;
      }
+   g_trailDist = FxDist(InpTrailAtr, InpTrailPips);
+   g_beDist = FxDist(InpBreakevenAtr, InpBreakevenPips);
+   g_beDone = false;
    PrintFormat("%s %.2f lots %s à %s (SL %s, TP %s)", (dir > 0) ? "Achat" : "Vente", lots, _Symbol,
                DoubleToString(price, digits), DoubleToString(sl, digits), DoubleToString(tp, digits));
    return 1;
+  }
+
+// ---------- Calendrier économique ----------
+// En réel : API Calendar de MT5. Dans le testeur (pas de calendrier) : fichier exporté par la passerelle
+// Forexia dans ...\\Terminal\\Common\\Files\\Forexia\\calendar.csv (heure;devise;importance;nom).
+bool FxNewsCurrency(const string cur)
+  {
+   string list = "," + InpNewsCurrencies + ",";
+   StringReplace(list, " ", "");
+   StringToUpper(list);
+   string c = cur;
+   StringToUpper(c);
+   return StringFind(list, "," + c + ",") >= 0;
+  }
+
+void FxNewsAdd(const datetime t)
+  {
+   int k = ArraySize(g_newsT);
+   ArrayResize(g_newsT, k + 1);
+   g_newsT[k] = t;
+  }
+
+void FxNewsLoadFile()
+  {
+   ArrayResize(g_newsT, 0);
+   int fh = FileOpen("Forexia\\\\calendar.csv", FILE_READ | FILE_TXT | FILE_ANSI | FILE_COMMON);
+   if(fh == INVALID_HANDLE)
+     {
+      Print("Calendrier économique : fichier Forexia\\\\calendar.csv introuvable, filtre des annonces inactif dans le testeur.");
+      return;
+     }
+   while(!FileIsEnding(fh))
+     {
+      string line = FileReadString(fh);
+      string f[];
+      if(StringSplit(line, ';', f) < 3) continue;
+      long t = StringToInteger(f[0]);
+      if(t <= 0) continue;
+      if((int)StringToInteger(f[2]) < (int)InpNewsImpact || !FxNewsCurrency(f[1])) continue;
+      FxNewsAdd((datetime)t);
+     }
+   FileClose(fh);
+   ArraySort(g_newsT);
+   PrintFormat("Calendrier économique : %d annonces chargées.", ArraySize(g_newsT));
+  }
+
+void FxNewsLoadLive(const datetime from, const datetime to)
+  {
+   ArrayResize(g_newsT, 0);
+   MqlCalendarValue v[];
+   if(CalendarValueHistory(v, from, to) <= 0) return;
+   for(int i = 0; i < ArraySize(v); i++)
+     {
+      MqlCalendarEvent ev;
+      MqlCalendarCountry co;
+      if(!CalendarEventById(v[i].event_id, ev)) continue;
+      if((int)ev.importance < (int)InpNewsImpact) continue;
+      if(!CalendarCountryById(ev.country_id, co) || !FxNewsCurrency(co.currency)) continue;
+      FxNewsAdd(v[i].time);
+     }
+   ArraySort(g_newsT);
+  }
+
+// Vrai si une annonce (fenêtre avant / après comprise) tombe pendant [start, end).
+bool FxNewsHit(const datetime start, const datetime end)
+  {
+   if(!InpNewsFilter) return false;
+   if(!MQLInfoInteger(MQL_TESTER) && (end + InpNewsBefore * 60 > g_newsTo || start - InpNewsAfter * 60 < g_newsFrom))
+     {
+      g_newsFrom = start - 86400;
+      g_newsTo = end + 7 * 86400;
+      FxNewsLoadLive(g_newsFrom, g_newsTo);
+     }
+   for(int i = 0; i < ArraySize(g_newsT); i++)
+     {
+      if(g_newsT[i] + InpNewsAfter * 60 < start) continue;
+      return g_newsT[i] - InpNewsBefore * 60 < end;
+     }
+   return false;
+  }
+
+bool FxNewsBar()
+  {
+   datetime t0 = iTime(_Symbol, InpTimeframe, 0);
+   return FxNewsHit(t0, t0 + PeriodSeconds(InpTimeframe));
+  }
+
+// Pause après des pertes consécutives (mise à jour à chaque fermeture d'une position de cet EA).
+void OnTradeTransaction(const MqlTradeTransaction &trans, const MqlTradeRequest &request, const MqlTradeResult &result)
+  {
+   if(trans.type != TRADE_TRANSACTION_DEAL_ADD || InpPauseLosses <= 0) return;
+   if(!HistoryDealSelect(trans.deal)) return;
+   if((ulong)HistoryDealGetInteger(trans.deal, DEAL_MAGIC) != InpMagic || HistoryDealGetString(trans.deal, DEAL_SYMBOL) != _Symbol) return;
+   long entry = HistoryDealGetInteger(trans.deal, DEAL_ENTRY);
+   if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_INOUT) return;
+   double pnl = HistoryDealGetDouble(trans.deal, DEAL_PROFIT) + HistoryDealGetDouble(trans.deal, DEAL_SWAP) + HistoryDealGetDouble(trans.deal, DEAL_COMMISSION);
+   g_lossStreak = (pnl < 0.0) ? g_lossStreak + 1 : 0;
+   if(g_lossStreak >= InpPauseLosses)
+     {
+      g_lossStreak = 0;
+      g_pauseBar = iTime(_Symbol, InpTimeframe, 0);
+      PrintFormat("%d pertes consécutives : pause de %d bougies.", InpPauseLosses, InpPauseBars);
+     }
+  }
+
+bool FxPaused()
+  {
+   if(InpPauseLosses <= 0 || g_pauseBar == 0) return false;
+   return iBarShift(_Symbol, InpTimeframe, g_pauseBar) <= InpPauseBars;
+  }
+
+// Stop suiveur et passage à l'équilibre, à chaque tick.
+void FxManage()
+  {
+   if(InpTrailPips <= 0.0 && InpTrailAtr <= 0.0 && InpBreakevenPips <= 0.0 && InpBreakevenAtr <= 0.0) return;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol || (ulong)PositionGetInteger(POSITION_MAGIC) != InpMagic) continue;
+      int dir = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY) ? 1 : -1;
+      double entry = PositionGetDouble(POSITION_PRICE_OPEN), sl = PositionGetDouble(POSITION_SL), tp = PositionGetDouble(POSITION_TP);
+      double px = (dir > 0) ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      // après un redémarrage de l'EA, distances recalculées avec l'ATR courant
+      if(g_trailDist <= 0.0 && g_beDist <= 0.0)
+        {
+         g_trailDist = FxDist(InpTrailAtr, InpTrailPips);
+         g_beDist = FxDist(InpBreakevenAtr, InpBreakevenPips);
+        }
+      double ns = sl;
+      if(g_trailDist > 0.0)
+        {
+         double t = px - dir * g_trailDist;
+         if(ns == 0.0 || (dir > 0 ? t > ns : t < ns)) ns = t;
+        }
+      if(g_beDist > 0.0 && !g_beDone && (px - entry) * dir >= g_beDist)
+        {
+         g_beDone = true;
+         if(ns == 0.0 || (dir > 0 ? entry > ns : entry < ns)) ns = entry;
+        }
+      int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
+      ns = NormalizeDouble(ns, digits);
+      if(ns == sl || MathAbs(ns - sl) < _Point) continue;
+      double stopsLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point;
+      if(MathAbs(px - ns) < stopsLevel) continue;
+      if(!g_trade.PositionModify(ticket, ns, tp))
+         PrintFormat("Stop suiveur non modifié : %u %s", g_trade.ResultRetcode(), g_trade.ResultRetcodeDescription());
+     }
   }
 
 // Tente l'ouverture en attente. Si le spread est trop large (bascule de minuit, annonce...),
@@ -1050,6 +1267,13 @@ void FxTryOpen()
   {
    if(g_pendDir == 0) return;
    if(FxPositionDir() != 0) { g_pendDir = 0; return; }
+   if(FxNewsBar())
+     {
+      g_cntNews++;
+      Print("Annonce économique proche : ordre annulé.");
+      g_pendDir = 0;
+      return;
+     }
    MqlTick tk;
    if(!SymbolInfoTick(_Symbol, tk)) return;
    double spread = (tk.ask - tk.bid) / FxPip();
@@ -1113,12 +1337,27 @@ bool FxProcess()
       Print("Ordre non exécuté : spread trop élevé pendant toute la bougie.");
       g_pendDir = 0;
      }
+   if(InpStopAtr > 0.0 || InpTakeAtr > 0.0 || InpTrailAtr > 0.0 || InpBreakevenAtr > 0.0)
+     {
+      double a[];
+      FxATR(h, l, c, InpAtrPeriod, a);
+      g_atr = (MathIsValidNumber(a[n - 1]) && a[n - 1] > 0.0 && a[n - 1] < 1e6) ? a[n - 1] : 0.0;
+     }
    bool le = false, lx = false, se = false, sx = false;
    FxSignals(o, h, l, c, tm, n, iTime(_Symbol, InpTimeframe, 0), le, lx, se, sx);
    bool wantLong = le && !se;
    bool wantShort = se && !le;
    int dir = FxPositionDir();
    int toOpen = 0;
+   bool newsNow = InpNewsFilter && FxNewsBar();
+   if(dir != 0 && newsNow && InpNewsMode == FX_NEWS_CLOSE)
+     {
+      Print("Annonce économique : position fermée.");
+      if(!FxCloseAll()) return true;
+      dir = 0;
+      wantLong = false;
+      wantShort = false;
+     }
    if(dir > 0 && (lx || wantShort))
      {
       if(!FxCloseAll()) return true;
@@ -1129,10 +1368,21 @@ bool FxProcess()
       if(!FxCloseAll()) return true;
       if(wantLong && InpAllowLong) toOpen = 1;
      }
+   else if(dir != 0 && InpMaxBars > 0 && FxPositionAgeBars() >= InpMaxBars)
+     {
+      Print("Durée maximale atteinte : position fermée.");
+      FxCloseAll();
+     }
    else if(dir == 0)
      {
       if(wantLong && InpAllowLong) toOpen = 1;
       else if(wantShort && InpAllowShort) toOpen = -1;
+     }
+   if(toOpen != 0 && FxPaused())
+     {
+      g_cntSignals++;
+      g_cntPaused++;
+      toOpen = 0;
      }
    if(toOpen != 0)
      {
@@ -1162,6 +1412,7 @@ int OnInit()
    g_trade.SetExpertMagicNumber(InpMagic);
    g_trade.SetDeviationInPoints(30);
    g_trade.SetTypeFillingBySymbol(_Symbol);
+   if(InpNewsFilter && MQLInfoInteger(MQL_TESTER)) FxNewsLoadFile();
    if(StringLen(FX_PAIR) > 0 && StringFind(_Symbol, FX_PAIR) != 0)
       PrintFormat("Attention : stratégie testée sur %s, EA lancé sur %s.", FX_PAIR, _Symbol);
    g_lastBar = InpTradeOnStart ? 0 : iTime(_Symbol, InpTimeframe, 0);
@@ -1190,9 +1441,11 @@ void OnTick()
    if(t != 0 && t != g_lastBar)
      {
       if(FxProcess()) g_lastBar = t;
+      FxManage();
       return;
      }
    if(g_pendDir != 0) FxTryOpen();
+   FxManage();
   }
 //+------------------------------------------------------------------+
 `;
@@ -1223,6 +1476,11 @@ void OnTick()
       longEntry: rule('Entrée achat'), longExit: rule('Sortie achat'), shortEntry: rule('Entrée vente'), shortExit: rule('Sortie vente'),
       stopLossPips: num('InpStopLossPips', 0), takeProfitPips: num('InpTakeProfitPips', 0),
     };
+    for (const [k, n] of [['atrPeriod', 'InpAtrPeriod'], ['stopAtr', 'InpStopAtr'], ['takeAtr', 'InpTakeAtr'], ['trailPips', 'InpTrailPips'], ['trailAtr', 'InpTrailAtr'],
+      ['breakevenPips', 'InpBreakevenPips'], ['breakevenAtr', 'InpBreakevenAtr'], ['maxBars', 'InpMaxBars'], ['pauseLosses', 'InpPauseLosses'], ['pauseBars', 'InpPauseBars']]) {
+      const v = num(n, 0);
+      if (v && !(k === 'atrPeriod' && v === 14)) strategy[k] = v;
+    }
     if (input('InpAllowLong') === 'false') { strategy.longEntry = ''; strategy.longExit = ''; }
     if (input('InpAllowShort') === 'false') { strategy.shortEntry = ''; strategy.shortExit = ''; }
     const config = { leverage: num('InpLeverage', 10), exposurePct: num('InpExposurePct', 100) };
@@ -1245,6 +1503,11 @@ void OnTick()
       sizing: SIZING_KEYS[input('InpSizing')] || 'backtest', lots: num('InpFixedLots', 0.01), risk: num('InpRiskPct', 1),
       maxLots: num('InpMaxLots', 1), maxSpread: num('InpMaxSpreadPips', 5),
     };
+    if (input('InpNewsFilter') === 'true') {
+      const cur = /^input\s+string\s+InpNewsCurrencies\s*=\s*"([^"]*)"/m.exec(code);
+      config.news = { enabled: true, mode: input('InpNewsMode') === 'FX_NEWS_CLOSE' ? 'close' : 'block', before: num('InpNewsBefore', 30), after: num('InpNewsAfter', 30),
+        impact: input('InpNewsImpact') === 'FX_IMPACT_MEDIUM' ? 'medium' : 'high', currencies: cur ? cur[1] : '' };
+    }
     for (const k of ['longEntry', 'longExit', 'shortEntry', 'shortExit']) {
       const err = F.rules.validate(strategy[k]);
       if (err) throw new Error('Règle illisible dans l\'EA (' + k + ') : ' + err);
