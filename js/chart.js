@@ -251,7 +251,7 @@
     container.innerHTML = '';
     container.classList.add('chart');
     const W = Math.max(280, container.clientWidth), H = opts.height || 190;
-    const m = { l: 10, r: 62, t: 18, b: 26 };
+    const m = { l: 10, r: 62, t: opts.topLabels ? 34 : 18, b: 26 };
     const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, role: 'img' }, container);
     if (opts.ariaLabel) svg.setAttribute('aria-label', opts.ariaLabel);
     const n = opts.values.length, innerW = W - m.l - m.r, innerH = H - m.t - m.b;
@@ -288,8 +288,11 @@
       if (opts.topLabels && opts.topLabels[i]) {
         const gTop = gh ? y(Math.max(0, gh.value)) : top;
         const ty = Math.min(top, gTop, y(0)) - 4;
-        const tl = el('text', { x: cx, y: Math.max(10, ty), class: 'bar-top', 'text-anchor': 'middle' }, svg);
-        tl.textContent = slot < 34 ? opts.topLabels[i].short : opts.topLabels[i].long;
+        const L = opts.topLabels[i], narrow = slot < 40;
+        // gain au-dessus de la barre (coloré), durée en petit au-dessus
+        const tl = el('text', { x: cx, y: Math.max(22, ty), class: 'bar-top bar-gain ' + (L.cls || ''), 'text-anchor': 'middle' }, svg);
+        tl.textContent = narrow ? L.short : L.long;
+        if (L.sub && slot >= 26) { const ts = el('text', { x: cx, y: Math.max(22, ty) - 12, class: 'bar-top bar-sub', 'text-anchor': 'middle' }, svg); ts.textContent = narrow ? L.subShort : L.sub; }
         if (opts.titles) { const ti = el('title', {}, tl); ti.textContent = opts.titles[i]; }
       }
       if (opts.selected && opts.selected.includes(i)) el('rect', { x: cx - bw / 2 - 5, y: m.t - 2, width: bw + 10, height: innerH + 4, rx: 4, class: 'selected' }, svg);

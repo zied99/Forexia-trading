@@ -2626,10 +2626,30 @@
           '<div class="hb-val ' + cls(g.medianRet) + '">' + pctTxt(g.medianRet) + '</div></div>';
       }).join('') + '</div></section>';
   }
+  /** Cercle : simulations gagnantes / perdantes, et au centre le rendement global (gains cumulés / capitaux engagés). */
+  function winDonut(list) {
+    const n = list.length;
+    if (!n) return '';
+    const win = list.filter((e) => e.returnPct > 0).length, lose = n - win;
+    const cap = list.reduce((a, e) => a + (e.capital || 0), 0), gain = list.reduce((a, e) => a + (e.capital || 0) * e.returnPct / 100, 0);
+    const glob = cap > 0 ? (gain / cap) * 100 : 0;
+    const R = 34, C = 2 * Math.PI * R, fw = (win / n) * C;
+    const arc = (len, off, color) => len > 0 ? '<circle r="' + R + '" cx="50" cy="50" fill="none" stroke="' + color + '" stroke-width="12" stroke-dasharray="' + len.toFixed(2) + ' ' + (C - len).toFixed(2) +
+      '" stroke-dashoffset="' + (-off).toFixed(2) + '" transform="rotate(-90 50 50)"/>' : '';
+    const gap = win && lose ? 1.5 : 0;
+    return '<div class="win-donut" title="' + win + ' simulation(s) gagnante(s), ' + lose + ' perdante(s) · rendement global ' + signed(glob, num1) + ' % (gains cumulés : ' + signed(gain, money) + ' sur ' + money.format(cap) + ' engagés)">' +
+      '<svg viewBox="0 0 100 100" role="img" aria-label="' + win + ' gagnantes sur ' + n + ', rendement global ' + signed(glob, num1) + ' %">' +
+      '<circle r="' + R + '" cx="50" cy="50" fill="none" class="donut-track" stroke-width="12"/>' +
+      arc(Math.max(0, fw - gap), gap / 2, 'var(--up)') + arc(Math.max(0, C - fw - gap), fw + gap / 2, 'var(--down)') +
+      '<text x="50" y="49" text-anchor="middle" class="donut-val ' + cls(glob) + '">' + signed(glob, Math.abs(glob) < 10 ? num1 : new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 })) + ' %</text>' +
+      '<text x="50" y="62" text-anchor="middle" class="donut-sub">rendement</text></svg>' +
+      '<div class="donut-legend"><span><i style="background:var(--up)"></i>' + win + ' gagnante' + (win > 1 ? 's' : '') + '</span><span><i style="background:var(--down)"></i>' + lose + ' perdante' + (lose > 1 ? 's' : '') + '</span>' +
+      '<span class="hint">' + Math.round((win / n) * 100) + ' % de réussite</span></div></div>';
+  }
   function renderEvalCharts(list, filtered) {
     const A = F.advisor.analyze(list), G = A.groups;
     $('evalBody').innerHTML = (filtered ? '<p class="eval-count">Graphiques sur les ' + list.length + ' simulations affichées (filtres appliqués).</p>' : '') +
-      '<section class="eval-chart"><h4>Résultat de chaque simulation</h4><p class="hint">Dans l\'ordre où elles ont été lancées ; survolez une barre pour le détail.</p><div id="evalRunsChart"></div>' +
+      '<section class="eval-chart"><div class="runs-head"><div><h4>Résultat de chaque simulation</h4><p class="hint">Dans l\'ordre où elles ont été lancées ; survolez une barre pour le détail.</p></div>' + winDonut(list) + '</div><div id="evalRunsChart"></div>' +
       checkToolsHtml(list) + '</section>' +
       '<p class="hint">Les barres ci-dessous montrent le résultat <b>médian</b> (la moitié des simulations fait mieux, l\'autre moins bien) : un résultat extrême ne fausse pas la comparaison. La moyenne est dans l\'info-bulle.</p>' +
       '<div class="eval-charts-grid">' +
@@ -2681,7 +2701,12 @@
         if ($('barPanel')) $('barPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       },
       // nombre de mois de test au-dessus de chaque barre
-      topLabels: list.map((e) => { const m = Math.max(1, Math.round(durationDays(e.from, e.to) / 30.4375)); return { long: m + ' mois', short: m + 'm' }; }),
+      // gain au-dessus de chaque barre, durée en petit au-dessus
+      topLabels: list.map((e) => {
+        const m = Math.max(1, Math.round(durationDays(e.from, e.to) / 30.4375)), v = e.returnPct, a = Math.abs(v);
+        const g = (a < 0.005 ? '0' : signed(v, a < 10 ? num1 : new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }))) + ' %';
+        return { long: g, short: a >= 100 ? (v > 0 ? '+' : '−') + Math.round(a) : g.replace(' %', ''), cls: v > 0 ? 'pos' : v < 0 ? 'neg' : '', sub: m + ' mois', subShort: m + 'm' };
+      }),
       titles: list.map((e, i) => '#' + (i + 1) + ' ' + e.name + ' · ' + e.pair + ' · capital ' + money.format(e.capital) + ' · ' + (e.extended ? 'origine ' + frDate(e.extended.from) + ' → ' + frDate(e.extended.to) +
         (e.extended.capital && e.extended.capital !== e.capital ? ' avec ' + money.format(e.extended.capital) : '') + ' : ' + pctTxt(e.extended.returnPct) + ' ; ' + changeLabel(e) + ' (' + frDate(e.from) + ' → ' + frDate(e.to) + ') : ' : frDate(e.from) + ' → ' + frDate(e.to) + ' : ') +
         pctTxt(e.returnPct) + ', drawdown −' + num1.format(e.maxDrawdownPct) + ' %'),

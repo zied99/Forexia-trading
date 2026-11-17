@@ -558,3 +558,16 @@ a.btn-link:hover { border-color: var(--accent); color: var(--accent); }
 .bar-panel #bpManual { flex: 1 1 100%; width: 100%; min-height: 54px; font-size: 13px; }
 .bar-panel .bp-del { border-top: 1px solid var(--border); padding-top: 8px; }
 .bar-panel button.danger { color: var(--down); }
+.chart .bar-gain { font-size: 11px; font-weight: 700; fill: var(--text); }
+.chart .bar-gain.pos { fill: var(--up); } .chart .bar-gain.neg { fill: var(--down); }
+.chart .bar-sub { font-size: 9.5px; font-weight: 500; fill: var(--muted); }
+.runs-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.win-donut { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.win-donut svg { width: 104px; height: 104px; }
+.win-donut .donut-track { stroke: var(--panel-2); }
+.win-donut .donut-val { font-size: 15px; font-weight: 800; fill: var(--text); }
+.win-donut .donut-val.pos { fill: var(--up); } .win-donut .donut-val.neg { fill: var(--down); }
+.win-donut .donut-sub { font-size: 8.5px; fill: var(--muted); }
+.donut-legend { display: grid; gap: 3px; font-size: 12.5px; }
+.donut-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+@media (max-width: 600px) { .runs-head { flex-direction: column; } }
