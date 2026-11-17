@@ -571,3 +571,4 @@ a.btn-link:hover { border-color: var(--accent); color: var(--accent); }
 .donut-legend { display: grid; gap: 3px; font-size: 12.5px; }
 .donut-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
 @media (max-width: 600px) { .runs-head { flex-direction: column; } }
+.donut-legend .donut-avg { margin-top: 3px; font-size: 13px; }
