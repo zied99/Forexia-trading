@@ -671,7 +671,7 @@
     $('batchCount').value = n;
     batchRunning = true; batchStop = false;
     $('batchRun').textContent = 'Arrêter';
-    const res = [], keysBefore = new Set(evalList().map((e) => e.key));
+    const res = [], lot = startLotBatch(n);
     let fails = 0;
     let attempts = 0;
     for (let k = 0; k < n && !batchStop && attempts++ < n * 3; k++) {
@@ -680,7 +680,7 @@
       pickRandomPeriod();
       const before = evalList().length;
       const ok = await runFromForm();
-      if (ok && lastRun && evalList().length > before) res.push(lastRun.stats.returnPct);
+      if (ok && lastRun && evalList().length > before) { res.push(lastRun.stats.returnPct); addToLotBatch(lot, evalList()[evalList().length - 1]); }
       else if (ok) k--; // même simulation que la précédente (période identique) : on en tire une autre
       else if (++fails >= Math.max(3, Math.ceil(n / 3))) { $('batchStatus').textContent = 'Lot interrompu : ' + $('formError').textContent; break; }
       else { console.warn('Test du lot ignoré :', $('formError').textContent); k--; } // période inutilisable : on en tire une autre
@@ -689,16 +689,20 @@
     batchRunning = false;
     setRunLabel('');
     $('batchRun').textContent = 'Lancer le lot';
+    if (!res.length) dropLotBatch(lot);
     if (res.length) {
       const pos = res.filter((v) => v > 0).length, avg = res.reduce((a, b) => a + b, 0) / res.length;
       $('batchStatus').innerHTML = '<b>' + res.length + ' test' + (res.length > 1 ? 's' : '') + ' enregistré' + (res.length > 1 ? 's' : '') + '</b> dans « Évaluation » : ' +
         pos + ' gagnant' + (pos > 1 ? 's' : '') + ' sur ' + res.length + ', résultat moyen <span class="' + cls(avg) + '">' + signed(avg, num1) + ' %</span> (de ' + signed(Math.min(...res), num1) + ' à ' + signed(Math.max(...res), num1) + ' %). ' +
-        '<button type="button" class="link" id="batchOpenEval">Voir les recommandations</button> · <button type="button" class="link" id="batchSaveLot">💾 Enregistrer ce lot comme batch</button>';
-      $('batchOpenEval').addEventListener('click', () => { openEvaluation(); document.querySelector('.eval-views [data-view="reco"]').click(); });
-      const lotKeys = evalList().filter((e) => !keysBefore.has(e.key)).map((e) => e.key);
-      $('batchSaveLot').addEventListener('click', () => {
-        const entries = evalList().filter((e) => lotKeys.includes(e.key));
-        if (saveBatch(entries)) $('batchSaveLot').outerHTML = '<span class="pos">✓ Batch enregistré</span>';
+        '<br>Nouveau batch : <b id="lotName">« ' + esc(lot.name) + ' »</b> · <button type="button" class="link" id="batchOpenLot">Voir le batch</button> · ' +
+        '<button type="button" class="link" id="batchOpenEval">Recommandations</button> · <button type="button" class="link" id="batchRenLot">Renommer</button>';
+      $('batchOpenLot').addEventListener('click', () => openEvaluation('charts'));
+      $('batchOpenEval').addEventListener('click', () => openEvaluation('reco'));
+      $('batchRenLot').addEventListener('click', () => {
+        const list = batchStore.get(), b = list.find((x) => x.id === lot.id);
+        if (!b) return;
+        const nm = (prompt('Nom du batch :', b.name) || '').trim().slice(0, 100);
+        if (nm) { b.name = nm; lot.name = nm; batchStore.set(list); $('lotName').textContent = '« ' + nm + ' »'; }
       });
       logEvent('simulation.batch', 'Lot de ' + res.length + ' tests aléatoires : ' + pos + ' gagnants, moyenne ' + signed(avg, num1) + ' %', { results: res });
     }
@@ -2667,6 +2671,32 @@
     updateBatchCount();
     return b;
   }
+  // Un lot de tests aléatoires crée automatiquement son batch, rempli au fur et à mesure ; l'évaluation s'ouvre dessus.
+  let activeBatchId = '';
+  function startLotBatch(n) {
+    const st = currentStrategy(), d = new Date();
+    const b = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), at: d.toISOString(), auto: true, entries: [],
+      name: st.name + ' · ' + $('pair').value + ' · lot de ' + n + ' · ' + d.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) };
+    const list = batchStore.get(); list.push(b); batchStore.set(list);
+    activeBatchId = b.id;
+    evalBatch = { id: b.id, keys: new Set() };
+    updateBatchCount();
+    return b;
+  }
+  function addToLotBatch(lot, e) {
+    if (!e) return;
+    const list = batchStore.get(), b = list.find((x) => x.id === lot.id);
+    if (!b) return;
+    b.entries.push(Object.assign({}, e)); batchStore.set(list);
+    if (evalBatch && evalBatch.id === b.id) evalBatch.keys.add(e.key);
+    if (!$('evalModal').hidden) renderEvaluation();
+  }
+  function dropLotBatch(lot) {
+    batchStore.set(batchStore.get().filter((x) => x.id !== lot.id));
+    if (activeBatchId === lot.id) activeBatchId = '';
+    if (evalBatch && evalBatch.id === lot.id) evalBatch = null;
+    updateBatchCount();
+  }
   function updateBatchCount() { const n = batchStore.get().length; if ($('evalScopeBatchN')) $('evalScopeBatchN').textContent = n; }
   function batchSaveButton(id) { return '<button type="button" class="secondary small batch-save" id="' + id + '" title="Enregistrer les simulations affichées comme un lot (Batch) que vous pourrez recharger">💾 Enregistrer un batch</button>'; }
   function renderBatches() {
@@ -2708,6 +2738,7 @@
       updateStyleHint();
     });
     evalBatch = { id: b.id, keys: new Set(b.entries.map((e) => e.key)) };
+    activeBatchId = b.id;
     evalScope = 'current';
     evalView = 'charts';
     document.querySelectorAll('.eval-views [data-view]').forEach((x) => x.setAttribute('aria-selected', x.dataset.view === 'charts'));
@@ -2717,7 +2748,7 @@
     if (!evalBatch) return '';
     const b = batchStore.get().find((x) => x.id === evalBatch.id);
     if (!b) { evalBatch = null; return ''; }
-    return '<div class="banner info batch-banner"><span>Batch <b>« ' + esc(b.name) + ' »</b> rechargé : seules ses ' + evalBatch.keys.size + ' simulations sont affichées.</span>' +
+    return '<div class="banner info batch-banner"><span>Batch <b>« ' + esc(b.name) + ' »</b> : seules ses ' + evalBatch.keys.size + ' simulations sont affichées.</span>' +
       '<span class="row buttons"><button type="button" class="secondary small" id="batchUpdate" title="Enregistrer dans ce batch l\'état actuel de ses simulations (prolongées, améliorées…)">Mettre à jour le batch</button>' +
       '<button type="button" class="secondary small" id="batchLeave">Voir toutes les simulations</button></span></div>';
   }
@@ -2736,6 +2767,7 @@
       if (!confirm('Supprimer le batch « ' + b.name + ' » ? Ses simulations restent dans l\'historique.')) return;
       list.splice(+t.dataset.batchDel, 1); batchStore.set(list);
       if (evalBatch && evalBatch.id === b.id) evalBatch = null;
+      if (activeBatchId === b.id) activeBatchId = '';
       updateBatchCount(); renderEvaluation();
       return;
     }
@@ -2744,7 +2776,7 @@
       if (b && cur.length) { b.entries = cur.map((x) => Object.assign({}, x)); b.updatedAt = new Date().toISOString(); batchStore.set(list); toast('Batch « ' + b.name + ' » mis à jour.', false); }
       return;
     }
-    if (t.id === 'batchLeave') { evalBatch = null; return renderEvaluation(); }
+    if (t.id === 'batchLeave') { evalBatch = null; activeBatchId = ''; return renderEvaluation(); }
     if (t.classList.contains('batch-save')) {
       const shown = evalFiltered(evalList()).map((x) => x.e);
       if (saveBatch(shown) && evalScope === 'batch') renderEvaluation();
@@ -2760,7 +2792,7 @@
   }
   function setEvalScope(scope) {
     evalScope = scope;
-    evalBatch = null;
+    evalBatch = null; activeBatchId = '';
     $('evalScopeCurrent').setAttribute('aria-selected', scope === 'current');
     $('evalScopeAll').setAttribute('aria-selected', scope === 'all');
     $('evalScopeBatch').setAttribute('aria-selected', scope === 'batch');
@@ -2869,7 +2901,7 @@
       $('evalFilters').hidden = true; $('evalExport').disabled = true;
       return renderBatches();
     }
-    $('evalTitle').textContent = evalBatch ? 'Batch rechargé' : evalScope === 'current' ? 'Évaluation de « ' + name + ' »' : 'Historique des simulations';
+    $('evalTitle').textContent = evalBatch ? 'Batch « ' + ((batchStore.get().find((x) => x.id === evalBatch.id) || {}).name || '') + ' »' : evalScope === 'current' ? 'Évaluation de « ' + name + ' »' : 'Historique des simulations';
     // dans l'onglet « Stratégie en cours », le choix de stratégie et la recherche n'ont pas lieu d'être
     $('evalFStratField').hidden = evalScope === 'current';
     $('evalFSearch').closest('label').hidden = evalScope === 'current';
@@ -3865,8 +3897,12 @@
   }
   $('evalScopeCurrent').addEventListener('click', () => setEvalScope('current'));
   $('evalScopeAll').addEventListener('click', () => setEvalScope('all'));
-  function openEvaluation() {
+  function openEvaluation(view) {
     evalScope = 'current'; evalBatch = null;
+    // dernier batch actif (lot aléatoire lancé, ou batch rechargé) : l'évaluation s'ouvre dessus
+    const ab = activeBatchId && batchStore.get().find((x) => x.id === activeBatchId);
+    if (ab) evalBatch = { id: ab.id, keys: new Set(ab.entries.map((e) => e.key)) }; else activeBatchId = '';
+    if (typeof view === 'string') { evalView = view; document.querySelectorAll('.eval-views [data-view]').forEach((x) => x.setAttribute('aria-selected', x.dataset.view === view)); }
     $('evalScopeCurrent').setAttribute('aria-selected', 'true'); $('evalScopeAll').setAttribute('aria-selected', 'false'); $('evalScopeBatch').setAttribute('aria-selected', 'false');
     $('evalConfirm').hidden = true;
     renderEvaluation();
@@ -3875,7 +3911,7 @@
     $('evalModal').querySelector('.close').focus();
   }
   function closeEvaluation() { $('evalModal').hidden = true; document.body.style.overflow = ''; }
-  $('evalBtn').addEventListener('click', openEvaluation);
+  $('evalBtn').addEventListener('click', () => openEvaluation());
   $('evalModal').addEventListener('click', (e) => {
     if (e.target.closest('[data-close]')) return closeEvaluation();
     const re = e.target.closest('[data-reload]');

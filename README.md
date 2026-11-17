@@ -179,7 +179,8 @@ CLOSE < BB_LOWER(20, 2) OR RSI(14) < 25
 ## Batchs
 
 Un **batch** est un lot de simulations enregistré ensemble, par exemple un lot de tests aléatoires.
-- Enregistrement : lien « 💾 Enregistrer ce lot comme batch » à la fin d'un lot, ou bouton « 💾 Enregistrer un batch »
+- Chaque **lot de tests aléatoires crée automatiquement son batch** (rempli test après test) et l'évaluation s'ouvre
+  dessus (« Voir toutes les simulations » pour revenir à l'ensemble). Bouton « 💾 Enregistrer un batch »
   dans la fenêtre Évaluation (enregistre les simulations affichées).
 - Onglet **Batchs** de la fenêtre Évaluation : devise, période des simulations (« entre 6 mois et 1 an »), nombre de
   simulations, rendement moyen, probabilité de gain (le pourcentage du cercle), capital moyen final, drawdown moyen.
