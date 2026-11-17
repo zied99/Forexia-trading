@@ -86,6 +86,45 @@ const SYN = { pair: 'EUR/USD', source: 'synthetic', dateFrom: '2019-01-01', date
     const e = await call('generate_ea', { strategy: { preset: 'supertrend' }, pair: 'EUR/USD', timeframe: 'H1', outputPath: dataDir });
     ok(fs.existsSync(e.writtenTo) && /FxSignals/.test(fs.readFileSync(e.writtenTo, 'utf8')) && !e.code);
   });
+  await test('get_market_data, find_levels, make_trend_line', async () => {
+    const d = await call('get_market_data', { market: SYN, indicators: ['EMA(50)', 'RSI(14)'], last: 30 });
+    ok(d.rows.length === 30 && d.rows[29]['RSI(14)'] > 0 && d.rows[0].t > 0, JSON.stringify(d.rows[0]));
+    const w = await call('get_market_data', { market: SYN, timeframe: 'W1', last: 10 }); ok(w.rows.length === 10 && w.timeframe === 'W1');
+    const l = await call('find_levels', { market: SYN });
+    ok(Array.isArray(l.supportsResistances) && Array.isArray(l.trendLines), JSON.stringify(l).slice(0, 200));
+    const tl = await call('make_trend_line', { date1: '2020-03-02', price1: 1.08, date2: '2020-01-02', price2: 1.1 });
+    ok(/^LINE\(1577923200, 1.1, 1583107200, 1.08\)$/.test(tl.expression), tl.expression);
+    const b = await call('run_backtest', { strategy: { preset: 'macd', longEntry: 'CROSS_UP(MACD(12,26,9), MACD_SIGNAL(12,26,9)) AND CLOSE > ' + tl.expression }, market: SYN, record: false });
+    ok(b.stats.trades >= 0 && !b.evaluationKey);
+  });
+  await test('edit_conditions (retirer une ligne de tendance)', async () => {
+    const L = 'LINE(1577923200, 1.1, 1583107200, 1.08)';
+    const st = { name: 'x', longEntry: '(CROSS_UP(CLOSE, SMA(200)) AND MACD_HIST(12,26,9) > 0 OR LOW <= ' + L + ' AND CLOSE > ' + L + ') AND ADX(14) < 20', shortEntry: 'CROSS_DOWN(CLOSE, SMA(200))' };
+    const l = await call('edit_conditions', { strategy: st }); ok(l.conditions.longEntry.length === 5, JSON.stringify(l.conditions));
+    const r = await call('edit_conditions', { strategy: st, remove: [{ match: 'LINE(' }] });
+    ok(r.strategy.longEntry === 'CROSS_UP(CLOSE, SMA(200)) AND MACD_HIST(12,26,9) > 0 AND ADX(14) < 20', r.strategy.longEntry);
+    const one = await call('edit_conditions', { strategy: st, remove: [{ rule: 'longEntry', path: '1' }] });
+    const L2 = L.replace(/ /g, '');
+    ok(one.strategy.longEntry === '(CROSS_UP(CLOSE, SMA(200)) AND MACD_HIST(12,26,9) > 0) OR (LOW <= ' + L2 + ' AND CLOSE > ' + L2 + ')', one.strategy.longEntry);
+  });
+  await test('stress_test (prolonger, raccourcir, découper, capital)', async () => {
+    const r = await call('stress_test', { strategy: { preset: 'macd' }, market: SYN, extendMonths: 6, shortenMonths: 6, splitMonths: 6, capitals: [1000, 50000] });
+    ok(r.original.returnPct !== undefined && /^2021-0[67]/.test(r.extended.to) && /^2020-0[67]/.test(r.shortened.to) && r.slices.length === 4 && r.capitals.length === 2, JSON.stringify(r).slice(0, 300));
+  });
+  await test('improve_across_periods (+ apply)', async () => {
+    const r = await call('improve_across_periods', { strategy: { preset: 'macd' }, market: { pair: 'EUR/USD', source: 'synthetic' }, randomN: 5, duration: { kind: 'exact', months: 12 } });
+    ok(r.periods.length === 5 && Array.isArray(r.highImpact), JSON.stringify(r).slice(0, 200));
+    const pick = (r.highImpact[0] || r.commonToLosers[0]);
+    if (pick) {
+      const a = await call('improve_across_periods', { strategy: { preset: 'macd' }, market: { pair: 'EUR/USD', source: 'synthetic' }, periods: r.periods.map((p) => ({ dateFrom: p.from, dateTo: p.to })), apply: [pick.id] });
+      ok(a.after.length === 5 && a.improvedStrategy, JSON.stringify(a).slice(0, 200));
+    }
+  });
+  await test('ligne de commande (mcp/cli.js)', async () => {
+    const { execFileSync } = require('child_process');
+    const out = JSON.parse(execFileSync(process.execPath, [path.join(__dirname, '..', 'mcp', 'cli.js'), 'run_backtest', JSON.stringify({ strategy: { preset: 'rsi' }, market: SYN, record: false })], { env: Object.assign({}, process.env, { FOREXIA_MCP_DATA: dataDir }) }).toString());
+    ok(out.stats.trades > 0);
+  });
   await test('outils MT5 sans passerelle : message clair', async () => {
     const r = await rpc('tools/call', { name: 'mt5_status', arguments: {} });
     ok(r.result.isError && /FOREXIA_BRIDGE_TOKEN/.test(r.result.content[0].text));

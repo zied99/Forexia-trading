@@ -1,0 +1,4 @@
+# le dépôt de l'outil Forexia, cloné au démarrage de chaque session
+forexia/
+node_modules/
+*.png

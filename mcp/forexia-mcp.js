@@ -233,10 +233,18 @@ function record(strat, m, md, res) {
   const l = store.evaluations(); l.push(e); store.setEvaluations(l.slice(-5000));
   return e.key;
 }
+async function newsTimes(m, md) {
+  const n = m.news, cur = md.pair.split('/'), min = n.impact === 'medium' ? 2 : 3;
+  const t0 = Math.floor(D.barTime(md.bars[0])), t1 = Math.floor(D.barTime(md.bars[md.bars.length - 1])) + 2 * 86400;
+  const r = await bridge('GET', '/calendar?from=' + t0 + '&to=' + t1);
+  if (!r.ok) fail('Calendrier économique indisponible : ' + (r.message || '') + ' (outil mt5_export_calendar).');
+  return r.events.filter((e) => cur.includes(e.currency) && e.importance >= min).map((e) => e.t).sort((a, b) => a - b);
+}
 async function backtest(stratIn, m, opt) {
   const strat = resolveStrategy(stratIn), range = rangeOf(m || {});
   const md = await loadMarket(m || {}, range); md.range = range;
   const settings = settingsOf(m || {}, md);
+  if (m && m.news) settings.news = { times: await newsTimes(m, md), before: m.news.before != null ? m.news.before : 30, after: m.news.after != null ? m.news.after : 30, mode: m.news.mode || 'block' };
   const res = run(md, strat, settings);
   const key = opt && opt.record === false ? null : record(strat, m || {}, md, res);
   return { strat, md, settings, res, key };
@@ -299,6 +307,7 @@ const marketSchema = {
     withdraw: { type: 'object', description: 'Retrait fictif : {pct, share, when: immediate|close} (au seuil de gain) ou {mode: "periodic", every: month|days, days, type: pct|fixed|excess, value}' },
     csvPath: { type: 'string' }, estimateWicks: { type: 'boolean' },
     symbol: { type: 'string', description: 'broker : symbole MT5 (ex. EURUSD)' }, timeframe: { type: 'string', enum: ['M15', 'M30', 'H1', 'H4', 'D1'] },
+    news: { type: 'object', description: 'Filtre des annonces économiques (calendrier MT5, passerelle requise) : {before, after (minutes), mode: block|close, impact: high|medium}' },
     intrabar: { type: 'boolean' }, spreadMode: { type: 'string', enum: ['real', 'fixed', 'add'] }, maxLots: { type: 'number' }, maxSpreadPips: { type: 'number' },
   },
 };
@@ -505,6 +514,173 @@ const TOOLS = [
       out.note = 'À compiler dans MetaEditor puis tester dans le testeur de stratégie et sur un compte DÉMO avant tout compte réel.';
       return out;
     },
+  },
+  {
+    name: 'get_market_data',
+    description: 'Cours et indicateurs bougie par bougie (pour « regarder le graphique » comme un humain) : OHLC + les indicateurs demandés, dans l\'unité de temps voulue (D1, W1, MN… ; plus fin avec la source broker).',
+    inputSchema: obj({ market: marketSchema, indicators: { type: 'array', items: { type: 'string' }, description: 'ex. ["EMA(50)", "RSI(14)", "ADX(14)", "BB_UPPER(20,2)"]' }, timeframe: { type: 'string', enum: ['D1', 'W1', 'MN'] }, last: { type: 'number', description: 'nombre de bougies renvoyées (défaut 120, max 1500)' } }),
+    handler: async (a) => {
+      const m = a.market || {}, range = rangeOf(m), md = await loadMarket(m, range);
+      let bars = md.bars;
+      if (a.timeframe && a.timeframe !== md.timeframe) bars = D.resample(bars, a.timeframe);
+      const ctx = R.makeContext(bars), ind = {};
+      for (const e of a.indicators || []) { const err = R.validate(e); if (err) fail('Indicateur invalide « ' + e + ' » : ' + err); ind[e] = R.evaluateSeries(e, ctx); }
+      const n = Math.max(1, Math.min(1500, a.last || 120)), from = Math.max(0, bars.length - n);
+      const rows = [];
+      for (let i = from; i < bars.length; i++) {
+        const b = bars[i], row = { date: b.date, t: ctx.t[i], open: b.open, high: b.high, low: b.low, close: b.close };
+        for (const k in ind) row[k] = Number.isFinite(ind[k][i]) ? Math.round(ind[k][i] * 1e6) / 1e6 : null;
+        rows.push(row);
+      }
+      return { pair: md.pair, data: md.label, timeframe: a.timeframe || md.timeframe, rows: rows, note: 't = heure de la bougie en secondes Unix (pour LINE)' };
+    },
+  },
+  {
+    name: 'find_levels',
+    description: 'Comme un trader qui trace sur le graphique : supports, résistances (zones touchées plusieurs fois) et lignes de tendance (sommets / creux successifs), avec l\'expression prête à mettre dans une règle (niveau ou LINE(...)).',
+    inputSchema: obj({ market: marketSchema, timeframe: { type: 'string', enum: ['D1', 'W1', 'MN'] }, swing: { type: 'number', description: 'bougies de chaque côté d\'un sommet / creux (défaut 5)' }, max: { type: 'number' } }),
+    handler: async (a) => {
+      const m = a.market || {}, range = rangeOf(m), md = await loadMarket(m, range);
+      let bars = md.bars;
+      if (a.timeframe && a.timeframe !== md.timeframe) bars = D.resample(bars, a.timeframe);
+      const ctx = R.makeContext(bars), k = Math.max(2, a.swing || 5), atr = F.indicators.atr(ctx.high, ctx.low, ctx.close, 14);
+      const from = Math.max(k, bars.length - Math.max(120, md.bars.length - md.startIndex)), highs = [], lows = [];
+      for (let i = from; i < bars.length - k; i++) {
+        let hi = true, lo = true;
+        for (let j = i - k; j <= i + k; j++) { if (bars[j].high > bars[i].high) hi = false; if (bars[j].low < bars[i].low) lo = false; }
+        if (hi) highs.push({ i: i, p: bars[i].high }); if (lo) lows.push({ i: i, p: bars[i].low });
+      }
+      const last = bars[bars.length - 1].close, tol = (atr[bars.length - 1] || last * 0.003) * 0.5, dec = /JPY/.test(md.pair) ? 3 : 5;
+      const zones = [];
+      for (const x of highs.map((h) => Object.assign({ kind: 'h' }, h)).concat(lows.map((l) => Object.assign({ kind: 'l' }, l)))) {
+        const z = zones.find((z) => Math.abs(z.level - x.p) <= tol);
+        if (z) { z.touches++; z.level = (z.level * (z.touches - 1) + x.p) / z.touches; z.lastIndex = Math.max(z.lastIndex, x.i); } else zones.push({ level: x.p, touches: 1, lastIndex: x.i });
+      }
+      const fmtLevel = (v) => +v.toFixed(dec);
+      const lv = zones.filter((z) => z.touches >= 2).sort((x, y) => y.touches - x.touches || y.lastIndex - x.lastIndex).slice(0, a.max || 6).map((z) => ({
+        type: z.level < last ? 'support' : 'résistance', level: fmtLevel(z.level), touches: z.touches, lastTouch: bars[z.lastIndex].date,
+        examples: z.level < last ? ['(LOW <= ' + fmtLevel(z.level) + ' AND CLOSE > ' + fmtLevel(z.level) + ')  // rebond sur le support', 'CROSS_DOWN(CLOSE, ' + fmtLevel(z.level) + ')  // cassure']
+          : ['(HIGH >= ' + fmtLevel(z.level) + ' AND CLOSE < ' + fmtLevel(z.level) + ')  // rejet sur la résistance', 'CROSS_UP(CLOSE, ' + fmtLevel(z.level) + ')  // cassure'],
+      }));
+      const line = (p1, p2, kind) => {
+        if (!p1 || !p2) return null;
+        const expr = 'LINE(' + ctx.t[p1.i] + ', ' + fmtLevel(p1.p) + ', ' + ctx.t[p2.i] + ', ' + fmtLevel(p2.p) + ')';
+        return { type: kind, from: { date: bars[p1.i].date, price: fmtLevel(p1.p) }, to: { date: bars[p2.i].date, price: fmtLevel(p2.p) }, expression: expr,
+          examples: kind === 'tendance haussière (creux)' ? ['(LOW <= ' + expr + ' AND CLOSE > ' + expr + ')', 'CLOSE > ' + expr] : ['(HIGH >= ' + expr + ' AND CLOSE < ' + expr + ')', 'CLOSE < ' + expr] };
+      };
+      const rising = lows.slice(-6).reduce((acc, x, idx, arr) => acc || (idx && arr[idx - 1].p < x.p ? [arr[idx - 1], x] : null), null);
+      const falling = highs.slice(-6).reduce((acc, x, idx, arr) => acc || (idx && arr[idx - 1].p > x.p ? [arr[idx - 1], x] : null), null);
+      return { pair: md.pair, lastClose: last, supportsResistances: lv,
+        trendLines: [rising && line(rising[0], rising[1], 'tendance haussière (creux)'), falling && line(falling[0], falling[1], 'tendance baissière (sommets)')].filter(Boolean),
+        note: 'Un niveau est un prix précis : valable pour cette paire et la période autour. Testez-le dans une règle avec run_backtest, puis random_batch.' };
+    },
+  },
+  {
+    name: 'make_trend_line', description: 'Construit l\'expression LINE(...) d\'une ligne de tendance passant par deux points (date, prix), comme si on la traçait à la main.',
+    inputSchema: obj({ date1: { type: 'string' }, price1: { type: 'number' }, date2: { type: 'string' }, price2: { type: 'number' } }, ['date1', 'price1', 'date2', 'price2']),
+    handler: async (a) => {
+      const t = (d) => Math.floor(Date.parse(String(d).length > 10 ? String(d).replace(' ', 'T') + 'Z' : d + 'T00:00:00Z') / 1000);
+      let p = [[t(a.date1), a.price1], [t(a.date2), a.price2]].sort((x, y) => x[0] - y[0]);
+      if (!(p[1][0] > p[0][0])) fail('Les deux dates doivent être différentes.');
+      const expr = 'LINE(' + p[0][0] + ', ' + p[0][1] + ', ' + p[1][0] + ', ' + p[1][1] + ')';
+      return { expression: expr, examples: ['CLOSE > ' + expr + '  // au-dessus de la ligne', '(LOW <= ' + expr + ' AND CLOSE > ' + expr + ')  // rebond', 'CROSS_DOWN(CLOSE, ' + expr + ')  // cassure'] };
+    },
+  },
+  {
+    name: 'edit_conditions',
+    description: 'Liste les conditions d\'une stratégie (arbre ET / OU, avec un chemin pour chacune) et en retire : une condition précise (rule + path), toutes celles qui contiennent un texte (match, ex. "LINE(" ou "ADX"). Renvoie la stratégie modifiée (non enregistrée : utilisez save_strategy).',
+    inputSchema: obj({ strategy: strategySchema, remove: { type: 'array', items: { type: 'object', properties: { rule: { type: 'string', enum: RULES }, path: { type: 'string', description: 'ex. "0.2" (voir la liste)' }, match: { type: 'string' } } } } }, ['strategy']),
+    handler: async (a) => {
+      const st = resolveStrategy(a.strategy);
+      const split = (n, op) => (n.k === 'bin' && n.op === op ? split(n.a, op).concat(split(n.b, op)) : [n]);
+      const build = (n) => (n.k === 'bin' && (n.op === 'AND' || n.op === 'OR') ? { op: n.op, items: split(n, n.op).map(build) } : R.stringify(n));
+      const str = (t, parent) => (typeof t === 'string' ? t : (parent ? '(' : '') + t.items.map((x) => str(x, t.op)).join(' ' + t.op + ' ') + (parent ? ')' : ''));
+      const drop = (t, f, p) => {
+        if (typeof t === 'string') return f(t, p) ? null : t;
+        const items = t.items.map((x, i) => drop(x, f, p.concat(i))).filter((x) => x !== null).flatMap((x) => (typeof x !== 'string' && x.op === t.op ? x.items : [x]));
+        return !items.length ? null : items.length === 1 ? items[0] : { op: t.op, items: items };
+      };
+      const list = (t, p, out) => { if (typeof t === 'string') out.push({ path: p.join('.'), condition: t }); else t.items.forEach((x, i) => list(x, p.concat(i), out)); return out; };
+      const out = Object.assign({}, st);
+      for (const k of RULES) {
+        if (!st[k]) continue;
+        let t = build(R.parse(st[k]));
+        for (const r of a.remove || []) {
+          if (r.rule && r.rule !== k) continue;
+          t = t && drop(t, (c, p) => (r.match ? c.includes(r.match) : r.rule === k && p.join('.') === r.path), []);
+        }
+        out[k] = t ? str(t) : '';
+      }
+      if (!out.longEntry && !out.shortEntry) fail('Ce retrait supprimerait toutes les règles d\'entrée.');
+      const conditions = {};
+      for (const k of RULES) if (out[k]) conditions[k] = list(build(R.parse(out[k])), [], []);
+      return { strategy: strategyView(out), conditions: conditions };
+    },
+  },
+  {
+    name: 'stress_test',
+    description: 'Vérifications de l\'onglet Graphiques sur une période : prolonger (long terme ?), raccourcir, découper en tranches (court terme ?), changer le capital de départ. Renvoie le résultat d\'origine et chaque variante.',
+    inputSchema: obj({ strategy: strategySchema, market: marketSchema, extendMonths: { type: 'number' }, shortenMonths: { type: 'number' }, splitMonths: { type: 'number' }, capitals: { type: 'array', items: { type: 'number' } } }, ['strategy', 'market']),
+    handler: async (a) => {
+      const m = a.market, r0 = rangeOf(m), f = iso(r0.start), t = iso(r0.end), day = 864e5;
+      const go = async (extra, label) => { try { const b = await backtest(a.strategy, Object.assign({}, m, extra), { record: false }); return { label: label, from: extra.dateFrom || f, to: extra.dateTo || t, capital: extra.capital || m.capital || 10000, returnPct: r2(b.res.stats.returnPct), maxDrawdownPct: r2(b.res.stats.maxDrawdownPct), trades: b.res.stats.trades, netProfit: r2(b.res.stats.netProfit) }; } catch (e) { return { label: label, error: e.message }; } };
+      const base = await go({ dateFrom: f, dateTo: t }, 'origine'), out = { original: base };
+      if (a.extendMonths) { let to = D.addMonths(r0.end, a.extendMonths), from = r0.start; if (to > today()) { const lack = to - today(); to = today(); from = new Date(from - lack); } out.extended = await go({ dateFrom: iso(from), dateTo: iso(to) }, 'prolongée de ' + a.extendMonths + ' mois'); }
+      if (a.shortenMonths) { const to = new Date(Math.max(D.addMonths(r0.end, -a.shortenMonths).getTime(), r0.start.getTime() + 31 * day)); out.shortened = await go({ dateFrom: f, dateTo: iso(to) }, 'raccourcie de ' + a.shortenMonths + ' mois'); }
+      if (a.splitMonths) {
+        out.slices = [];
+        for (let s0 = r0.start; s0 < r0.end;) { const e = new Date(Math.min(Math.max(D.addMonths(s0, a.splitMonths).getTime() - day, s0.getTime() + 30 * day), r0.end.getTime())); if (e - s0 >= 30 * day) out.slices.push(await go({ dateFrom: iso(s0), dateTo: iso(e) }, 'tranche')); s0 = new Date(e.getTime() + day); }
+        const ok = out.slices.filter((x) => !x.error);
+        out.slicesSummary = { n: ok.length, positive: ok.filter((x) => x.returnPct > 0).length, verdict: ok.filter((x) => x.returnPct > 0).length >= ok.length * 0.6 ? 'fonctionne aussi sur des périodes courtes' : 'dépend du moment sur des périodes courtes' };
+      }
+      if (a.capitals && a.capitals.length) out.capitals = await Promise.all(a.capitals.map((c) => go({ dateFrom: f, dateTo: t, capital: c }, 'capital ' + c)));
+      return out;
+    },
+  },
+  {
+    name: 'improve_across_periods',
+    description: 'Section « Améliorations » de l\'évaluation : sur plusieurs périodes (fournies, ou tirées au hasard), cherche les améliorations communes aux périodes perdantes et celles à fort impact sur toutes ; avec apply (ids), resimule chaque période avec la stratégie améliorée.',
+    inputSchema: obj({ strategy: strategySchema, market: marketSchema, periods: { type: 'array', items: { type: 'object', properties: { dateFrom: { type: 'string' }, dateTo: { type: 'string' } } } }, randomN: { type: 'number' }, duration: durationSchema, apply: { type: 'array', items: { type: 'string' } } }, ['strategy']),
+    handler: async (a) => {
+      const m = Object.assign({}, a.market || {}); delete m.period;
+      let periods = a.periods && a.periods.length ? a.periods : [];
+      if (!periods.length) for (let k = 0; k < Math.min(16, a.randomN || 8); k++) periods.push(randomRange(m.source || 'online', a.duration || { kind: 'exact', months: 12 }));
+      const ctxs = [];
+      for (const p of periods) { try { const b = await backtest(a.strategy, Object.assign({}, m, { dateFrom: p.dateFrom, dateTo: p.dateTo }), { record: false }); ctxs.push({ p: p, md: b.md, strat: b.strat, settings: b.settings, base: b.res.stats }); } catch (e) { /* période inutilisable */ } }
+      if (!ctxs.length) fail('Aucune période utilisable.');
+      const reds = ctxs.filter((c) => c.base.returnPct <= 0), srcs = reds.slice().sort((x, y) => x.base.returnPct - y.base.returnPct).slice(0, 6).concat(ctxs.slice().sort((x, y) => y.base.returnPct - x.base.returnPct).slice(0, 2));
+      const cand = new Map();
+      for (const c of srcs) for (const x of E.suggest(c.md.bars, c.strat, c.settings, c.strat.style || 'none').suggestions) {
+        if (x.risk || x.group === 'Combinaison recommandée' || cand.has(x.id)) continue;
+        if (x.apply({ strat: c.strat, settings: c.settings }).settings !== c.settings) continue;
+        cand.set(x.id, x);
+      }
+      const runOn = (c, pick) => { const k = E.combine(c.strat, c.settings, pick); return run(c.md, k.strat, k.settings).stats; };
+      const med = (v) => { const s2 = v.slice().sort((x, y) => x - y); return s2.length ? s2[s2.length >> 1] : 0; };
+      const rated = [...cand.values()].map((x) => {
+        const res = ctxs.map((c) => { const st = runOn(c, [x]); return { c: c, a: st, d: E.score(st) - E.score(c.base) }; }), rr = res.filter((z) => z.c.base.returnPct <= 0);
+        return { id: x.id, group: x.group, title: x.title, redsImproved: rr.filter((z) => z.d > 0.5).length + ' / ' + rr.length, allImproved: res.filter((z) => z.d > 0.5).length + ' / ' + res.length,
+          medianReturnPct: { before: r2(med(res.map((z) => z.c.base.returnPct))), after: r2(med(res.map((z) => z.a.returnPct))) }, _r: rr.length ? rr.filter((z) => z.d > 0.5).length / rr.length : 0, _g: res.reduce((s2, z) => s2 + z.d, 0) / res.length };
+      });
+      const clean = (x) => { const o = Object.assign({}, x); delete o._r; delete o._g; return o; };
+      const out = { periods: ctxs.map((c) => ({ from: c.p.dateFrom, to: c.p.dateTo, returnPct: r2(c.base.returnPct) })), losing: reds.length,
+        commonToLosers: rated.filter((x) => x._r >= 0.6).sort((x, y) => y._r - x._r || y._g - x._g).slice(0, 8).map(clean),
+        highImpact: rated.filter((x) => x.medianReturnPct.after > x.medianReturnPct.before && x._g > 0).sort((x, y) => (y.medianReturnPct.after - y.medianReturnPct.before) - (x.medianReturnPct.after - x.medianReturnPct.before)).slice(0, 8).map(clean) };
+      if (a.apply && a.apply.length) {
+        const pick = a.apply.map((id) => cand.get(id) || fail('id inconnu : ' + id));
+        const k = E.combine(ctxs[0].strat, ctxs[0].settings, pick);
+        out.applied = pick.map((x) => x.title);
+        out.after = ctxs.map((c) => ({ from: c.p.dateFrom, to: c.p.dateTo, before: r2(c.base.returnPct), after: r2(runOn(c, pick).returnPct) }));
+        out.afterSummary = { positiveBefore: ctxs.filter((c) => c.base.returnPct > 0).length, positiveAfter: out.after.filter((x) => x.after > 0).length, medianBefore: r2(med(out.after.map((x) => x.before))), medianAfter: r2(med(out.after.map((x) => x.after))) };
+        out.improvedStrategy = strategyView(Object.assign({}, k.strat, { name: ctxs[0].strat.name + ' (améliorée)' }));
+      }
+      return out;
+    },
+  },
+  {
+    name: 'mt5_export_calendar', description: 'Fait exporter le calendrier économique de MetaTrader 5 par la passerelle (MT5 est fermé puis relancé brièvement) ; nécessaire au filtre « news » du marché.',
+    inputSchema: obj({ closeTerminal: { type: 'boolean' } }),
+    handler: async (a) => { const term = await bridgeTerminal(); return bridge('POST', '/calendar/export', { terminalId: term.id, closeTerminal: !!a.closeTerminal }); },
   },
   {
     name: 'mt5_status', description: 'Passerelle MT5 (sur le PC de l\'utilisateur) : version, terminaux MetaTrader 5 détectés.', inputSchema: obj({}),

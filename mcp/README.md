@@ -88,7 +88,12 @@ node mcp/forexia-mcp.js --http 3333 --token UN_SECRET_LONG
 | `list_evaluations` / `clear_evaluations` | Historique des simulations de l'agent. |
 | `save_strategy` / `list_strategies` / `delete_strategy` | Stratégies enregistrées de l'agent. |
 | `generate_ea` | Expert Advisor MT5 (.mq5) de la stratégie (code renvoyé ou fichier écrit). |
-| `mt5_status` / `mt5_deploy_ea` / `mt5_run_test` | Passerelle MT5 : terminaux, envoi + compilation de l'EA, testeur de stratégie MT5. |
+| `get_market_data` | Cours et indicateurs bougie par bougie (D1, W1, MN), pour « regarder le graphique ». |
+| `find_levels` / `make_trend_line` | Supports, résistances, lignes de tendance (détectés ou tracés entre 2 points) → expressions pour les règles. |
+| `edit_conditions` | Liste les conditions (ET / OU) et en retire (par chemin ou par texte, ex. toutes les `LINE(`). |
+| `stress_test` | Prolonger, raccourcir, découper en tranches, changer le capital de départ. |
+| `improve_across_periods` | Améliorations communes aux périodes perdantes / à fort impact, puis resimulation. |
+| `mt5_status` / `mt5_deploy_ea` / `mt5_run_test` / `mt5_export_calendar` | Passerelle MT5 : terminaux, envoi + compilation de l'EA, testeur de stratégie MT5, calendrier économique. |
 
 ### Décrire une stratégie (`strategy`)
 
@@ -111,6 +116,16 @@ Les champs fournis complètent ou remplacent la base (ex. `{ "preset": "rsi", "s
 - `period` : `1m`, `2m`, `3m`, `6m`, `1y`, `2y` (jusqu'à aujourd'hui), ou `dateFrom` / `dateTo` (AAAA-MM-JJ).
 - `source` : `online` (BCE, défaut), `synthetic` (marche aléatoire, tests), `csv` (`csvPath`), `broker`
   (passerelle MT5 : `symbol`, `timeframe` M15…D1 ; même calcul que le testeur MT5).
+
+### En ligne de commande (sans client MCP)
+
+`node mcp/cli.js list`, `node mcp/cli.js help run_backtest`, `node mcp/cli.js run_backtest '{"strategy":{"preset":"macd"}}'`
+(ou `@arguments.json`) : mêmes outils, sortie JSON. Pratique pour un agent dans le cloud.
+
+### Projet d'agent prêt à l'emploi
+
+Le dossier [`agent/`](../agent/README.md) contient un projet complet pour un agent Claude dans le cloud
+(instructions `CLAUDE.md`, `.mcp.json`, script d'installation).
 
 ## Consigne à donner à l'agent (exemple)
 

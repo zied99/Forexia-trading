@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "forexia": {
+      "command": "node",
+      "args": ["forexia/mcp/forexia-mcp.js"],
+      "env": { "FOREXIA_MCP_DATA": "data" }
+    }
+  }
+}
