@@ -693,7 +693,7 @@
       const pos = res.filter((v) => v > 0).length, avg = res.reduce((a, b) => a + b, 0) / res.length;
       $('batchStatus').innerHTML = '<b>' + res.length + ' test' + (res.length > 1 ? 's' : '') + ' enregistré' + (res.length > 1 ? 's' : '') + '</b> dans « Évaluation » : ' +
         pos + ' gagnant' + (pos > 1 ? 's' : '') + ' sur ' + res.length + ', résultat moyen <span class="' + cls(avg) + '">' + signed(avg, num1) + ' %</span> (de ' + signed(Math.min(...res), num1) + ' à ' + signed(Math.max(...res), num1) + ' %). ' +
-        '<button type="button" class="link" id="batchOpenEval">Voir les recommandations</button> · <button type="button" class="link" id="batchSaveLot">💾 Enregistrer ce lot en Batch</button>';
+        '<button type="button" class="link" id="batchOpenEval">Voir les recommandations</button> · <button type="button" class="link" id="batchSaveLot">💾 Enregistrer ce lot comme batch</button>';
       $('batchOpenEval').addEventListener('click', () => { openEvaluation(); document.querySelector('.eval-views [data-view="reco"]').click(); });
       const lotKeys = evalList().filter((e) => !keysBefore.has(e.key)).map((e) => e.key);
       $('batchSaveLot').addEventListener('click', () => {
@@ -1293,7 +1293,7 @@
 
 
     $('enhanceBtn').addEventListener('click', openEnhancer);
-    $('anaBtn').addEventListener('click', openAnalyzer);
+    $('anaBtn').addEventListener('click', () => openAnalyzer());
     $('deployBtn').addEventListener('click', openDeploy);
     $('editConds').addEventListener('click', () => { $('condPanel').hidden = !$('condPanel').hidden; if (!$('condPanel').hidden) { renderCondPanel(); $('condPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } });
     $('saveFromResults').addEventListener('click', () => {
@@ -1863,6 +1863,7 @@
 
   // ---------- Fenêtre « Analyseur » ----------
   let ana = null; // { report, tested: [{p, stats}], best }
+  let anaCtx = null, anaOrigin = null; // simulation analysée ; anaOrigin = { e } si elle vient d'une barre de l'évaluation
   function anaCurve(res, drop) {
     const w = (res.wealth || res.equity).filter(Number.isFinite);
     if (w.length < 2) return '';
@@ -1879,15 +1880,46 @@
     return '<table class="ana-table"><thead><tr><th>' + title + '</th><th>Trades</th><th>Gagnants</th><th>Résultat</th></tr></thead><tbody>' +
       rows.map((r) => '<tr><td>' + esc(r.label) + '</td><td>' + r.n + '</td><td>' + Math.round(r.winRate) + ' %</td><td class="' + cls(r.pnl) + '">' + signed(r.pnl, num1) + '</td></tr>').join('') + '</tbody></table>';
   }
-  function openAnalyzer() {
-    if (!lastRunCtx || !lastRunCtx.result) return;
+  function showAnaModal() {
     const m = $('anaModal');
     m.hidden = false; document.body.style.overflow = 'hidden';
-    const { bars, strat, settings, result } = lastRunCtx;
-    $('anaSub').textContent = strat.name + ' · ' + settings.pair + ' · levier 1:' + settings.leverage;
-    $('anaBody').innerHTML = '<div class="modal-loading"><span class="spinner"></span>Analyse de la simulation…</div>';
-    $('anaApplyBest').disabled = true; $('anaBest').innerHTML = '';
+    $('anaApplyBest').disabled = true; $('anaApplyBestAll').disabled = true; $('anaBest').innerHTML = '';
+    $('anaApplyBestAll').hidden = !anaOrigin;
+    $('anaApplyBest').textContent = anaOrigin ? 'Appliquer à cette simulation' : 'Appliquer la meilleure combinaison';
     m.querySelector('.close').focus();
+  }
+  /** Simulations du « batch » auxquelles une correction peut être appliquée : celles affichées, de la même stratégie. */
+  function anaBatchKeys() {
+    if (!anaOrigin) return [];
+    return evalFiltered(evalList()).map((x) => x.e).filter((x) => x.strategy && x.config && !x.tag && x.name === anaOrigin.e.name).map((x) => x.key);
+  }
+  async function analyzeBar(key) {
+    const e = evalList().find((x) => x.key === key);
+    if (checkRunning || !e || !e.strategy || !e.config) return;
+    anaOrigin = { e: e }; anaCtx = null;
+    showAnaModal();
+    const idx = evalList().findIndex((x) => x.key === key) + 1;
+    $('anaSub').textContent = '#' + idx + ' · ' + e.name + ' · ' + e.pair + ' · ' + frDate(e.from) + ' → ' + frDate(e.to);
+    $('anaBody').innerHTML = '<div class="modal-loading"><span class="spinner"></span>Chargement de la simulation #' + idx + '…</div>';
+    const saved = captureForm();
+    checkRunning = 'ana';
+    let c = null;
+    try { c = await ctxOf(e); if (c) c.result = lastRunCtx.result; } finally {
+      checkRunning = ''; setRunLabel('');
+      restoring = true;
+      try { loadStrategy(saved.strat); applyConfig(saved.config); $('style').value = saved.style; $('preset').value = [...$('preset').options].some((o) => o.value === saved.preset) ? saved.preset : 'mine'; $('presetDesc').textContent = saved.desc; updateWithdrawUI(); syncFormState(); }
+      finally { restoring = false; }
+    }
+    if (!c || !c.result) { $('anaBody').innerHTML = '<p class="err">Simulation impossible : ' + esc($('formError').textContent || 'données indisponibles') + '</p>'; return; }
+    openAnalyzer({ bars: c.bars, strat: c.strat, settings: c.settings, result: c.result }, anaOrigin);
+  }
+  function openAnalyzer(ctx, origin) {
+    anaCtx = ctx && ctx.result ? ctx : lastRunCtx; anaOrigin = origin || null;
+    if (!anaCtx || !anaCtx.result) return;
+    if ($('anaModal').hidden || !origin) showAnaModal();
+    const { bars, strat, settings, result } = anaCtx;
+    if (!origin) $('anaSub').textContent = strat.name + ' · ' + settings.pair + ' · levier 1:' + settings.leverage;
+    $('anaBody').innerHTML = '<div class="modal-loading"><span class="spinner"></span>Analyse de la simulation…</div>';
     setTimeout(() => {
       let rep;
       try { rep = F.analyzer.analyze(bars, strat, settings, result); } catch (e) { $('anaBody').innerHTML = '<p class="err">Analyse impossible : ' + esc(e.message) + '</p>'; return; }
@@ -1898,14 +1930,14 @@
       html += '<details class="ana-sec"><summary><b>Où la stratégie gagne et perd</b></summary><div class="ana-tables">' +
         anaGroupTable('Marché (ADX 14)', rep.groups.regime) + anaGroupTable('Sens', rep.groups.direction) + anaGroupTable('Tendance de fond (EMA 200)', rep.groups.trend) +
         anaGroupTable('Volatilité à l\'entrée', rep.groups.volatility) + anaGroupTable('Durée', rep.groups.duration) + '</div></details>';
-      html += '<section class="ana-sec"><h3>💡 Propositions</h3><p class="hint">Chaque proposition est testée sur la même période. « Appliquer » modifie la stratégie dans le formulaire et relance la simulation.</p><div id="anaProps">' +
+      html += '<section class="ana-sec"><h3>💡 Propositions</h3><p class="hint">Chaque proposition est testée sur la même période. ' + (anaOrigin ? '« Cette simulation » la relance avec la correction ; « Tout le batch » relance les ' + anaBatchKeys().length + ' simulations affichées de cette stratégie. Ensuite, vous pouvez l\'ajouter à la stratégie.' : '« Appliquer » modifie la stratégie dans le formulaire et relance la simulation.') + '</p><div id="anaProps">' +
         (rep.proposals.length ? '<div class="modal-loading"><span class="spinner"></span>Test des propositions…</div>' : '<p>Aucune correction évidente : la stratégie se comporte comme attendu sur cette période. Essayez « Améliorer » pour régler les indicateurs.</p>') + '</div></section>';
       $('anaBody').innerHTML = html;
       if (rep.proposals.length) setTimeout(testAnaProposals, 20);
     }, 30);
   }
   function testAnaProposals() {
-    const { bars, strat, settings, result } = lastRunCtx, base = result.stats, A = F.analyzer;
+    const { bars, strat, settings, result } = anaCtx, base = result.stats, A = F.analyzer;
     const score = (st) => (st ? E.score(st) : -Infinity);
     ana.tested = ana.report.proposals.map((p) => { const x = A.applyProposal(strat, settings, p); return { p: p, stats: E.run(bars, x.strat, x.settings) }; });
     ana.tested.sort((a, b) => score(b.stats) - score(a.stats));
@@ -1921,10 +1953,39 @@
       const st = t.stats, better = st && score(st) > score(base);
       return '<div class="ana-prop ' + (better ? 'good' : 'bad') + '"><div><b>' + esc(t.p.title) + '</b><div class="hint">' + t.p.why + '</div>' +
         '<div class="ana-ba">Avant : ' + statLine(base) + '<br>Après : ' + (st ? statLine(st) : 'échec du test') + (better ? ' <span class="pos">✓ mieux</span>' : ' <span class="hint">pas mieux sur cette période</span>') + '</div></div>' +
-        '<button type="button" class="' + (better ? 'primary' : 'secondary') + ' small" data-ana-apply="' + i + '">Appliquer</button></div>';
+        (anaOrigin ? '<div class="ana-btns"><button type="button" class="' + (better ? 'primary' : 'secondary') + ' small" data-ana-apply="' + i + '">Cette simulation</button>' +
+          '<button type="button" class="secondary small" data-ana-all="' + i + '">Tout le batch (' + anaBatchKeys().length + ')</button></div>'
+          : '<button type="button" class="' + (better ? 'primary' : 'secondary') + ' small" data-ana-apply="' + i + '">Appliquer</button>') + '</div>';
     }).join('');
     $('anaBest').innerHTML = ana.best ? '<b>Meilleure combinaison :</b> ' + ana.best.list.map((p) => esc(p.title)).join(' + ') + ' → ' + statLine(ana.best.stats) : 'Aucune proposition n\'améliore le résultat sur cette période.';
     $('anaApplyBest').disabled = !ana.best;
+    $('anaApplyBestAll').disabled = !ana.best;
+    $('anaApplyBestAll').textContent = 'Appliquer à tout le batch (' + anaBatchKeys().length + ')';
+  }
+  /** Correction de l'analyseur appliquée à des simulations de l'évaluation (relancées sur place). */
+  async function applyAnaToSims(st, se, titles, all) {
+    const e = anaOrigin.e, keys = all ? anaBatchKeys() : [e.key];
+    if (!keys.length || checkRunning) return;
+    const base = e.strategy, before = keys.map((k) => ({ key: k, r: (evalList().find((x) => x.key === k) || {}).returnPct }));
+    const lev = se.leverage !== anaCtx.settings.leverage ? se.leverage : 0;
+    closeAnalyzer();
+    pushUndo('Analyseur sur ' + keys.length + ' simulation(s)');
+    barSel = new Set([e.key]);
+    improveWhere = 'panel'; improveHtml = '<div class="modal-loading"><span class="spinner"></span>Nouvelle simulation avec la correction de l\'analyseur…</div>';
+    renderEvaluation();
+    await rerunWithStrategy(keys, Object.assign({}, st, { name: base.name }), lev ? { leverage: lev } : null);
+    const after = evalList().filter((x) => keys.includes(x.key));
+    const row = (x) => { const b = before.find((y) => y.key === x.key); return '<li>#' + (evalList().findIndex((y) => y.key === x.key) + 1) + ' : ' + pctFine(b.r) + ' → ' + pctFine(x.returnPct) + '</li>'; };
+    const better = after.filter((x) => x.returnPct > before.find((y) => y.key === x.key).r).length;
+    const text = titles.join(' + ');
+    improveCtx = { kind: 'manual', strat: Object.assign({}, st, { name: base.name }), base: base, text: text, leverage: lev };
+    improveHtml = '<div class="imp-proposal"><p><b>Correction de l\'analyseur :</b> ' + esc(text) + (lev ? ' (levier 1:' + lev + ')' : '') + '</p>' +
+      '<p class="val ' + (better * 2 >= after.length ? 'ok' : 'ko') + '">' + better + ' simulation' + (better > 1 ? 's' : '') + ' sur ' + after.length + ' meilleure' + (better > 1 ? 's' : '') + ' :</p><ul class="imp-list">' + after.map(row).join('') + '</ul>' +
+      '<p>Ajouter cette correction à la stratégie ?</p>' +
+      '<div class="row buttons"><button type="button" class="primary small" id="manToCurrent">Ajouter à la stratégie en cours</button><button type="button" class="secondary small" id="manAsNew">Créer une nouvelle stratégie</button></div>' +
+      '<p class="hint">Les barres montrent le résultat d\'origine en plein et le nouveau en pointillé. Ctrl+Z pour revenir aux résultats d\'avant.</p></div>';
+    renderEvaluation();
+    if ($('improveOut')) $('improveOut').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
   function applyAnalysis(st, se, titles) {
     undoable('Analyseur : ' + titles.join(' ; '), () => {
@@ -1945,16 +2006,22 @@
       $('form').requestSubmit();
     });
   }
-  function closeAnalyzer() { $('anaModal').hidden = true; document.body.style.overflow = ''; }
+  function closeAnalyzer() { $('anaModal').hidden = true; if ($('evalModal').hidden) document.body.style.overflow = ''; }
   $('anaModal').addEventListener('click', (e) => {
     if (e.target.closest('[data-close]')) return closeAnalyzer();
-    const b = e.target.closest('[data-ana-apply]');
-    if (b && ana) {
-      const t = ana.tested[Number(b.dataset.anaApply)], x = F.analyzer.applyProposal(lastRunCtx.strat, lastRunCtx.settings, t.p);
-      applyAnalysis(x.strat, x.settings, [t.p.title]);
+    const b = e.target.closest('[data-ana-apply],[data-ana-all]');
+    if (b && ana && anaCtx) {
+      const t = ana.tested[Number(b.dataset.anaApply != null ? b.dataset.anaApply : b.dataset.anaAll)], x = F.analyzer.applyProposal(anaCtx.strat, anaCtx.settings, t.p);
+      if (anaOrigin) applyAnaToSims(x.strat, x.settings, [t.p.title], b.dataset.anaAll != null);
+      else applyAnalysis(x.strat, x.settings, [t.p.title]);
     }
   });
-  $('anaApplyBest').addEventListener('click', () => { if (ana && ana.best) applyAnalysis(ana.best.strat, ana.best.settings, ana.best.list.map((p) => p.title)); });
+  $('anaApplyBest').addEventListener('click', () => {
+    if (!ana || !ana.best) return;
+    const titles = ana.best.list.map((p) => p.title);
+    if (anaOrigin) applyAnaToSims(ana.best.strat, ana.best.settings, titles, false); else applyAnalysis(ana.best.strat, ana.best.settings, titles);
+  });
+  $('anaApplyBestAll').addEventListener('click', () => { if (ana && ana.best && anaOrigin) applyAnaToSims(ana.best.strat, ana.best.settings, ana.best.list.map((p) => p.title), true); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('anaModal').hidden) closeAnalyzer(); });
 
   // ---------- Fenêtre « Déployer sur MetaTrader 5 » ----------
@@ -2601,11 +2668,11 @@
     return b;
   }
   function updateBatchCount() { const n = batchStore.get().length; if ($('evalScopeBatchN')) $('evalScopeBatchN').textContent = n; }
-  function batchSaveButton(id) { return '<button type="button" class="secondary small batch-save" id="' + id + '" title="Enregistrer les simulations affichées comme un lot (Batch) que vous pourrez recharger">💾 Enregistrer en Batch</button>'; }
+  function batchSaveButton(id) { return '<button type="button" class="secondary small batch-save" id="' + id + '" title="Enregistrer les simulations affichées comme un lot (Batch) que vous pourrez recharger">💾 Enregistrer un batch</button>'; }
   function renderBatches() {
     const list = batchStore.get();
     if (!list.length) {
-      $('evalBody').innerHTML = '<p class="eval-empty">Aucun batch enregistré. Lancez un lot de tests (section « Période de backtesting »), puis « 💾 Enregistrer en Batch » ' +
+      $('evalBody').innerHTML = '<p class="eval-empty">Aucun batch enregistré. Lancez un lot de tests (section « Période de backtesting »), puis « 💾 Enregistrer un batch » ' +
         'dans les onglets « Stratégie en cours » ou « Historique complet ».</p>';
       return;
     }
@@ -3041,6 +3108,7 @@
       const s = Object.assign({}, r.strat, { name: name });
       s.frenchText = F.french.toFrench(s) || ''; s.plots = F.french.derivePlots(s);
       loadStrategy(s);
+      if (r.leverage) $('leverage').value = String(r.leverage);
       if (asNew || storage.get().some((x) => x.name === name)) saveStrategy(s, currentConfig()); else $('preset').value = 'mine';
       $('presetDesc').textContent = 'Amélioration ajoutée : ' + r.text;
       logEvent('strategy.enhanced', (asNew ? 'Nouvelle stratégie ' : 'Amélioration ajoutée à ') + name + ' : ' + r.text, { name: name });
@@ -3073,6 +3141,8 @@
       '<div class="bp-row bp-mix"><button type="button" class="primary small" id="bpMix"' + (busy ? ' disabled' : '') + '>▶ Resimuler</button><span class="hint">' + esc(mixSummary(many ? chosen.length : 1)) + '</span></div>' +
       '<div class="bp-row bp-mix"><button type="button" class="primary small bp-improve" id="bpImprove"' + (busy ? ' disabled' : '') + '>✨ Améliorer et simuler</button><span class="hint">Cherche ce qui améliore ' +
       (many ? 'ces simulations' : 'cette simulation') + ' sans dégrader les autres simulations de la stratégie, puis la resimule. Si le résultat vous convient, vous l\'ajoutez à la stratégie en cours.</span></div>' +
+      '<div class="bp-row bp-mix"><button type="button" class="secondary small bp-analyze" id="bpAnalyze"' + (busy ? ' disabled' : '') + '>🔍 Analyseur</button><span class="hint">Explique le résultat de ' +
+      (many ? 'la simulation ' + num(e) + ' (la première sélectionnée)' : 'cette simulation') + ' (chute, levier, marché…) et propose des corrections, à appliquer à cette simulation ou à tout le batch.</span></div>' +
       '<div class="bp-row bp-mix bp-manual"><b>Ma propre amélioration</b>' +
       '<div class="bp-ideas">' + MANUAL_IDEAS.map((x) => '<button type="button" class="chip" data-idea="' + esc(x) + '">' + esc(x) + '</button>').join('') + '</div>' +
       '<textarea id="bpManual" class="prose" rows="2" placeholder="ex. Acheter seulement si l\'ADX 14 est au-dessus de 25. Vendre dans le cas inverse.&#10;ou : Stop suiveur 2 ATR, fermer après 20 bougies">' + esc(barOpt.manual || '') + '</textarea>' +
@@ -3115,6 +3185,7 @@
     if (id === 'bpDurRun') runChecks('ext', { keys: [...barSel], months: +barOpt.dur, sign: barOpt.durDir === 'shorter' ? -1 : 1 });
     if (id === 'bpCap') runChecks('cap', { keys: [...barSel], capMode: barOpt.capMode, capVal: barOpt.capValue });
     if (id === 'bpImprove') improveSelection([...barSel]);
+    if (id === 'bpAnalyze') { const k = evalFiltered(evalList()).map((x) => x.e).find((x) => barSel.has(x.key)); if (k) analyzeBar(k.key); }
     if (id === 'bpManualRun') manualImprove([...barSel]);
     if (id === 'bpDelete') deleteSims([...barSel]);
     const idea = ev.target.closest('[data-idea]');
@@ -3662,7 +3733,7 @@
     });
   }
   /** Relance des simulations (mêmes dates, même capital) avec une autre version de la stratégie ; elles sont modifiées sur place. */
-  async function rerunWithStrategy(keys, strat) {
+  async function rerunWithStrategy(keys, strat, extra) {
     if (checkRunning) return;
     const saved = captureForm();
     checkRunning = 'upd'; checkStop = false;
@@ -3674,7 +3745,7 @@
         if (!$('evalModal').hidden && evalView === 'charts') renderEvaluation();
         const d = datesOf(e);
         evalMarkImproved = true;
-        try { await rerunEntry(e, d.from, d.to, '', true, null, Object.assign({}, strat, { name: e.name })); } finally { evalMarkImproved = false; }
+        try { await rerunEntry(e, d.from, d.to, '', true, extra || null, Object.assign({}, strat, { name: e.name })); } finally { evalMarkImproved = false; }
         if (!$('evalModal').hidden && evalView === 'charts') renderEvaluation();
         await new Promise((res) => setTimeout(res, 120));
       }

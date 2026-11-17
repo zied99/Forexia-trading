@@ -611,3 +611,5 @@ button.analyze svg { width: 16px; height: 16px; fill: none; stroke: currentColor
 .batch-acts button { margin-left: 4px; }
 @media (max-width: 600px) { .runs-side { align-items: flex-start; } }
 table.eval.batch-table td.name { white-space: normal; max-width: 280px; min-width: 180px; overflow: visible; }
+#anaModal { z-index: 60; }
+.ana-prop > .ana-btns { display: flex; flex-direction: column; gap: 6px; flex: none; }
