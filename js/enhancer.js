@@ -511,6 +511,22 @@
    * Renvoie une suggestion testée comme les autres, ou { error }.
    */
   function customSuggestion(bars, strat, settings, text, mode) {
+    const c = customChange(strat, text, mode);
+    if (c.error) return c;
+    const { apply, detail, notes } = c;
+    const out = apply({ strat: strat, settings: settings });
+    const stats = run(bars, out.strat, out.settings);
+    if (!stats) return { error: 'Simulation impossible avec cette amélioration.' };
+    const folds = makeFolds(bars, settings).map((f) => Object.assign(f, { base: run(f.bars, strat, f.settings) })).filter((f) => f.base);
+    const validation = validateOn(folds, strat, apply);
+    return {
+      id: 'custom-' + Date.now() + '-' + Math.floor(Math.random() * 1e6), group: 'Mon amélioration', custom: true,
+      title: String(text).trim().replace(/\s+/g, ' ').slice(0, 160), detail: detail, notes: notes,
+      stats: stats, score: score(stats), apply: apply, validation: validation,
+    };
+  }
+  /** Amélioration en français -> {apply, detail, notes} (sans simulation), ou {error}. */
+  function customChange(strat, text, mode) {
     if (!String(text || '').trim()) return { error: 'Écrivez votre amélioration.' };
     const parsed = FR.parse(text);
     const notes = parsed.warnings.filter((w) => !/Aucune règle d'entrée/.test(w));
@@ -545,21 +561,12 @@
       }
       return { strat: o, settings: se };
     };
-    const out = apply({ strat: strat, settings: settings });
+    const out = apply({ strat: strat, settings: {} });
     for (const k of ['longEntry', 'longExit', 'shortEntry', 'shortExit']) { const e = R.validate(out.strat[k]); if (e) return { error: 'Règle invalide : ' + e }; }
-    const stats = run(bars, out.strat, out.settings);
-    if (!stats) return { error: 'Simulation impossible avec cette amélioration.' };
     const how = { and: 'ET', or: 'OU', replace: 'remplacée par' };
     const detail = changes.map((c) => (c.k === 'sl' ? 'Stop-loss : ' + c.v + ' pips' : c.k === 'tp' ? 'Take-profit : ' + c.v + ' pips' : c.k === 'tm' ? c.label + ' : ' + c.v
       : LABEL[c.k] + (mode === 'replace' || !strat[c.k] ? ' : ' : c.isExit ? ' OU ' : ' ' + how[mode] + ' ') + c.rule)).join(' · ');
-    // contrôle sur la période précédente, comme les suggestions automatiques
-    const folds = makeFolds(bars, settings).map((f) => Object.assign(f, { base: run(f.bars, strat, f.settings) })).filter((f) => f.base);
-    const validation = validateOn(folds, strat, apply);
-    return {
-      id: 'custom-' + Date.now() + '-' + Math.floor(Math.random() * 1e6), group: 'Mon amélioration', custom: true,
-      title: String(text).trim().replace(/\s+/g, ' ').slice(0, 160), detail: detail, notes: notes,
-      stats: stats, score: score(stats), apply: apply, validation: validation,
-    };
+    return { apply: apply, detail: detail, notes: notes };
   }
   function combine(strat, settings, selected) {
     let cur = { strat: Object.assign({}, strat), settings: Object.assign({}, settings) };
@@ -577,5 +584,5 @@
     return { runs: runs, tested: ok.length, positive: pos, robust: ok.length >= 3 && pos * 3 >= ok.length * 2 };
   }
 
-  F.enhancer = { STYLES, adaptToStyle, scaleStrategy, suggest, combine, score, run, customSuggestion, makeFolds, validateOn, robustness, ORDER, andWith, orWith };
+  F.enhancer = { STYLES, adaptToStyle, scaleStrategy, suggest, combine, score, run, customSuggestion, customChange, makeFolds, validateOn, robustness, ORDER, andWith, orWith };
 })(typeof window !== 'undefined' ? window : globalThis);

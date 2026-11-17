@@ -551,3 +551,10 @@ a.btn-link:hover { border-color: var(--accent); color: var(--accent); }
 .cond-body { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; flex: 1; min-width: 0; }
 .cond-lines { display: flex; flex-wrap: wrap; gap: 6px; }
 .cond-lines button { width: auto; margin: 0; border-color: #9333ea; color: #9333ea; }
+.bar-panel .bp-manual { align-items: flex-start; }
+.bar-panel .bp-manual > b { flex-basis: 100%; }
+.bp-ideas { display: flex; flex-wrap: wrap; gap: 5px; flex-basis: 100%; }
+.bp-ideas .chip { font-size: 12px; padding: 3px 9px; }
+.bar-panel #bpManual { flex: 1 1 100%; width: 100%; min-height: 54px; font-size: 13px; }
+.bar-panel .bp-del { border-top: 1px solid var(--border); padding-top: 8px; }
+.bar-panel button.danger { color: var(--down); }

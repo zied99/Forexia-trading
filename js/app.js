@@ -433,12 +433,11 @@
       syncPeriodUI(); $('dateFrom').value = from; $('dateTo').value = to;
     } finally { restoring = false; }
     if (atStart && c.source === 'broker' && !bridgeToken) return;
-    evalNoRecord = true; // déjà dans le tableau d'évaluation
-    runFromForm().then((ok) => {
+    runFromForm({ noRecord: true }).then((ok) => { // déjà dans le tableau d'évaluation
       if (!ok && atStart) { $('formError').textContent = ''; return; }
       $('presetDesc').textContent = (ok ? 'Dernière simulation affichée : ' : 'Dernière simulation : ') + frDate(from) + ' → ' + frDate(to) + ' · ' + esc(c.pair || '') +
         ' · capital ' + money.format(c.capital || 0) + ' · levier 1:' + (c.leverage || '?') + ' · lancée le ' + new Date(last.at).toLocaleDateString('fr-FR') + ' (' + signed(last.returnPct, num1) + ' %).';
-    }).finally(() => { evalNoRecord = false; syncFormState(); });
+    }).finally(() => { syncFormState(); });
   }
 
   function runKey(s, config) {
@@ -902,7 +901,9 @@
     if (batchRunning) $('batchRun').textContent = 'Arrêt…';
   });
   /** Lance le backtest du formulaire. Renvoie true si la simulation a abouti. */
-  async function runFromForm() {
+  async function runFromForm(opts) {
+    // « ne pas enregistrer » est décidé au lancement, pour ce calcul-là (une autre simulation en parallèle ne le change pas)
+    const noRecord = !!((opts && opts.noRecord) || evalNoRecord);
     $('formError').textContent = '';
     if (frenchDirty && $('frenchText').value.trim()) {
       const r = translateFrench();
@@ -996,7 +997,7 @@
       lastRun = { key: runKey(strat, config), stats: result.stats };
       render({ bars, strat, settings, result, loaded, periodKey, warnings, config });
       syncFormState();
-      recordEvaluation({ bars, strat, settings, result, loaded, periodKey, config });
+      if (!noRecord || evalReplaceKey) recordEvaluation({ bars, strat, settings, result, loaded, periodKey, config }, noRecord);
       // Filet de sécurité : la dernière stratégie simulée est gardée, même non enregistrée.
       const lastRunRec = { at: new Date().toISOString(), strategy: strat, config: config };
       try { localStorage.setItem('forexia.lastRun', JSON.stringify(lastRunRec)); } catch (e) { /* ignoré */ }
@@ -2475,7 +2476,7 @@
     if (/BCE/.test(loaded.source)) return 'BCE' + (/mèches/.test(loaded.source) ? ' + mèches' : '');
     return 'Simulées';
   }
-  function recordEvaluation(c) {
+  function recordEvaluation(c, noRecord) {
     const s = c.result.stats, st = c.result.startIndex;
     const avg = averageGain(c.result.wealth || c.result.equity, c.settings.capital);
     const entry = {
@@ -2487,7 +2488,7 @@
       rules: [c.strat.longEntry, c.strat.longExit, c.strat.shortEntry, c.strat.shortExit, c.strat.stopLossPips, c.strat.takeProfitPips].concat(TM_FIELDS.map((f) => c.strat[f] || 0)).join('|'),
       strategy: c.strat, config: c.config,
     };
-    if (evalNoRecord) return; // simulation d'analyse (« Améliorer » depuis un rapport) : rien n'est ajouté au tableau
+    if ((noRecord || evalNoRecord) && !evalReplaceKey) return; // simulation d'analyse (« Améliorer » depuis un rapport) : rien n'est ajouté au tableau
     if (evalTag) entry.tag = evalTag;
     entry.key = entry.at + '|' + entry.name;
     const list = evalList();
@@ -2510,7 +2511,8 @@
     const last = list[list.length - 1];
     // Même stratégie, mêmes réglages, même résultat : on ne compte pas deux fois la même simulation.
     const same = (a, b) => a && ['name', 'pair', 'from', 'to', 'data', 'leverage', 'capital', 'rules'].every((k) => a[k] === b[k]) && Math.abs(a.returnPct - b.returnPct) < 1e-9;
-    if (same(last, entry)) return;
+    // simulation identique déjà dans le tableau (ex. rechargée puis relancée) : pas de doublon
+    if (same(last, entry) || list.some((x) => same(x, entry))) return;
     list.push(entry);
     evalSave(list);
     // Dans la base : la simulation complète, avec la liste de ses trades.
@@ -2709,7 +2711,67 @@
   // Panneau d'une simulation choisie en cliquant sur sa barre : prolonger, raccourcir, changer le capital de départ.
   let barSel = new Set(), barLast = -1;
   let lastBarClick = { k: '', t: 0 };
-  const barOpt = { durDir: 'longer', dur: '6', capMode: 'pct', capValue: '100' };
+  const barOpt = { durDir: 'longer', dur: '6', capMode: 'pct', capValue: '100', manual: '', manualMode: 'and' };
+  // idées d'améliorations « à la main » (cliquables, modifiables dans la zone de texte)
+  const MANUAL_IDEAS = ['Stop suiveur 2 ATR', 'Stop loss 2 ATR', 'Take profit 3 ATR', 'Stop au prix d\'entrée après 1 ATR', 'Fermer après 20 bougies',
+    'Acheter seulement si le prix est au-dessus de la moyenne mobile exponentielle 200. Vendre dans le cas inverse',
+    'Acheter seulement si l\'ADX 14 est au-dessus de 25. Vendre seulement si l\'ADX 14 est au-dessus de 25',
+    'Acheter seulement si le RSI 14 est au-dessus de 50. Vendre dans le cas inverse',
+    'Pause de 5 bougies après 3 pertes de suite'];
+  function deleteSims(keys) {
+    if (!keys.length || !confirm('Supprimer ' + (keys.length > 1 ? 'ces ' + keys.length + ' simulations' : 'cette simulation') + ' du tableau d\'évaluation ? (Ctrl+Z pour annuler)')) return;
+    pushUndo('Suppression de ' + keys.length + ' simulation(s)');
+    const set = new Set(keys);
+    evalSave(evalList().filter((e) => !set.has(e.key)));
+    for (const k of keys) { dbPush('simulations/delete', { key: k }); cloudPush(() => C.deleteSimulation(k)); }
+    barSel = new Set(); improveHtml = ''; improveCtx = null;
+    toast(keys.length > 1 ? keys.length + ' simulations supprimées.' : 'Simulation supprimée.', true);
+    renderEvaluation();
+  }
+  // Amélioration écrite par l'utilisateur, appliquée aux simulations choisies puis resimulées sur place
+  async function manualImprove(keys) {
+    const text = ($('bpManual').value || '').trim(), mode = $('bpManualMode').value;
+    barOpt.manual = text; barOpt.manualMode = mode;
+    if (!text || checkRunning) return;
+    const sims = evalList().filter((e) => keys.includes(e.key) && e.strategy);
+    if (!sims.length) return;
+    // l'amélioration est construite sur la stratégie de la 1re simulation (même stratégie pour toutes)
+    const base = sims[0].strategy, before = sims.map((e) => ({ key: e.key, r: e.returnPct }));
+    const fake = E.customChange(base, text, mode);
+    if (fake.error) { improveWhere = 'panel'; improveHtml = '<p class="val ko">' + esc(fake.error) + '</p>'; return renderEvaluation(); }
+    const improved = fake.apply({ strat: Object.assign({}, base), settings: {} }).strat;
+    for (const k of RULE_FIELDS) { const err = F.rules.validate(improved[k]); if (err) { improveWhere = 'panel'; improveHtml = '<p class="val ko">Règle invalide : ' + esc(err) + '</p>'; return renderEvaluation(); } }
+    pushUndo('Amélioration à la main sur ' + sims.length + ' simulation(s)');
+    improveWhere = 'panel'; improveHtml = '<div class="modal-loading"><span class="spinner"></span>Nouvelle simulation avec votre amélioration…</div>';
+    await rerunWithStrategy(sims.map((e) => e.key), Object.assign({}, improved, { name: base.name }));
+    const after = evalList().filter((e) => keys.includes(e.key));
+    const row = (e) => { const b = before.find((x) => x.key === e.key); return '<li>#' + (evalList().findIndex((x) => x.key === e.key) + 1) + ' : ' + pctFine(b.r) + ' → ' + pctFine(e.returnPct) + '</li>'; };
+    const better = after.filter((e) => e.returnPct > before.find((x) => x.key === e.key).r).length;
+    improveCtx = { kind: 'manual', strat: improved, base: base, text: text };
+    improveHtml = '<div class="imp-proposal"><p><b>Votre amélioration :</b> ' + esc(fake.detail) + '</p>' + (fake.notes && fake.notes.length ? '<p class="hint">' + esc(fake.notes.join(' ')) + '</p>' : '') +
+      '<p class="val ' + (better * 2 >= after.length ? 'ok' : 'ko') + '">' + better + ' simulation' + (better > 1 ? 's' : '') + ' sur ' + after.length + ' meilleure' + (better > 1 ? 's' : '') + ' :</p><ul class="imp-list">' + after.map(row).join('') + '</ul>' +
+      '<div class="row buttons"><button type="button" class="primary small" id="manToCurrent">Ajouter à la stratégie en cours</button><button type="button" class="secondary small" id="manAsNew">Créer une nouvelle stratégie</button></div>' +
+      '<p class="hint">Les barres montrent le résultat d\'origine en plein et le nouveau en pointillé. Ctrl+Z pour revenir aux résultats d\'avant.</p></div>';
+    renderEvaluation();
+  }
+  function saveManual(asNew) {
+    const r = improveCtx; if (!r || r.kind !== 'manual') return;
+    const name = asNew ? (prompt('Nom de la nouvelle stratégie :', newStratName(r.base.name)) || '').trim() : r.base.name;
+    if (!name) return;
+    undoable(asNew ? 'Nouvelle stratégie « ' + name + ' »' : 'Amélioration ajoutée à « ' + name + ' »', () => {
+      if (asNew && !storage.get().some((x) => x.name === r.base.name)) saveStrategy(r.base, currentConfig());
+      const s = Object.assign({}, r.strat, { name: name });
+      s.frenchText = F.french.toFrench(s) || ''; s.plots = F.french.derivePlots(s);
+      loadStrategy(s);
+      if (asNew || storage.get().some((x) => x.name === name)) saveStrategy(s, currentConfig()); else $('preset').value = 'mine';
+      $('presetDesc').textContent = 'Amélioration ajoutée : ' + r.text;
+      logEvent('strategy.enhanced', (asNew ? 'Nouvelle stratégie ' : 'Amélioration ajoutée à ') + name + ' : ' + r.text, { name: name });
+    });
+    improveHtml = '<p class="val ok">' + (asNew ? '« ' + esc(name) + ' » créée et chargée.' : 'Amélioration ajoutée à « ' + esc(name) + ' ».') + '</p>';
+    improveCtx = null;
+    toast(asNew ? '« ' + name + ' » créée.' : 'Amélioration ajoutée à « ' + name + ' ».', true);
+    renderEvaluation();
+  }
   function barPanelHtml(list) {
     const chosen = list.filter((x) => barSel.has(x.key));
     if (!chosen.length) return '<p class="hint bar-hint">Cliquez sur une barre pour modifier cette simulation (durée ou capital de départ). Plusieurs : glissez la souris sur les barres, ou Ctrl+clic.</p>';
@@ -2733,7 +2795,16 @@
       '<div class="bp-row bp-mix"><button type="button" class="primary small" id="bpMix"' + (busy ? ' disabled' : '') + '>▶ Resimuler</button><span class="hint">' + esc(mixSummary(many ? chosen.length : 1)) + '</span></div>' +
       '<div class="bp-row bp-mix"><button type="button" class="primary small bp-improve" id="bpImprove"' + (busy ? ' disabled' : '') + '>✨ Améliorer et simuler</button><span class="hint">Cherche ce qui améliore ' +
       (many ? 'ces simulations' : 'cette simulation') + ' sans dégrader les autres simulations de la stratégie, puis la resimule. Si le résultat vous convient, vous l\'ajoutez à la stratégie en cours.</span></div>' +
+      '<div class="bp-row bp-mix bp-manual"><b>Ma propre amélioration</b>' +
+      '<div class="bp-ideas">' + MANUAL_IDEAS.map((x) => '<button type="button" class="chip" data-idea="' + esc(x) + '">' + esc(x) + '</button>').join('') + '</div>' +
+      '<textarea id="bpManual" class="prose" rows="2" placeholder="ex. Acheter seulement si l\'ADX 14 est au-dessus de 25. Vendre dans le cas inverse.&#10;ou : Stop suiveur 2 ATR, fermer après 20 bougies">' + esc(barOpt.manual || '') + '</textarea>' +
+      '<select id="bpManualMode"><option value="and"' + (barOpt.manualMode === 'and' ? ' selected' : '') + '>comme condition (ET)</option><option value="or"' + (barOpt.manualMode === 'or' ? ' selected' : '') + '>comme alternative (OU)</option>' +
+      '<option value="replace"' + (barOpt.manualMode === 'replace' ? ' selected' : '') + '>remplace la règle</option></select>' +
+      '<button type="button" class="primary small" id="bpManualRun"' + (busy ? ' disabled' : '') + '>Tester et simuler</button>' +
+      '<span class="hint">Appliquée à ' + (many ? 'ces ' + chosen.length + ' simulations' : 'cette simulation') + ', relancée' + (many ? 's' : '') + ' sur place (Ctrl+Z pour revenir) ; ensuite, vous pouvez l\'ajouter à la stratégie.</span></div>' +
       improveInPanel() +
+      '<div class="bp-row bp-del"><button type="button" class="secondary small danger" id="bpDelete"' + (busy ? ' disabled' : '') + '>🗑 Supprimer ' + (many ? 'ces ' + chosen.length + ' simulations' : 'cette simulation') + '</button>' +
+      '<span class="hint">Retire ' + (many ? 'ces lignes' : 'cette ligne') + ' du tableau d\'évaluation (Ctrl+Z pour la remettre).</span></div>' +
       '<p class="hint">' + (many ? 'Ces ' + chosen.length + ' simulations sont modifiées' : 'La simulation #' + idx + ' est modifiée') + ' sur place (mêmes numéros) ; Ctrl+Z pour revenir en arrière. Glisser ou Ctrl+clic pour changer la sélection.</p></div>';
   }
   function mixSummary(n) {
@@ -2754,8 +2825,10 @@
       } else barOpt.dur = ev.target.value;
     }
     if (ev.target.id === 'bpCapMode') { barOpt.capMode = ev.target.value; renderEvaluation(); }
+    if (ev.target.id === 'bpManualMode') barOpt.manualMode = ev.target.value;
   });
   $('evalBody').addEventListener('input', (ev) => {
+    if (ev.target.id === 'bpManual') barOpt.manual = ev.target.value;
     if (ev.target.id === 'bpCapValue') { barOpt.capValue = ev.target.value; const h = document.querySelector('.bp-mix .hint'); if (h) h.textContent = mixSummary(barSel.size); }
   });
   $('evalBody').addEventListener('click', (ev) => {
@@ -2764,6 +2837,10 @@
     if (id === 'bpDurRun') runChecks('ext', { keys: [...barSel], months: +barOpt.dur, sign: barOpt.durDir === 'shorter' ? -1 : 1 });
     if (id === 'bpCap') runChecks('cap', { keys: [...barSel], capMode: barOpt.capMode, capVal: barOpt.capValue });
     if (id === 'bpImprove') improveSelection([...barSel]);
+    if (id === 'bpManualRun') manualImprove([...barSel]);
+    if (id === 'bpDelete') deleteSims([...barSel]);
+    const idea = ev.target.closest('[data-idea]');
+    if (idea) { const ta = $('bpManual'); ta.value = (ta.value.trim() ? ta.value.trim().replace(/\.?$/, '. ') : '') + idea.dataset.idea; barOpt.manual = ta.value; ta.focus(); }
     if (id === 'bpMix') runChecks('mix', { keys: [...barSel], months: barOpt.durDir === 'none' ? 0 : +barOpt.dur, sign: barOpt.durDir === 'shorter' ? -1 : 1, capMode: barOpt.capMode, capVal: barOpt.capValue });
   });
   function checkToolsHtml(list) {
@@ -3030,8 +3107,7 @@
       updateStyleHint();
     });
     closeEvaluation();
-    evalNoRecord = true; // déjà dans le tableau : on ne l'ajoute pas une 2e fois
-    runFromForm().finally(() => { evalNoRecord = false; $('results').scrollIntoView({ behavior: 'smooth' }); });
+    runFromForm({ noRecord: true }).finally(() => { $('results').scrollIntoView({ behavior: 'smooth' }); }); // déjà dans le tableau
   }
 
   // ---------- Section « Améliorations » : communes aux rouges, et à fort impact ----------
@@ -3397,6 +3473,8 @@
     if (b) return improveFromReport(b);
     if (ev.target.id === 'impCreate') return createImproved();
     if (ev.target.id === 'impApplyCurrent') return applyToCurrent();
+    if (ev.target.id === 'manToCurrent') return saveManual(false);
+    if (ev.target.id === 'manAsNew') return saveManual(true);
     if (ev.target.id === 'impRerunOthers') {
       const keys = ev.target.dataset.keys.split('\n');
       pushUndo('Simulations relancées avec la version améliorée');
