@@ -176,6 +176,17 @@ CLOSE < BB_LOWER(20, 2) OR RSI(14) < 25
 - Les données BCE n'ont qu'un cours par jour : ouverture = clôture de la veille, pas de mèches.
   Pour un test plus fin des stops, importez un CSV OHLC.
 
+## Batchs
+
+Un **batch** est un lot de simulations enregistré ensemble, par exemple un lot de tests aléatoires.
+- Enregistrement : lien « 💾 Enregistrer ce lot en Batch » à la fin d'un lot, ou bouton « 💾 Enregistrer en Batch »
+  dans la fenêtre Évaluation (enregistre les simulations affichées).
+- Onglet **Batchs** de la fenêtre Évaluation : devise, période des simulations (« entre 6 mois et 1 an »), nombre de
+  simulations, rendement moyen, probabilité de gain (le pourcentage du cercle), capital moyen final, drawdown moyen.
+- **Recharger** remet la stratégie dans le formulaire et n'affiche que les simulations du batch (tableau, graphiques,
+  recommandations) ; « Mettre à jour le batch » y enregistre leur état après prolongation ou amélioration.
+- Renommer ✏️ et supprimer 🗑. Les batchs sont gardés dans ce navigateur.
+
 ## Analyseur
 
 Le bouton **🔍 Analyseur** (à côté d'« Améliorer ») explique une simulation :

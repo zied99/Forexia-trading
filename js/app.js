@@ -671,7 +671,7 @@
     $('batchCount').value = n;
     batchRunning = true; batchStop = false;
     $('batchRun').textContent = 'Arrêter';
-    const res = [];
+    const res = [], keysBefore = new Set(evalList().map((e) => e.key));
     let fails = 0;
     let attempts = 0;
     for (let k = 0; k < n && !batchStop && attempts++ < n * 3; k++) {
@@ -693,8 +693,13 @@
       const pos = res.filter((v) => v > 0).length, avg = res.reduce((a, b) => a + b, 0) / res.length;
       $('batchStatus').innerHTML = '<b>' + res.length + ' test' + (res.length > 1 ? 's' : '') + ' enregistré' + (res.length > 1 ? 's' : '') + '</b> dans « Évaluation » : ' +
         pos + ' gagnant' + (pos > 1 ? 's' : '') + ' sur ' + res.length + ', résultat moyen <span class="' + cls(avg) + '">' + signed(avg, num1) + ' %</span> (de ' + signed(Math.min(...res), num1) + ' à ' + signed(Math.max(...res), num1) + ' %). ' +
-        '<button type="button" class="link" id="batchOpenEval">Voir les recommandations</button>';
+        '<button type="button" class="link" id="batchOpenEval">Voir les recommandations</button> · <button type="button" class="link" id="batchSaveLot">💾 Enregistrer ce lot en Batch</button>';
       $('batchOpenEval').addEventListener('click', () => { openEvaluation(); document.querySelector('.eval-views [data-view="reco"]').click(); });
+      const lotKeys = evalList().filter((e) => !keysBefore.has(e.key)).map((e) => e.key);
+      $('batchSaveLot').addEventListener('click', () => {
+        const entries = evalList().filter((e) => lotKeys.includes(e.key));
+        if (saveBatch(entries)) $('batchSaveLot').outerHTML = '<span class="pos">✓ Batch enregistré</span>';
+      });
       logEvent('simulation.batch', 'Lot de ' + res.length + ' tests aléatoires : ' + pos + ' gagnants, moyenne ' + signed(avg, num1) + ' %', { results: res });
     }
   });
@@ -2340,7 +2345,7 @@
     await cloudSync().catch(() => {});
     logEvent('auth.logout', 'Déconnexion : ' + C.user.name);
     await C.signOut();
-    for (const k of ['forexia.strategies', 'forexia.evaluations', 'forexia.lastRun']) { try { localStorage.removeItem(k); } catch (e) { /* ignoré */ } }
+    for (const k of ['forexia.strategies', 'forexia.evaluations', 'forexia.lastRun', 'forexia.batches']) { try { localStorage.removeItem(k); } catch (e) { /* ignoré */ } }
     evalMemory = null;
     updateEvalCount();
     refreshPresetSelect('preset:' + F.presets.list[0].id);
@@ -2556,6 +2561,130 @@
   function evalSave(list) { evalMemory = list; evalStore.set(list); updateEvalCount(); }
   // Onglet « Stratégie en cours » (par défaut) ou « Historique complet ».
   let evalScope = 'current';
+  // ---------- Batchs : lots de simulations enregistrés, rechargeables ----------
+  const BATCH_KEY = 'forexia.batches';
+  const batchStore = {
+    get() { try { return JSON.parse(localStorage.getItem(BATCH_KEY)) || []; } catch (e) { return batchMemory || []; } },
+    set(list) { batchMemory = list; try { localStorage.setItem(BATCH_KEY, JSON.stringify(list)); } catch (e) { /* ignoré */ } },
+  };
+  let batchMemory = null;
+  let evalBatch = null; // batch rechargé : { id, keys:Set } — le tableau et les graphiques ne montrent que ses simulations
+  /** Chiffres d'un batch : devise(s), durées extrêmes, rendement, probabilité de gain, capital moyen. */
+  function batchStats(entries) {
+    const n = entries.length, days = entries.map((e) => durationDays(e.from, e.to));
+    const dmin = Math.min(...days), dmax = Math.max(...days);
+    const lmin = durationFromDays(dmin), lmax = durationFromDays(dmax);
+    const finals = entries.map((e) => (e.capital || 0) * (1 + e.returnPct / 100));
+    const cap = entries.reduce((a, e) => a + (e.capital || 0), 0), gain = entries.reduce((a, e) => a + ((e.capital || 0) * e.returnPct) / 100, 0);
+    return {
+      n: n, pairs: [...new Set(entries.map((e) => e.pair))].join(', '), data: [...new Set(entries.map((e) => e.data))].join(', '),
+      strategies: [...new Set(entries.map((e) => e.name))],
+      span: lmin === lmax ? lmin : 'entre ' + lmin + ' et ' + lmax,
+      from: entries.map((e) => e.from).sort()[0], to: entries.map((e) => e.to).sort().pop(),
+      winRate: n ? (entries.filter((e) => e.returnPct > 0).length / n) * 100 : 0,
+      avgReturn: mean(entries.map((e) => e.returnPct)), globalReturn: cap > 0 ? (gain / cap) * 100 : 0,
+      avgStart: mean(entries.map((e) => e.capital || 0)), avgFinal: mean(finals), avgGainPct: mean(entries.map((e) => e.avgGainPct || 0)),
+      avgDD: mean(entries.map((e) => e.maxDrawdownPct || 0)), leverage: [...new Set(entries.map((e) => '1:' + e.leverage))].join(', '),
+    };
+  }
+  function saveBatch(entries, name) {
+    if (!entries.length) return null;
+    const st = batchStats(entries);
+    const def = (st.strategies.length === 1 ? st.strategies[0] : 'Plusieurs stratégies') + ' · ' + st.pairs + ' · ' + st.n + ' simulations';
+    const nm = name || (prompt('Nom du batch :', def) || '').trim().slice(0, 100);
+    if (!nm) return null;
+    const b = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: nm, at: new Date().toISOString(), entries: entries.map((e) => Object.assign({}, e)) };
+    const list = batchStore.get(); list.push(b); batchStore.set(list);
+    logEvent('batch.saved', 'Batch enregistré : ' + nm + ' (' + st.n + ' simulations, ' + Math.round(st.winRate) + ' % gagnantes)', { id: b.id });
+    toast('Batch « ' + nm + ' » enregistré (' + st.n + ' simulations).', false);
+    updateBatchCount();
+    return b;
+  }
+  function updateBatchCount() { const n = batchStore.get().length; if ($('evalScopeBatchN')) $('evalScopeBatchN').textContent = n; }
+  function batchSaveButton(id) { return '<button type="button" class="secondary small batch-save" id="' + id + '" title="Enregistrer les simulations affichées comme un lot (Batch) que vous pourrez recharger">💾 Enregistrer en Batch</button>'; }
+  function renderBatches() {
+    const list = batchStore.get();
+    if (!list.length) {
+      $('evalBody').innerHTML = '<p class="eval-empty">Aucun batch enregistré. Lancez un lot de tests (section « Période de backtesting »), puis « 💾 Enregistrer en Batch » ' +
+        'dans les onglets « Stratégie en cours » ou « Historique complet ».</p>';
+      return;
+    }
+    const p = (v) => '<span class="' + cls(v) + '">' + signed(v, num1) + ' %</span>';
+    const rows = list.map((b, i) => {
+      const s = batchStats(b.entries);
+      return '<tr><td class="l name" title="' + esc(b.name) + '"><b>' + esc(b.name) + '</b><small class="eval-tag">' + (s.strategies.length > 1 || b.name.indexOf(s.strategies[0]) < 0 ? esc(s.strategies.join(', ')) + ' · ' : '') + 'enregistré le ' +
+        new Date(b.at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) + '</small></td>' +
+        '<td class="l">' + esc(s.pairs) + '</td><td class="l">' + esc(s.span) + '<small class="eval-tag">' + frDate(s.from) + ' → ' + frDate(s.to) + '</small></td>' +
+        '<td>' + s.n + '</td><td title="Moyenne des résultats de chaque simulation (rendement global : ' + signed(s.globalReturn, num1) + ' %)">' + p(s.avgReturn) + '</td>' +
+        '<td><span class="batch-rate ' + (s.winRate >= 50 ? 'pos' : 'neg') + '">' + Math.round(s.winRate) + ' %</span></td>' +
+        '<td title="Capital de départ moyen : ' + money.format(s.avgStart) + '">' + money.format(s.avgFinal) + '<small class="eval-tag">départ ' + money.format(s.avgStart) + '</small></td>' +
+        '<td>−' + num1.format(s.avgDD) + ' %</td>' +
+        '<td class="batch-acts"><button type="button" class="reload" data-batch-load="' + i + '">Recharger</button>' +
+        '<button type="button" class="ghost small" data-batch-ren="' + i + '" title="Renommer" aria-label="Renommer le batch">✏️</button>' +
+        '<button type="button" class="ghost small" data-batch-del="' + i + '" title="Supprimer" aria-label="Supprimer le batch">🗑</button></td></tr>';
+    }).join('');
+    $('evalBody').innerHTML = '<p class="hint">Un batch est un lot de simulations enregistré ensemble (par exemple un lot de tests aléatoires). « Recharger » remet la stratégie dans le formulaire ' +
+      'et affiche les simulations du batch dans les graphiques, où vous pouvez les prolonger, les améliorer, etc.</p>' +
+      '<div class="table-wrap"><table class="eval batch-table"><thead><tr><th class="l">Batch</th><th class="l">Devise</th><th class="l">Période des simulations</th><th>Simulations</th>' +
+      '<th>Rendement moyen</th><th>Probabilité de gain</th><th>Capital moyen (final)</th><th>Drawdown moyen</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+  }
+  function loadBatch(b) {
+    // les simulations du batch retournent dans l'historique si elles en ont été effacées
+    const list = evalList(), have = new Set(list.map((e) => e.key));
+    const missing = b.entries.filter((e) => !have.has(e.key));
+    if (missing.length) evalSave(list.concat(missing.map((e) => Object.assign({}, e))));
+    const first = b.entries.find((e) => e.strategy);
+    if (first) undoable('Batch rechargé', () => {
+      loadStrategy(first.strategy); if (first.config) applyConfig(first.config);
+      $('preset').value = 'mine'; $('deleteStrat').hidden = true;
+      $('presetDesc').textContent = 'Batch « ' + b.name + ' » rechargé (' + b.entries.length + ' simulations).';
+      updateStyleHint();
+    });
+    evalBatch = { id: b.id, keys: new Set(b.entries.map((e) => e.key)) };
+    evalScope = 'current';
+    evalView = 'charts';
+    document.querySelectorAll('.eval-views [data-view]').forEach((x) => x.setAttribute('aria-selected', x.dataset.view === 'charts'));
+    renderEvaluation();
+  }
+  function batchBanner() {
+    if (!evalBatch) return '';
+    const b = batchStore.get().find((x) => x.id === evalBatch.id);
+    if (!b) { evalBatch = null; return ''; }
+    return '<div class="banner info batch-banner"><span>Batch <b>« ' + esc(b.name) + ' »</b> rechargé : seules ses ' + evalBatch.keys.size + ' simulations sont affichées.</span>' +
+      '<span class="row buttons"><button type="button" class="secondary small" id="batchUpdate" title="Enregistrer dans ce batch l\'état actuel de ses simulations (prolongées, améliorées…)">Mettre à jour le batch</button>' +
+      '<button type="button" class="secondary small" id="batchLeave">Voir toutes les simulations</button></span></div>';
+  }
+  $('evalModal').addEventListener('click', (e) => {
+    const t = e.target.closest('[data-batch-load],[data-batch-ren],[data-batch-del],#batchUpdate,#batchLeave,.batch-save');
+    if (!t) return;
+    const list = batchStore.get();
+    if (t.dataset.batchLoad != null) return loadBatch(list[+t.dataset.batchLoad]);
+    if (t.dataset.batchRen != null) {
+      const b = list[+t.dataset.batchRen], nm = (prompt('Nouveau nom du batch :', b.name) || '').trim().slice(0, 100);
+      if (nm) { b.name = nm; batchStore.set(list); renderEvaluation(); }
+      return;
+    }
+    if (t.dataset.batchDel != null) {
+      const b = list[+t.dataset.batchDel];
+      if (!confirm('Supprimer le batch « ' + b.name + ' » ? Ses simulations restent dans l\'historique.')) return;
+      list.splice(+t.dataset.batchDel, 1); batchStore.set(list);
+      if (evalBatch && evalBatch.id === b.id) evalBatch = null;
+      updateBatchCount(); renderEvaluation();
+      return;
+    }
+    if (t.id === 'batchUpdate' && evalBatch) {
+      const b = list.find((x) => x.id === evalBatch.id), cur = evalList().filter((x) => evalBatch.keys.has(x.key));
+      if (b && cur.length) { b.entries = cur.map((x) => Object.assign({}, x)); b.updatedAt = new Date().toISOString(); batchStore.set(list); toast('Batch « ' + b.name + ' » mis à jour.', false); }
+      return;
+    }
+    if (t.id === 'batchLeave') { evalBatch = null; return renderEvaluation(); }
+    if (t.classList.contains('batch-save')) {
+      const shown = evalFiltered(evalList()).map((x) => x.e);
+      if (saveBatch(shown) && evalScope === 'batch') renderEvaluation();
+    }
+  });
+  $('evalScopeBatch').addEventListener('click', () => setEvalScope('batch'));
+
   function currentStratName() { return currentStrategy().name; }
   function updateEvalCount() {
     const all = evalList(), name = currentStratName(), n = all.filter((e) => e.name === name).length;
@@ -2564,8 +2693,10 @@
   }
   function setEvalScope(scope) {
     evalScope = scope;
+    evalBatch = null;
     $('evalScopeCurrent').setAttribute('aria-selected', scope === 'current');
     $('evalScopeAll').setAttribute('aria-selected', scope === 'all');
+    $('evalScopeBatch').setAttribute('aria-selected', scope === 'batch');
     renderEvaluation();
   }
   function dataLabel(loaded, settings) {
@@ -2641,6 +2772,7 @@
     sel.value = values.includes(cur) ? cur : '';
   }
   function evalFiltered(list) {
+    if (evalBatch) return list.map((e, i) => ({ e: e, i: i })).filter(({ e }) => evalBatch.keys.has(e.key));
     const fs = evalScope === 'current' ? currentStratName() : $('evalFStrat').value;
     const q = evalScope === 'current' ? '' : $('evalFSearch').value.trim().toLowerCase(), fp = $('evalFPair').value, fd = $('evalFData').value, fr = $('evalFResult').value;
     return list.map((e, i) => ({ e: e, i: i })).filter(({ e }) => (!fs || e.name === fs) && (!q || e.name.toLowerCase().includes(q)) &&
@@ -2659,16 +2791,28 @@
     fillFilter('evalFStrat', uniq((e) => e.name)); fillFilter('evalFPair', uniq((e) => e.pair)); fillFilter('evalFData', uniq((e) => e.data));
     const name = currentStratName(), mineN = all.filter((e) => e.name === name).length;
     $('evalScopeCurrentN').textContent = mineN; $('evalScopeAllN').textContent = all.length;
-    $('evalTitle').textContent = evalScope === 'current' ? 'Évaluation de « ' + name + ' »' : 'Historique des simulations';
+    updateBatchCount();
+    const isBatch = evalScope === 'batch';
+    document.querySelector('.eval-views').hidden = isBatch;
+    $('evalSaveBatch').hidden = isBatch || !!evalBatch;
+    $('evalClear').hidden = $('evalExport').hidden = isBatch;
+    if (evalBatch) { $('evalScopeCurrent').setAttribute('aria-selected', 'false'); $('evalScopeAll').setAttribute('aria-selected', 'false'); $('evalScopeBatch').setAttribute('aria-selected', 'true'); }
+    if (isBatch) {
+      $('evalTitle').textContent = 'Batchs enregistrés';
+      $('evalFilters').hidden = true; $('evalExport').disabled = true;
+      return renderBatches();
+    }
+    $('evalTitle').textContent = evalBatch ? 'Batch rechargé' : evalScope === 'current' ? 'Évaluation de « ' + name + ' »' : 'Historique des simulations';
     // dans l'onglet « Stratégie en cours », le choix de stratégie et la recherche n'ont pas lieu d'être
     $('evalFStratField').hidden = evalScope === 'current';
     $('evalFSearch').closest('label').hidden = evalScope === 'current';
-    $('evalFilters').hidden = !all.length;
+    $('evalFilters').hidden = !all.length || !!evalBatch;
     $('evalClear').disabled = $('evalResetAll').disabled = !all.length;
     $('evalFReset').hidden = !['evalFStrat', 'evalFPair', 'evalFData', 'evalFResult'].some((id) => $(id).value) && !$('evalFSearch').value;
     if (!all.length) { $('evalExport').disabled = true; $('evalBody').innerHTML = '<p class="eval-empty">Aucune simulation pour l\'instant : lancez un backtest, il s\'ajoutera ici.</p>'; return; }
     const shown = evalFiltered(all);
     $('evalExport').disabled = !shown.length;
+    $('evalSaveBatch').disabled = !shown.length;
     if (!shown.length) {
       $('evalBody').innerHTML = evalScope === 'current' && !mineN
         ? '<p class="eval-empty">Aucune simulation de « ' + esc(name) + ' » pour l\'instant : lancez un backtest. Les ' + all.length + ' simulations précédentes sont dans <button type="button" class="link" id="evalGoAll">l\'historique complet</button>.</p>'
@@ -2677,8 +2821,9 @@
       return;
     }
     const list = shown.map((x) => x.e);
-    if (evalView === 'charts') return renderEvalCharts(list, shown.length < all.length);
-    if (evalView === 'reco') return renderEvalReco(list, shown.length < all.length);
+    const filt = shown.length < all.length && !evalBatch;
+    if (evalView === 'charts') { renderEvalCharts(list, filt); return addBatchBanner(); }
+    if (evalView === 'reco') { renderEvalReco(list, filt); return addBatchBanner(); }
     const p = (v) => '<span class="' + cls(v) + '">' + signed(v, num2) + ' %</span>';
     const rows = shown.map(({ e, i }) => '<tr>' +
       '<td>' + (i + 1) + '</td><td class="l">' + new Date(e.at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) + '</td>' +
@@ -2692,7 +2837,7 @@
       '<td>' + e.trades + '</td><td>' + num1.format(e.winRate) + ' %</td><td>−' + num1.format(e.maxDrawdownPct) + ' %</td>' +
       '<td>' + (e.strategy ? '<button type="button" class="reload" data-reload="' + i + '" title="Remettre cette stratégie et ses réglages dans le formulaire">Recharger</button>' : '') + '</td>' +
       '<td><button type="button" class="del" data-del="' + i + '" title="Retirer cette ligne" aria-label="Retirer la simulation ' + (i + 1) + '">✕</button></td></tr>').join('');
-    const filtered = evalScope === 'all' && shown.length < all.length;
+    const filtered = evalScope === 'all' && shown.length < all.length && !evalBatch;
     const foot = '<tr><td colspan="5" class="l">Moyenne sur ' + list.length + ' simulation' + (list.length > 1 ? 's' : '') + (filtered ? ' (filtrées)' : '') + '</td><td class="l">' + durationFromDays(mean(list.map((e) => durationDays(e.from, e.to)))) + '</td><td colspan="3"></td>' +
       '<td>' + p(mean(list.map((e) => e.returnPct))) + '</td><td class="avg-col" title="Moyenne des gains moyens">' + p(mean(list.map((e) => e.avgGainPct))) + '</td><td>' + signed(mean(list.filter((e) => e.monthlyGain != null).map((e) => e.monthlyGain)), money) + '</td><td>' + money.format(mean(list.map((e) => e.withdrawn || 0))) + '</td>' +
       '<td>' + num1.format(mean(list.map((e) => e.trades))) + '</td><td>' + num1.format(mean(list.map((e) => e.winRate))) + ' %</td>' +
@@ -2700,7 +2845,9 @@
     $('evalBody').innerHTML = (filtered ? '<p class="eval-count">' + shown.length + ' simulation(s) affichée(s) sur ' + all.length + '</p>' : '') + '<div class="table-wrap"><table class="eval"><thead><tr><th>#</th><th class="l">Date</th><th class="l">Stratégie</th><th class="l">Paire</th>' +
       '<th class="l">Période testée</th><th class="l">Durée</th><th class="l">Données</th><th>Levier</th><th>Capital</th><th>Résultat</th><th class="avg-col">Gain moyen</th><th>Par mois</th><th>Retiré</th>' +
       '<th>Trades</th><th>Gagnants</th><th>Drawdown</th><th></th><th></th></tr></thead><tbody>' + rows + '</tbody><tfoot>' + foot + '</tfoot></table></div>';
+    addBatchBanner();
   }
+  function addBatchBanner() { const h = batchBanner(); if (h) $('evalBody').insertAdjacentHTML('afterbegin', h); }
   // ---------- Graphiques et recommandations (sur les simulations affichées) ----------
   let evalView = 'table';
   document.querySelectorAll('.eval-views [data-view]').forEach((b) => b.addEventListener('click', () => {
@@ -2755,7 +2902,7 @@
   function renderEvalCharts(list, filtered) {
     const A = F.advisor.analyze(list), G = A.groups;
     $('evalBody').innerHTML = (filtered ? '<p class="eval-count">Graphiques sur les ' + list.length + ' simulations affichées (filtres appliqués).</p>' : '') +
-      '<section class="eval-chart"><div class="runs-head"><div><h4>Résultat de chaque simulation</h4><p class="hint">Dans l\'ordre où elles ont été lancées ; survolez une barre pour le détail.</p></div>' + winDonut(list) + '</div><div id="evalRunsChart"></div>' +
+      '<section class="eval-chart"><div class="runs-head"><div><h4>Résultat de chaque simulation</h4><p class="hint">Dans l\'ordre où elles ont été lancées ; survolez une barre pour le détail.</p></div><div class="runs-side">' + winDonut(list) + (evalBatch ? '' : batchSaveButton('chartSaveBatch')) + '</div></div><div id="evalRunsChart"></div>' +
       checkToolsHtml(list) + '</section>' +
       '<p class="hint">Les barres ci-dessous montrent le résultat <b>médian</b> (la moitié des simulations fait mieux, l\'autre moins bien) : un résultat extrême ne fausse pas la comparaison. La moyenne est dans l\'info-bulle.</p>' +
       '<div class="eval-charts-grid">' +
@@ -3648,8 +3795,8 @@
   $('evalScopeCurrent').addEventListener('click', () => setEvalScope('current'));
   $('evalScopeAll').addEventListener('click', () => setEvalScope('all'));
   function openEvaluation() {
-    evalScope = 'current';
-    $('evalScopeCurrent').setAttribute('aria-selected', 'true'); $('evalScopeAll').setAttribute('aria-selected', 'false');
+    evalScope = 'current'; evalBatch = null;
+    $('evalScopeCurrent').setAttribute('aria-selected', 'true'); $('evalScopeAll').setAttribute('aria-selected', 'false'); $('evalScopeBatch').setAttribute('aria-selected', 'false');
     $('evalConfirm').hidden = true;
     renderEvaluation();
     $('evalModal').hidden = false;

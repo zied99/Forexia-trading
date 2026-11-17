@@ -599,3 +599,15 @@ button.analyze svg { width: 16px; height: 16px; fill: none; stroke: currentColor
 .ana-prop .hint { margin: 2px 0; }
 .ana-ba { font-size: 13px; margin-top: 4px; }
 @media (max-width: 560px) { .ana-prop { flex-direction: column; align-items: stretch; } .ana-prop > button { width: 100%; } }
+
+/* Batchs */
+.runs-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.batch-banner { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.batch-banner .row { margin: 0; gap: 6px; }
+.batch-table td { vertical-align: middle; }
+.batch-table .eval-tag { display: block; }
+.batch-rate { font-weight: 700; font-size: 15px; }
+.batch-acts { white-space: nowrap; }
+.batch-acts button { margin-left: 4px; }
+@media (max-width: 600px) { .runs-side { align-items: flex-start; } }
+table.eval.batch-table td.name { white-space: normal; max-width: 280px; min-width: 180px; overflow: visible; }
