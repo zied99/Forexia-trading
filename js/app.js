@@ -993,7 +993,7 @@
       if (settings.sizing === 'risk' && !(strat.stopLossPips > 0 || strat.stopAtr > 0)) warnings.push({ info: true, html: 'Taille « % du capital risqué » sans stop-loss : ' + (loaded.broker ? 'lots fixes utilisés.' : 'taille « capital × exposition × levier » utilisée.') });
       if (result.ruined) warnings.push('<b>Compte liquidé</b> : le capital a été entièrement perdu. Réduisez le levier ou l\'exposition.');
       const config = currentConfig();
-      lastRunCtx = { bars, strat, settings, config, timeframe: loaded.timeframe || 'D1', lastTrades: result.trades, diag: result.diag };
+      lastRunCtx = { bars, strat, settings, config, timeframe: loaded.timeframe || 'D1', lastTrades: result.trades, diag: result.diag, result };
       lastRun = { key: runKey(strat, config), stats: result.stats };
       render({ bars, strat, settings, result, loaded, periodKey, warnings, config });
       syncFormState();
@@ -1039,6 +1039,7 @@
       '<div class="hint save-config" id="saveCardConfig">Configuration enregistrée avec : ' + esc(describeConfig(config)) + '</div><div class="stale-note" id="saveCardStale" hidden></div>' +
       '</div><div class="save-actions">' +
       '<button type="button" class="enhance" id="enhanceBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/></svg>Améliorer</button>' +
+      '<button type="button" class="analyze" id="anaBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg>Analyseur</button>' +
       '<button type="button" class="deploy" id="deployBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>Déployer</button>' +
       '<button type="button" class="primary inline-save" id="saveFromResults">Enregistrer</button>' +
       '<button type="button" class="secondary small edit-conds" id="editConds">✎ Modifier les conditions</button></div></div>' +
@@ -1287,6 +1288,7 @@
 
 
     $('enhanceBtn').addEventListener('click', openEnhancer);
+    $('anaBtn').addEventListener('click', openAnalyzer);
     $('deployBtn').addEventListener('click', openDeploy);
     $('editConds').addEventListener('click', () => { $('condPanel').hidden = !$('condPanel').hidden; if (!$('condPanel').hidden) { renderCondPanel(); $('condPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } });
     $('saveFromResults').addEventListener('click', () => {
@@ -1853,6 +1855,102 @@
     closeEnhancer();
     $('form').requestSubmit();
   }));
+
+  // ---------- Fenêtre « Analyseur » ----------
+  let ana = null; // { report, tested: [{p, stats}], best }
+  function anaCurve(res, drop) {
+    const w = (res.wealth || res.equity).filter(Number.isFinite);
+    if (w.length < 2) return '';
+    const W = 640, H = 120, min = Math.min(...w), max = Math.max(...w), rg = max - min || 1;
+    const x = (j) => (j / (w.length - 1)) * W, y = (v) => H - 4 - ((v - min) / rg) * (H - 8);
+    const path = w.map((v, j) => (j ? 'L' : 'M') + x(j).toFixed(1) + ' ' + y(v).toFixed(1)).join('');
+    const shade = drop ? '<rect class="ana-dd" x="' + x(drop.fromJ).toFixed(1) + '" y="0" width="' + Math.max(2, x(drop.toJ) - x(drop.fromJ)).toFixed(1) + '" height="' + H + '"/>' : '';
+    const base = res.stats.initialCapital, yb = y(base);
+    return '<svg class="ana-curve" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" aria-label="Évolution du compte, la plus forte baisse en rouge">' + shade +
+      (yb >= 0 && yb <= H ? '<line class="ana-base" x1="0" x2="' + W + '" y1="' + yb.toFixed(1) + '" y2="' + yb.toFixed(1) + '"/>' : '') + '<path d="' + path + '"/></svg>';
+  }
+  function anaGroupTable(title, rows) {
+    if (!rows || !rows.length) return '';
+    return '<table class="ana-table"><thead><tr><th>' + title + '</th><th>Trades</th><th>Gagnants</th><th>Résultat</th></tr></thead><tbody>' +
+      rows.map((r) => '<tr><td>' + esc(r.label) + '</td><td>' + r.n + '</td><td>' + Math.round(r.winRate) + ' %</td><td class="' + cls(r.pnl) + '">' + signed(r.pnl, num1) + '</td></tr>').join('') + '</tbody></table>';
+  }
+  function openAnalyzer() {
+    if (!lastRunCtx || !lastRunCtx.result) return;
+    const m = $('anaModal');
+    m.hidden = false; document.body.style.overflow = 'hidden';
+    const { bars, strat, settings, result } = lastRunCtx;
+    $('anaSub').textContent = strat.name + ' · ' + settings.pair + ' · levier 1:' + settings.leverage;
+    $('anaBody').innerHTML = '<div class="modal-loading"><span class="spinner"></span>Analyse de la simulation…</div>';
+    $('anaApplyBest').disabled = true; $('anaBest').innerHTML = '';
+    m.querySelector('.close').focus();
+    setTimeout(() => {
+      let rep;
+      try { rep = F.analyzer.analyze(bars, strat, settings, result); } catch (e) { $('anaBody').innerHTML = '<p class="err">Analyse impossible : ' + esc(e.message) + '</p>'; return; }
+      ana = { report: rep, tested: [], best: null };
+      const lv = { bad: '⛔', warn: '⚠️', ok: '✅', info: 'ℹ️' };
+      let html = '<div class="modal-note ana-verdict">' + rep.verdict.map((v) => '<p>' + v + '</p>').join('') + '</div>' + anaCurve(result, rep.drop);
+      for (const s of rep.sections) html += '<section class="ana-sec ' + s.level + '"><h3>' + lv[s.level] + ' ' + esc(s.title) + '</h3><ul>' + s.items.map((x) => '<li>' + x + '</li>').join('') + '</ul></section>';
+      html += '<details class="ana-sec"><summary><b>Où la stratégie gagne et perd</b></summary><div class="ana-tables">' +
+        anaGroupTable('Marché (ADX 14)', rep.groups.regime) + anaGroupTable('Sens', rep.groups.direction) + anaGroupTable('Tendance de fond (EMA 200)', rep.groups.trend) +
+        anaGroupTable('Volatilité à l\'entrée', rep.groups.volatility) + anaGroupTable('Durée', rep.groups.duration) + '</div></details>';
+      html += '<section class="ana-sec"><h3>💡 Propositions</h3><p class="hint">Chaque proposition est testée sur la même période. « Appliquer » modifie la stratégie dans le formulaire et relance la simulation.</p><div id="anaProps">' +
+        (rep.proposals.length ? '<div class="modal-loading"><span class="spinner"></span>Test des propositions…</div>' : '<p>Aucune correction évidente : la stratégie se comporte comme attendu sur cette période. Essayez « Améliorer » pour régler les indicateurs.</p>') + '</div></section>';
+      $('anaBody').innerHTML = html;
+      if (rep.proposals.length) setTimeout(testAnaProposals, 20);
+    }, 30);
+  }
+  function testAnaProposals() {
+    const { bars, strat, settings, result } = lastRunCtx, base = result.stats, A = F.analyzer;
+    const score = (st) => (st ? E.score(st) : -Infinity);
+    ana.tested = ana.report.proposals.map((p) => { const x = A.applyProposal(strat, settings, p); return { p: p, stats: E.run(bars, x.strat, x.settings) }; });
+    ana.tested.sort((a, b) => score(b.stats) - score(a.stats));
+    // meilleure combinaison : on empile les propositions tant que la note progresse
+    let cur = { strat: strat, settings: settings }, curStats = base, picked = [];
+    for (const t of ana.tested) {
+      if (!t.stats || score(t.stats) <= score(base)) continue;
+      const x = A.applyProposal(cur.strat, cur.settings, t.p), st = E.run(bars, x.strat, x.settings);
+      if (st && score(st) > score(curStats)) { cur = x; curStats = st; picked.push(t.p); }
+    }
+    ana.best = picked.length ? { list: picked, strat: cur.strat, settings: cur.settings, stats: curStats } : null;
+    $('anaProps').innerHTML = ana.tested.map((t, i) => {
+      const st = t.stats, better = st && score(st) > score(base);
+      return '<div class="ana-prop ' + (better ? 'good' : 'bad') + '"><div><b>' + esc(t.p.title) + '</b><div class="hint">' + t.p.why + '</div>' +
+        '<div class="ana-ba">Avant : ' + statLine(base) + '<br>Après : ' + (st ? statLine(st) : 'échec du test') + (better ? ' <span class="pos">✓ mieux</span>' : ' <span class="hint">pas mieux sur cette période</span>') + '</div></div>' +
+        '<button type="button" class="' + (better ? 'primary' : 'secondary') + ' small" data-ana-apply="' + i + '">Appliquer</button></div>';
+    }).join('');
+    $('anaBest').innerHTML = ana.best ? '<b>Meilleure combinaison :</b> ' + ana.best.list.map((p) => esc(p.title)).join(' + ') + ' → ' + statLine(ana.best.stats) : 'Aucune proposition n\'améliore le résultat sur cette période.';
+    $('anaApplyBest').disabled = !ana.best;
+  }
+  function applyAnalysis(st, se, titles) {
+    undoable('Analyseur : ' + titles.join(' ; '), () => {
+      const { strat, settings } = lastRunCtx;
+      const s = Object.assign({}, st);
+      s.name = String(strat.name).replace(/ \(améliorée\)$/, '') + ' (améliorée)';
+      s.plots = F.french.derivePlots(s);
+      s.frenchText = F.french.toFrench(s) || '';
+      loadStrategy(s);
+      if (se.leverage !== settings.leverage) $('leverage').value = String(se.leverage);
+      $('preset').value = 'mine';
+      $('deleteStrat').hidden = true;
+      $('presetDesc').textContent = 'Corrections de l\'analyseur : ' + titles.join(' ; ') + '.';
+      if (!s.frenchText) $('rulesDetails').open = true;
+      logEvent('strategy.enhanced', 'Analyseur appliqué à ' + strat.name + ' : ' + titles.join(' ; '), { before: strat, after: s, leverage: se.leverage });
+      updateStyleHint();
+      closeAnalyzer();
+      $('form').requestSubmit();
+    });
+  }
+  function closeAnalyzer() { $('anaModal').hidden = true; document.body.style.overflow = ''; }
+  $('anaModal').addEventListener('click', (e) => {
+    if (e.target.closest('[data-close]')) return closeAnalyzer();
+    const b = e.target.closest('[data-ana-apply]');
+    if (b && ana) {
+      const t = ana.tested[Number(b.dataset.anaApply)], x = F.analyzer.applyProposal(lastRunCtx.strat, lastRunCtx.settings, t.p);
+      applyAnalysis(x.strat, x.settings, [t.p.title]);
+    }
+  });
+  $('anaApplyBest').addEventListener('click', () => { if (ana && ana.best) applyAnalysis(ana.best.strat, ana.best.settings, ana.best.list.map((p) => p.title)); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('anaModal').hidden) closeAnalyzer(); });
 
   // ---------- Fenêtre « Déployer sur MetaTrader 5 » ----------
   let deployed = null; // { code, fileName }

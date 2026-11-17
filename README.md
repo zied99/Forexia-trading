@@ -176,6 +176,18 @@ CLOSE < BB_LOWER(20, 2) OR RSI(14) < 25
 - Les données BCE n'ont qu'un cours par jour : ouverture = clôture de la veille, pas de mèches.
   Pour un test plus fin des stops, importez un CSV OHLC.
 
+## Analyseur
+
+Le bouton **🔍 Analyseur** (à côté d'« Améliorer ») explique une simulation :
+- **la plus forte baisse** (dates, trades en cause, plus gros trade perdant) et **pourquoi** : appel de marge,
+  absence de stop, choc de volatilité, stratégie de tendance dans un marché sans tendance (ADX < 20) ou de retour
+  à la moyenne dans une forte tendance (ADX ≥ 25), trade contre la tendance de fond (EMA 200), gain rendu au marché ;
+- le **risque** : levier effectif (levier × exposition) et mouvement de prix qui vide le compte ;
+- le **type de stratégie** et où elle gagne et perd (régime de marché, sens, tendance de fond, volatilité, durée) ;
+- des **propositions testées** sur la même période (réduire le levier, stop ATR, filtre ADX, filtre EMA 200, un seul
+  sens, filtre de volatilité, stop suiveur, stop au prix d'entrée, durée maximale, pause) avec « Appliquer », et la
+  **meilleure combinaison**.
+
 ## Améliorer (1.2)
 
 Chaque suggestion est backtestée avant d'être proposée, puis contrôlée sur **jusqu'à 3 périodes précédentes** de même durée

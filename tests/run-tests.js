@@ -1,7 +1,7 @@
 /* Tests du moteur : node tests/run-tests.js */
 'use strict';
 const path = require('path');
-for (const f of ['indicators', 'expr', 'trade', 'backtest', 'data', 'presets', 'french', 'enhancer', 'mql5', 'broker', 'advisor']) require(path.join(__dirname, '..', 'js', f + '.js'));
+for (const f of ['indicators', 'expr', 'trade', 'backtest', 'data', 'presets', 'french', 'enhancer', 'mql5', 'broker', 'advisor', 'analyzer']) require(path.join(__dirname, '..', 'js', f + '.js'));
 const { indicators: I, rules: R, backtest: B, data: D, presets: P, french: FR, enhancer: E, mql5: MQ, broker: BK } = globalThis.Forexia;
 
 let failed = 0, passed = 0;
@@ -738,7 +738,29 @@ console.log('Téléchargement des cours (API simulée)');
     eq(dates.join() === [...dates].sort().join(), true, 'ordre');
     if (bars.length < 1500) throw new Error(bars.length + ' bougies seulement');
   });
-  await atest('Pas de requête avant 1999 (début des cours BCE)', async () => {
+  await atest('Analyseur : explique la chute (levier, stop, régime) et propose des corrections testables', () => {
+  const A = globalThis.Forexia.analyzer, to = new Date('2025-06-30'), rg = D.periodRange('1y', to);
+  eq(A.strategyKind({ longEntry: 'CROSS_UP(MACD(12,26,9), MACD_SIGNAL(12,26,9))' }), 'trend');
+  eq(A.strategyKind({ longEntry: 'CROSS_UP(RSI(14), 30)', shortEntry: 'CROSS_DOWN(RSI(14), 70)' }), 'reversion');
+  const bars = D.generateSynthetic('EUR/USD', rg.fetchStart, rg.end);
+  const st = P.list.find((p) => p.id === 'macd'), se = Object.assign({}, base, { capital: 100, leverage: 100, exposurePct: 50, spreadPips: 1, startIndex: D.indexFrom(bars, rg.start) });
+  const r = B.runBacktest(bars, st, se), a = A.analyze(bars, st, se, r);
+  eq(a.kind, 'trend');
+  if (!a.drop || a.drop.pct <= 0) throw new Error('baisse non détectée');
+  const txt = a.sections.map((x) => x.items.join(' ')).join(' ');
+  if (!/levier effectif 50/.test(txt)) throw new Error('levier effectif absent');
+  if (!/Aucun stop-loss/.test(txt)) throw new Error('absence de stop non signalée');
+  const ids = a.proposals.map((p) => p.id);
+  if (!ids.includes('lev') || !ids.includes('sl')) throw new Error('propositions attendues : ' + ids.join(','));
+  const lev = A.applyProposal(st, se, a.proposals.find((p) => p.id === 'lev'));
+  if (!(lev.settings.leverage < 100) || se.leverage !== 100) throw new Error('levier non réduit ou réglages modifiés');
+  const adx = A.applyProposal(st, se, { change: { entryAnd: 'ADX(14) > 25' } });
+  if (!/ADX\(14\) > 25/.test(adx.strat.longEntry) || !/ADX\(14\) > 25/.test(adx.strat.shortEntry)) throw new Error('filtre ADX non ajouté');
+  const ol = A.applyProposal(st, se, { change: { onlyLong: true } });
+  eq(ol.strat.shortEntry, '');
+  for (const p of a.proposals) { const x = A.applyProposal(st, se, p); if (!B.runBacktest(bars, x.strat, x.settings).stats) throw new Error(p.id); }
+});
+test('Pas de requête avant 1999 (début des cours BCE)', async () => {
     calls.length = 0;
     const bars = await D.fetchFrankfurter('EUR/USD', new Date('1990-01-01'), new Date('1999-06-30'));
     eq(bars[0].date >= '1999-01-04', true); if (!calls.every((u) => !/199[0-8]-/.test(u))) throw new Error('requête avant 1999');

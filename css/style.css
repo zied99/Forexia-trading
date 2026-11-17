@@ -573,3 +573,29 @@ a.btn-link:hover { border-color: var(--accent); color: var(--accent); }
 @media (max-width: 600px) { .runs-head { flex-direction: column; } }
 .donut-legend .donut-avg { margin-top: 3px; font-size: 13px; }
 .win-donut .donut-before { font-size: 11.5px; max-width: 190px; }
+
+/* Fenêtre « Analyseur » */
+button.analyze { display: inline-flex; align-items: center; gap: 6px; background: var(--panel); color: var(--text); border: 1px solid var(--border); padding: 10px 18px; }
+button.analyze svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+#anaModal .modal-box { width: min(820px, 100%); }
+.ana-verdict p { margin: 0 0 4px; }
+.ana-curve { width: 100%; height: 120px; display: block; margin: 8px 0 4px; background: var(--bg, transparent); border: 1px solid var(--border); border-radius: 8px; }
+.ana-curve path { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.ana-curve .ana-dd { fill: var(--down-soft); opacity: .8; }
+.ana-curve .ana-base { stroke: var(--muted, #94a3b8); stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; }
+.ana-sec { border-left: 3px solid var(--border); padding: 4px 0 4px 12px; margin: 12px 0; }
+.ana-sec.bad { border-color: var(--down); } .ana-sec.warn { border-color: var(--warn); } .ana-sec.ok { border-color: var(--up); }
+.ana-sec h3 { margin: 0 0 6px; font-size: 15px; }
+.ana-sec ul { margin: 0; padding-left: 18px; } .ana-sec li { margin: 3px 0; line-height: 1.45; }
+.ana-sec summary { cursor: pointer; }
+.ana-tables { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin-top: 8px; }
+.ana-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ana-table th, .ana-table td { padding: 3px 6px; border-bottom: 1px solid var(--border); text-align: right; }
+.ana-table th:first-child, .ana-table td:first-child { text-align: left; }
+.ana-prop { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; margin: 8px 0; }
+.ana-prop.good { border-color: var(--up); background: var(--up-soft); }
+.ana-prop > div { flex: 1; min-width: 0; }
+.ana-prop > button { flex: none; width: auto; }
+.ana-prop .hint { margin: 2px 0; }
+.ana-ba { font-size: 13px; margin-top: 4px; }
+@media (max-width: 560px) { .ana-prop { flex-direction: column; align-items: stretch; } .ana-prop > button { width: 100%; } }
