@@ -2627,9 +2627,13 @@
       }).join('') + '</div></section>';
   }
   /** Cercle : simulations gagnantes / perdantes, et au centre le rendement global (gains cumulés / capitaux engagés). */
-  function winDonut(list) {
-    const n = list.length;
+  function winDonut(listIn) {
+    const n = listIn.length;
     if (!n) return '';
+    // aperçu d'une amélioration (« ✨ Améliorer et simuler » pas encore ajoutée) : le cercle montre les résultats prévus
+    const pv = improveCtx && improveCtx.kind === 'sel' && improveCtx.after ? improveCtx : null;
+    const before = pv ? { rate: Math.round((listIn.filter((e) => e.returnPct > 0).length / n) * 100), avg: listIn.reduce((a, e) => a + e.returnPct, 0) / n } : null;
+    const list = pv ? listIn.map((e) => { const k = pv.T.findIndex((c) => c.e.key === e.key); return k >= 0 ? Object.assign({}, e, { returnPct: pv.after[k].returnPct }) : e; }) : listIn;
     const win = list.filter((e) => e.returnPct > 0).length, lose = n - win;
     const cap = list.reduce((a, e) => a + (e.capital || 0), 0), gain = list.reduce((a, e) => a + (e.capital || 0) * e.returnPct / 100, 0);
     const glob = cap > 0 ? (gain / cap) * 100 : 0;
@@ -2645,9 +2649,10 @@
       '<circle r="' + R + '" cx="50" cy="50" fill="none" class="donut-track" stroke-width="12"/>' +
       arc(Math.max(0, fw - gap), gap / 2, 'var(--up)') + arc(Math.max(0, C - fw - gap), fw + gap / 2, 'var(--down)') +
       '<text x="50" y="50" text-anchor="middle" class="donut-val">' + rate + ' %</text>' +
-      '<text x="50" y="63" text-anchor="middle" class="donut-sub">de réussite</text></svg>' +
+      '<text x="50" y="63" text-anchor="middle" class="donut-sub">' + (pv ? 'aperçu' : 'de réussite') + '</text></svg>' +
       '<div class="donut-legend"><span><i style="background:var(--up)"></i>' + win + ' gagnante' + (win > 1 ? 's' : '') + '</span><span><i style="background:var(--down)"></i>' + lose + ' perdante' + (lose > 1 ? 's' : '') + '</span>' +
-      '<span class="donut-avg">Gain moyen : <b class="' + cls(avg) + '">' + big(avg) + '</b></span></div></div>';
+      '<span class="donut-avg">Gain moyen : <b class="' + cls(avg) + '">' + big(avg) + '</b></span>' +
+      (pv ? '<span class="hint donut-before">Avant l\'amélioration : ' + before.rate + ' % de réussite, gain moyen ' + big(before.avg) + '</span>' : '') + '</div></div>';
   }
   function renderEvalCharts(list, filtered) {
     const A = F.advisor.analyze(list), G = A.groups;
