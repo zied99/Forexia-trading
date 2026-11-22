@@ -737,3 +737,18 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 .wd-charts { margin-top: 12px; }
 .wd-verdict p { margin: 3px 0; }
 .wd-preset-field select { max-width: 320px; }
+.era-intro p { margin: 4px 0; }
+.era-intro #eraMax { width: 64px; display: inline-block; }
+.era-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin: 12px 0; }
+.era-grid th, .era-grid td { white-space: nowrap; }
+.era-grid td:first-child { white-space: normal; min-width: 200px; }
+.era-fixes tr.rec td { background: var(--up-soft); }
+.era-fixes td:last-child { text-align: right; }
+.era-fixes button { width: auto; margin: 0; }
+#eraModal .modal-box { width: min(1180px, 100%); }
+#eraBody { overflow-x: hidden; }
+#eraBody .table-wrap { overflow-x: auto; max-width: 100%; }
+#eraBody .era-grid th, #eraBody .era-grid td { white-space: normal; }
+#eraBody .era-grid td:first-child { min-width: 170px; }
+#eraBody .era-cards { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+#eraBody .era-grid td:not(:first-child), #eraBody .era-grid th:not(:first-child) { white-space: nowrap; }

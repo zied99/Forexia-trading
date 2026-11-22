@@ -2860,40 +2860,21 @@
       const f = $('eraForm'); if (f) { f.scrollIntoView({ behavior: 'smooth', block: 'center' }); $('eraFName').select(); }
     });
   }
-  let eraState = null; // { list, T, a, b, max, status, res, opts }
-  // Choix d'époques de l'analyseur : vos époques (et « tout sauf … »), sinon les époques par défaut et la rupture.
-  function eraOptions(T) {
-    const o = T.byEra.map((g) => ({ v: 'in|' + g.era.fromD + '|' + g.era.toD + '|' + g.label, label: g.label + ' (' + g.n + ')' }));
-    if (T.byEra.some((g) => g.era.custom)) {
-      T.byEra.forEach((g) => o.push({ v: 'out|' + g.era.fromD + '|' + g.era.toD + '|' + g.label, label: 'Tout sauf « ' + g.label + ' »' }));
-    } else if (T.split) {
-      o.unshift({ v: 'in|0000-01-01|' + (T.split.year - 1) + '-12-31|Avant ' + T.split.year, label: 'Avant ' + T.split.year + ' (' + T.split.before.n + ')' },
-        { v: 'in|' + T.split.year + '-01-01|9999-12-31|Depuis ' + T.split.year, label: 'Depuis ' + T.split.year + ' (' + T.split.after.n + ')' });
-    }
-    return o;
-  }
-  const eraRange = (v) => { const [kind, fromD, toD, label] = v.split('|'); return { out: kind === 'out', fromD: fromD, toD: toD, label: label }; };
-  const eraLabelOf = (v) => { const r = eraRange(v); return r.out ? 'hors de « ' + r.label + ' »' : /^(Avant|Depuis) \d{4}$/.test(r.label) ? r.label.toLowerCase() : 'pendant « ' + r.label + ' »'; };
-  const inEraV = (e, v) => { const r = eraRange(v), m = F.advisor.midDate(e), inside = m >= r.fromD && m <= r.toD; return r.out ? !inside : inside; };
+  // Analyseur d'époque : analyse toutes les époques affichées sous « Par époque » (vos époques, sinon celles par défaut).
+  let eraState = null; // { list, T, max, status, msg, res }
+  const ERA_KEYS = ['trendYear', 'aboveEma', 'adx', 'trendShare', 'efficiency', 'autocorr', 'vol', 'shocks'];
   function openEraAnalyzer(list) {
-    const T = F.advisor.timeline(list, activeEras()), opts = eraOptions(T);
-    if (opts.length < 2) return toast('Il faut des simulations dans au moins deux époques (ou une époque et « tout sauf » celle-ci).', false);
-    const custom = T.byEra.some((g) => g.era.custom), sorted = T.byEra.slice().sort((x, y) => x.robust - y.robust), vOf = (g) => 'in|' + g.era.fromD + '|' + g.era.toD + '|' + g.label;
-    let a, b;
-    if (!custom && T.split) { const up = T.split.after.robust > T.split.before.robust; a = opts[up ? 0 : 1].v; b = opts[up ? 1 : 0].v; }
-    else if (sorted.length >= 2) { a = vOf(sorted[0]); b = vOf(sorted[sorted.length - 1]); }
-    else { a = vOf(sorted[0]); b = 'out|' + sorted[0].era.fromD + '|' + sorted[0].era.toD + '|' + sorted[0].label; }
-    eraState = { list: list, T: T, a: a, b: b, max: 10, status: 'idle' };
+    const T = F.advisor.timeline(list, activeEras());
+    if (T.byEra.length < 2) return toast('Il faut des simulations dans au moins deux époques (voir « Époques » sous le graphique).', false);
+    eraState = { list: list, T: T, max: 8, status: 'idle' };
     $('eraModal').hidden = false; document.body.style.overflow = 'hidden';
-    renderEraModal();
+    runEraAnalysis();
   }
   function renderEraModal() {
-    const st = eraState, opts = eraOptions(st.T);
-    const sel = (id, cur) => '<select id="' + id + '">' + opts.map((o) => '<option value="' + o.v + '"' + (o.v === cur ? ' selected' : '') + '>' + esc(o.label) + '</option>').join('') + '</select>';
-    let h = '<div class="era-pick"><label class="field">Époque à comprendre (qui marche moins bien)' + sel('eraA', st.a) + '</label><label class="field">Époque de comparaison (qui marche bien)' + sel('eraB', st.b) + '</label>' +
-      '<label class="field">Simulations rechargées par époque<input id="eraMax" type="number" min="2" max="30" value="' + st.max + '"></label>' +
-      '<button type="button" class="primary" id="eraRun"' + (st.status === 'run' ? ' disabled' : '') + '>🔬 Analyser</button></div>' +
-      '<p class="hint">Chaque simulation est rechargée (mêmes données, mêmes réglages) pour mesurer le marché de son époque : direction, force de la tendance, va-et-vient, volatilité, chocs ; et ses trades : achats, ventes, marché en tendance ou non. Puis des corrections sont testées sur les deux époques.</p>';
+    const st = eraState;
+    let h = '<div class="era-intro"><p>Analyse des <b>' + st.T.byEra.length + ' époques</b> affichées sous « Par époque » : ' + st.T.byEra.map((g) => '<b>' + esc(g.label) + '</b> (' + g.n + ')').join(', ') + '.</p>' +
+      '<p class="hint">Les simulations de chaque époque sont rechargées (mêmes données, mêmes réglages) pour mesurer le marché (direction, tendance, va-et-vient, volatilité, chocs) et les trades, puis des corrections sont testées sur toutes les époques. ' +
+      'Simulations rechargées par époque : <input id="eraMax" type="number" min="2" max="30" value="' + st.max + '"> <button type="button" class="secondary small" id="eraRun"' + (st.status === 'run' ? ' disabled' : '') + '>Relancer l\'analyse</button></p></div>';
     if (st.status === 'run') h += '<div class="modal-loading"><span class="spinner"></span>' + esc(st.msg || '') + '</div>';
     if (st.status === 'err') h += '<p class="val ko">' + esc(st.msg) + '</p>';
     if (st.status === 'done') h += eraResultHtml(st);
@@ -2902,26 +2883,26 @@
   async function runEraAnalysis() {
     const st = eraState;
     if (checkRunning || st.status === 'run') return;
-    st.a = $('eraA').value; st.b = $('eraB').value; st.max = Math.max(2, Math.min(30, Math.round(+$('eraMax').value) || 10));
-    if (st.a === st.b) { st.status = 'err'; st.msg = 'Choisissez deux époques différentes.'; return renderEraModal(); }
-    const inR = inEraV;
+    if ($('eraMax')) st.max = Math.max(2, Math.min(30, Math.round(+$('eraMax').value) || 8));
     const usable = st.list.filter((e) => e.strategy && e.config && !e.tag);
     const names = {}; usable.forEach((e) => { names[e.name] = (names[e.name] || 0) + 1; });
     const name = Object.keys(names).sort((x, y) => names[y] - names[x])[0];
-    const pick = (L) => { if (L.length <= st.max) return L; const out = []; for (let i = 0; i < st.max; i++) out.push(L[Math.floor((i * L.length) / st.max)]); return out; };
-    const LA = pick(usable.filter((e) => e.name === name && inR(e, st.a))), LB = pick(usable.filter((e) => e.name === name && inR(e, st.b)));
-    if (LA.length < 2 || LB.length < 2) { st.status = 'err'; st.msg = 'Il faut au moins 2 simulations de « ' + name + ' » dans chaque époque (' + LA.length + ' et ' + LB.length + ').'; return renderEraModal(); }
+    const pick = (L) => { if (L.length <= st.max) return L; const o = []; for (let i = 0; i < st.max; i++) o.push(L[Math.floor((i * L.length) / st.max)]); return o; };
+    const inEra = (e, er) => { const m = F.advisor.midDate(e); return m >= er.fromD && m <= er.toD; };
+    const plan = st.T.byEra.map((g) => ({ g: g, sims: pick(usable.filter((e) => e.name === name && inEra(e, g.era))), items: [] })).filter((p) => p.sims.length);
+    if (plan.length < 2) { st.status = 'err'; st.msg = 'Il faut des simulations de « ' + name + ' » dans au moins deux époques.'; return renderEraModal(); }
     st.status = 'run'; renderEraModal();
-    const saved = captureForm(), ctxA = [], ctxB = [];
+    const saved = captureForm(), total = plan.reduce((a, p) => a + p.sims.length, 0);
+    let k = 0;
     checkRunning = 'era'; checkStop = false;
     try {
-      const all = LA.map((e) => [e, ctxA]).concat(LB.map((e) => [e, ctxB]));
-      for (let k = 0; k < all.length && !checkStop; k++) {
-        st.msg = 'Rechargement de la simulation ' + (k + 1) + ' / ' + all.length + '…'; renderEraModal(); setRunLabel('Époques ' + (k + 1) + ' / ' + all.length);
-        const c = await ctxOf(all[k][0]);
+      for (const p of plan) for (const e of p.sims) {
+        if (checkStop) break;
+        st.msg = 'Rechargement de la simulation ' + (++k) + ' / ' + total + ' (' + p.g.label + ')…'; renderEraModal(); setRunLabel('Époques ' + k + ' / ' + total);
+        const c = await ctxOf(e);
         if (c && lastRunCtx && lastRunCtx.result) {
           const r = lastRunCtx.result;
-          all[k][1].push({ e: all[k][0], ctx: { bars: c.bars, strat: c.strat, settings: c.settings }, features: F.analyzer.marketFeatures(c.bars, r.startIndex), trades: F.analyzer.tradeFeatures(c.bars, r), returnPct: r.stats.returnPct });
+          p.items.push({ e: e, ctx: { bars: c.bars, strat: c.strat, settings: c.settings }, features: F.analyzer.marketFeatures(c.bars, r.startIndex), trades: F.analyzer.tradeFeatures(c.bars, r), returnPct: r.stats.returnPct });
         }
       }
     } finally {
@@ -2930,63 +2911,69 @@
       try { loadStrategy(saved.strat); applyConfig(saved.config); $('style').value = saved.style; $('preset').value = [...$('preset').options].some((o) => o.value === saved.preset) ? saved.preset : 'mine'; $('presetDesc').textContent = saved.desc; updateWithdrawUI(); syncFormState(); }
       finally { restoring = false; }
     }
-    if (ctxA.length < 2 || ctxB.length < 2) { st.status = 'err'; st.msg = 'Simulations impossibles à recharger : ' + ($('formError').textContent || 'données indisponibles'); return renderEraModal(); }
-    st.msg = 'Comparaison et test des corrections…'; renderEraModal();
+    const groups = plan.filter((p) => p.items.length);
+    if (groups.length < 2) { st.status = 'err'; st.msg = 'Simulations impossibles à recharger : ' + ($('formError').textContent || 'données indisponibles'); return renderEraModal(); }
+    st.msg = 'Comparaison des époques et test des corrections…'; renderEraModal();
     await new Promise((r) => setTimeout(r, 20));
-    const la = eraLabelOf(st.a), lb = eraLabelOf(st.b), strat = ctxA[0].ctx.strat;
-    const cmp = F.analyzer.compareEras(ctxA, ctxB, strat, [la, lb]);
+    const A = F.analyzer, strat = groups[0].items[0].ctx.strat;
     const med = (a) => { const v = a.filter(Number.isFinite).sort((x, y) => x - y); return v.length ? (v.length % 2 ? v[v.length >> 1] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2) : NaN; };
-    const win = (a) => (a.filter((v) => v > 0).length / Math.max(1, a.length)) * 100;
-    const fixes = F.analyzer.eraCandidates(strat, cmp).map((p) => {
+    for (const g of groups) { g.med = med(g.items.map((x) => x.returnPct)); g.win = (g.items.filter((x) => x.returnPct > 0).length / g.items.length) * 100; g.agg = A.compareEras(g.items, g.items, strat, ['', '']); }
+    // époques perdantes contre époques gagnantes (sinon la pire contre la meilleure)
+    let bad = groups.filter((g) => g.med <= 0), good = groups.filter((g) => g.med > 0);
+    let mode = 'winlose';
+    if (!bad.length || !good.length) { const s = groups.slice().sort((x, y) => x.med - y.med); bad = [s[0]]; good = [s[s.length - 1]]; mode = 'worstbest'; }
+    const nm = (L) => L.map((g) => '« ' + g.g.label + ' »').join(', ');
+    const la = bad.length > 1 ? 'dans les époques perdantes' : 'pendant « ' + bad[0].g.label + ' »', lb = good.length > 1 ? 'dans les époques gagnantes' : 'pendant « ' + good[0].g.label + ' »';
+    const cmp = A.compareEras(bad.flatMap((g) => g.items), good.flatMap((g) => g.items), strat, [la, lb]);
+    const fixes = A.eraCandidates(strat, cmp).map((p) => {
       let tr0 = 0, tr1 = 0;
-      const run = (L) => L.map((x) => { const y = F.analyzer.applyProposal(x.ctx.strat, x.ctx.settings, p), s2 = E.run(x.ctx.bars, y.strat, y.settings); tr0 += x.trades.length; tr1 += s2 ? s2.trades : 0; return s2 ? s2.returnPct : NaN; });
-      const ra = run(ctxA), rb = run(ctxB);
-      const a0 = med(ctxA.map((x) => x.returnPct)), b0 = med(ctxB.map((x) => x.returnPct));
-      const fix = { p: p, a: med(ra), b: med(rb), wa: win(ra), wb: win(rb), a0: a0, b0: b0, tradeRatio: tr0 ? tr1 / tr0 : 1 };
-      // une correction qui supprime presque tous les trades « améliore » en ne faisant plus rien : écartée
-      fix.few = fix.tradeRatio < 0.35;
-      fix.good = !fix.few && fix.a > a0 + 1 && fix.b >= b0 - Math.max(5, Math.abs(b0) * 0.25);
-      fix.score = (fix.a - a0) + 0.5 * Math.min(0, fix.b - b0) + 0.2 * (fix.wa - win(ctxA.map((x) => x.returnPct))) - (fix.few ? 1000 : 0);
-      return fix;
-    }).sort((x, y) => y.score - x.score);
-    st.res = { cmp: cmp, ctxA: ctxA, ctxB: ctxB, la: la, lb: lb, fixes: fixes, strat: strat };
+      const per = groups.map((g) => {
+        const after = g.items.map((x) => { const y = A.applyProposal(x.ctx.strat, x.ctx.settings, p), s2 = E.run(x.ctx.bars, y.strat, y.settings); tr0 += x.trades.length; tr1 += s2 ? s2.trades : 0; return s2 ? s2.returnPct : NaN; });
+        return { before: g.med, after: med(after), win: (after.filter((v) => v > 0).length / Math.max(1, after.length)) * 100 };
+      });
+      const dBad = mean(groups.map((g, i) => (bad.includes(g) ? per[i].after - per[i].before : null)).filter((v) => v != null));
+      const dGood = mean(groups.map((g, i) => (good.includes(g) ? per[i].after - per[i].before : null)).filter((v) => v != null));
+      const few = tr0 ? tr1 / tr0 < 0.35 : false;
+      const ok = !few && dBad > 1 && dGood >= -Math.max(5, Math.abs(mean(good.map((g) => g.med))) * 0.25);
+      return { p: p, per: per, dBad: dBad, dGood: dGood, few: few, tradeRatio: tr0 ? tr1 / tr0 : 1, good: ok, score: dBad + Math.min(0, dGood) - (few ? 1000 : 0) };
+    }).sort((x, y) => (y.good - x.good) || (y.score - x.score));
+    st.res = { groups: groups, bad: bad, good: good, cmp: cmp, fixes: fixes, strat: strat, nmBad: nm(bad), nmGood: nm(good), mode: mode };
     st.status = 'done'; renderEraModal();
   }
   function eraResultHtml(st) {
-    const r = st.res, c = r.cmp, A = c.A, B = c.B;
-    const pc = (v) => (Number.isFinite(v) ? '<span class="' + cls(v) + '">' + signed(v, num1) + ' %</span>' : '—');
-    const cap = (s) => s[0].toUpperCase() + s.slice(1);
-    let h = '<div class="era-sum"><div class="era-card bad"><b>' + esc(cap(r.la)) + '</b>' + A.n + ' simulations · ' + Math.round(A.win) + ' % gagnantes · médiane ' + pc(A.ret) + '</div>' +
-      '<div class="era-card good"><b>' + esc(cap(r.lb)) + '</b>' + B.n + ' simulations · ' + Math.round(B.win) + ' % gagnantes · médiane ' + pc(B.ret) + '</div></div>';
-    h += '<section class="ana-sec warn"><h3>Ce qui a fait la différence</h3>' + (c.causes.length ? '<ol>' + c.causes.slice(0, 6).map((x) => '<li>' + x.text + '</li>').join('') + '</ol>' : '<p>Pas de différence marquée du marché entre les deux époques : l\'écart vient peut-être du hasard. Rechargez plus de simulations par époque.</p>') +
-      '<p class="hint">Stratégie ' + ({ trend: 'de suivi de tendance', reversion: 'de retour à la moyenne', mixed: 'mixte' })[c.kind] + '. Les différences sont classées par importance.</p></section>';
-    // événements pendant les simulations de chaque époque (de la plus ancienne date de début à la plus récente date de fin)
-    const eraEv = (L) => { const f = L.map((x) => x.e.from).sort()[0], t = L.map((x) => x.e.to).sort().pop();
-      return eventsFor(L[0].e.pair, { from: f, to: t, minImp: 2 }).filter((e) => (e.source !== 'auto' || e.named || e.imp >= 3) && L.some((x) => e.date >= x.e.from && e.date <= x.e.to)).slice(-12); };
-    const evA = eraEv(r.ctxA), evB = eraEv(r.ctxB);
-    h += '<details class="ana-sec" open><summary><b>📰 Ce qui s\'est passé pendant chaque époque</b> (événements de marché)</summary><div class="era-sum ev-cols"><div><b>' + esc(cap(r.la)) + '</b><ul class="ev-list">' + (evA.map((e) => evLine(e)).join('') || '<li class="hint">Aucun événement connu.</li>') + '</ul></div>' +
-      '<div><b>' + esc(cap(r.lb)) + '</b><ul class="ev-list">' + (evB.map((e) => evLine(e)).join('') || '<li class="hint">Aucun événement connu.</li>') + '</ul></div></div>' +
-      '<p class="hint">Rapprochez ces événements des différences de marché ci-dessus (direction, tendance, volatilité). Ajoutez ou complétez des événements dans <button type="button" class="link" data-ev-open="' + esc(r.ctxA[0].e.pair) + '">Tous les événements</button>.</p></details>';
-    h += '<details class="ana-sec" open><summary><b>Le marché dans chaque époque</b> (médiane des simulations)</summary><table class="ana-table"><thead><tr><th></th><th>' + esc(cap(r.la)) + '</th><th>' + esc(cap(r.lb)) + '</th></tr></thead><tbody>' +
-      c.rows.map((x) => '<tr><td>' + esc(x.label) + '</td><td>' + (Number.isFinite(x.a) ? x.fmt(x.a) : '—') + '</td><td>' + (Number.isFinite(x.b) ? x.fmt(x.b) : '—') + '</td></tr>').join('') + '</tbody></table></details>';
+    const r = st.res, G = r.groups, pc = (v) => (Number.isFinite(v) ? '<span class="' + cls(v) + '">' + signed(v, num1) + ' %</span>' : '—');
+    const head = '<tr><th></th>' + G.map((g) => '<th class="' + (r.bad.includes(g) ? 'neg' : r.good.includes(g) ? 'pos' : '') + '">' + esc(g.g.label) + '</th>').join('') + '</tr>';
+    let h = '<div class="era-cards">' + G.map((g) => '<div class="era-card ' + (g.med > 0 ? 'good' : 'bad') + '"><b>' + esc(g.g.label) + '</b>' + g.items.length + ' simulation' + (g.items.length > 1 ? 's' : '') + ' rechargée' + (g.items.length > 1 ? 's' : '') + ' · ' + Math.round(g.win) + ' % gagnantes · médiane ' + pc(g.med) + '</div>').join('') + '</div>';
+    h += '<section class="ana-sec warn"><h3>Ce qui a fait la différence</h3><p class="hint">' + (r.mode === 'winlose' ? 'Comparaison des époques perdantes (' + esc(r.nmBad) + ') et des époques gagnantes (' + esc(r.nmGood) + ').' :
+      'Toutes les époques ' + (r.groups.every((g) => g.med <= 0) ? 'perdent' : 'gagnent') + ' : comparaison de la moins bonne (' + esc(r.nmBad) + ') et de la meilleure (' + esc(r.nmGood) + ').') + '</p>' +
+      (r.cmp.causes.length ? '<ol>' + r.cmp.causes.slice(0, 6).map((x) => '<li>' + x.text + '</li>').join('') + '</ol>' : '<p>Pas de différence marquée du marché entre ces époques : l\'écart vient peut-être du hasard. Rechargez plus de simulations par époque.</p>') +
+      '<p class="hint">Stratégie ' + ({ trend: 'de suivi de tendance', reversion: 'de retour à la moyenne', mixed: 'mixte' })[r.cmp.kind] + '. Les différences sont classées par importance.</p></section>';
+    h += '<details class="ana-sec" open><summary><b>Le marché dans chaque époque</b> (médiane des simulations rechargées)</summary><div class="table-wrap"><table class="ana-table era-grid"><thead>' + head + '</thead><tbody>' +
+      r.cmp.rows.map((row, k) => '<tr><td>' + esc(row.label) + '</td>' + G.map((g) => { const v = g.agg.A[ERA_KEYS[k]]; return '<td>' + (Number.isFinite(v) ? row.fmt(v) : '—') + '</td>'; }).join('') + '</tr>').join('') + '</tbody></table></div></details>';
     const tcell = (t) => (t.n ? t.n + ' · ' + Math.round(t.win) + ' % · <span class="' + cls(t.pips) + '">' + signed(t.pips, num1) + ' pips</span>' : '—');
-    h += '<details class="ana-sec" open><summary><b>Les trades</b> (nombre · gagnants · gain moyen)</summary><table class="ana-table"><thead><tr><th></th><th>' + esc(cap(r.la)) + '</th><th>' + esc(cap(r.lb)) + '</th></tr></thead><tbody>' +
-      c.tradeRows.map((x) => '<tr><td>' + esc(x.label) + '</td><td>' + tcell(x.a) + '</td><td>' + tcell(x.b) + '</td></tr>').join('') + '</tbody></table></details>';
-    const keys = r.ctxA.concat(r.ctxB).map((x) => x.e.key);
-    h += '<section class="ana-sec"><h3>💡 Corrections testées sur les deux époques</h3><p class="hint">Résultat médian des simulations rechargées, avant → après. « Recommandée » : améliore ' + esc(r.la) + ' sans dégrader ' + esc(r.lb) + '.</p>' +
-      r.fixes.map((f, i) => '<div class="ana-prop ' + (f.good ? 'good' : 'bad') + '"><div><b>' + esc(f.p.title) + '</b>' + (f.good ? ' <span class="pos">✓ recommandée</span>' : '') +
-        (f.few ? ' <span class="hint">✗ supprime ' + Math.round((1 - f.tradeRatio) * 100) + ' % des trades : la stratégie ne trade presque plus</span>' : '') +
-        '<div class="ana-ba">' + esc(cap(r.la)) + ' : ' + pc(f.a0) + ' → ' + pc(f.a) + ' (' + Math.round(f.wa) + ' % gagnantes)<br>' + esc(cap(r.lb)) + ' : ' + pc(f.b0) + ' → ' + pc(f.b) + ' (' + Math.round(f.wb) + ' % gagnantes)</div></div>' +
-        '<button type="button" class="' + (f.good ? 'primary' : 'secondary') + ' small" data-era-fix="' + i + '">Appliquer aux ' + keys.length + ' simulations</button></div>').join('') + '</section>';
+    h += '<details class="ana-sec" open><summary><b>Les trades</b> (nombre · gagnants · gain moyen)</summary><div class="table-wrap"><table class="ana-table era-grid"><thead>' + head + '</thead><tbody>' +
+      r.cmp.tradeRows.map((row, k) => '<tr><td>' + esc(row.label) + '</td>' + G.map((g) => '<td>' + tcell(g.agg.tradeRows[k].a) + '</td>').join('') + '</tr>').join('') + '</tbody></table></div></details>';
+    h += '<details class="ana-sec"><summary><b>📰 Ce qui s\'est passé dans chaque époque</b> (événements de marché)</summary>' + G.map((g) => {
+      const L = g.items.map((x) => x.e), f = L.map((e) => e.from).sort()[0], t = L.map((e) => e.to).sort().pop();
+      const ev = eventsFor(L[0].pair, { from: f, to: t, minImp: 2 }).filter((e) => (e.source !== 'auto' || e.named || e.imp >= 3) && L.some((x) => e.date >= x.from && e.date <= x.to)).slice(-8);
+      return '<div class="era-ctx-row"><span class="era-ctx-name">' + esc(g.g.label) + '</span>' + (ev.length ? ev.map((e) => '<span class="ev-chip" title="' + esc(frDate(e.date) + ' · ' + (e.text || '')) + '">' + e.date.slice(0, 4) + ' · ' + esc(e.title) + '</span>').join('') : '<span class="hint">aucun événement connu</span>') + '</div>';
+    }).join('') + '</details>';
+    const n = G.reduce((a, g) => a + g.items.length, 0);
+    h += '<section class="ana-sec"><h3>💡 Corrections testées sur toutes les époques</h3><p class="hint">Résultat médian de chaque époque, avant → après. « Recommandée » : améliore ' + (r.mode === 'winlose' ? 'les époques perdantes sans dégrader les gagnantes' : 'la moins bonne époque sans dégrader la meilleure') + '.</p>' +
+      '<div class="table-wrap"><table class="ana-table era-grid era-fixes"><thead><tr><th>Correction</th>' + G.map((g) => '<th>' + esc(g.g.label) + '</th>').join('') + '<th></th></tr></thead><tbody>' +
+      r.fixes.map((f, i) => '<tr class="' + (f.good ? 'rec' : '') + '"><td><b>' + esc(f.p.title) + '</b>' + (f.good ? ' <span class="pos">✓ recommandée</span>' : '') + (f.few ? '<div class="hint">✗ supprime ' + Math.round((1 - f.tradeRatio) * 100) + ' % des trades</div>' : '') + '</td>' +
+        f.per.map((x) => '<td>' + pc(x.before) + ' → ' + pc(x.after) + '</td>').join('') +
+        '<td><button type="button" class="' + (f.good ? 'primary' : 'secondary') + ' small" data-era-fix="' + i + '">Appliquer (' + n + ')</button></td></tr>').join('') + '</tbody></table></div>' +
+      '<p class="hint">« Appliquer » relance les ' + n + ' simulations rechargées avec la correction (Ctrl+Z pour revenir), puis propose de l\'ajouter à la stratégie.</p></section>';
     return h;
   }
   function applyEraFix(i) {
     const r = eraState && eraState.res, f = r && r.fixes[i];
     if (!f) return;
-    const first = r.ctxA[0], y = F.analyzer.applyProposal(first.ctx.strat, first.ctx.settings, f.p);
+    const all = r.groups.flatMap((g) => g.items), first = all[0], y = F.analyzer.applyProposal(first.ctx.strat, first.ctx.settings, f.p);
     anaOrigin = { e: first.e }; anaCtx = first.ctx;
     closeEraModal();
-    applyAnaToSims(y.strat, y.settings, [f.p.title], true, r.ctxA.concat(r.ctxB).map((x) => x.e.key));
+    applyAnaToSims(y.strat, y.settings, [f.p.title], true, all.map((x) => x.e.key));
   }
   function closeEraModal() { $('eraModal').hidden = true; if ($('evalModal').hidden) document.body.style.overflow = ''; }
   $('eraModal').addEventListener('click', (ev) => {
@@ -3328,7 +3315,7 @@
       '<div class="row buttons"><button type="button" class="secondary small" data-ev-open="' + esc(mainPair) + '">📰 Tous les événements de ' + esc(mainPair) + '</button></div>' +
       '<h5>Par année</h5><p class="hint">Résultat médian des simulations dont la période est centrée sur l\'année ; au-dessus, la part de gagnantes.</p>' + yearBarsSvg(T, cap) +
       '<div class="era-head"><h5>Par époque</h5><button type="button" class="primary small" id="eraAnalyze">🔬 Analyseur d\'époque</button></div>' +
-      '<p class="hint">L\'analyseur d\'époque compare deux époques (marché, trades) pour expliquer ce qui a fait la différence, et teste des corrections.</p>' +
+      '<p class="hint">L\'analyseur d\'époque analyse les époques ci-dessous (marché, trades, événements) pour expliquer ce qui a fait la différence, et teste des corrections sur chacune.</p>' +
       '<div class="eval-charts-grid">' + hbars('Résultat médian par époque', T.byEra) + '</div>' +
       (T.emptyEras.length ? '<p class="hint">Sans simulation : ' + T.emptyEras.map(esc).join(', ') + '.</p>' : '') + eraEditorHtml(T, list) +
       '<div class="time-actions"><b>Vérifier une époque</b><p class="hint">Lance un lot de tests aléatoires limité à ces années (un nouveau batch). Comparez ensuite les deux époques dans « Voir toutes les simulations ».</p>' +

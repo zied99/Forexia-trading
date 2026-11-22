@@ -240,13 +240,14 @@ s'affichent en bandes colorées sur la frise, se modifient (✏️) ou se suppri
 défaut dans les graphiques et l'analyseur d'époque (avec aussi « Tout sauf « … » » pour comparer une époque au reste).
 « Découper par années » crée des époques à partir d'années de coupure ; « Revenir aux époques par défaut » les efface.
 
-**🔬 Analyseur d'époque** : compare deux époques (par défaut, avant et depuis la rupture détectée). Les simulations
-sont rechargées pour mesurer le marché de chaque époque (direction du prix par an, temps au-dessus de l'EMA 200, ADX,
-temps en tendance, netteté du mouvement, retour à la moyenne, volatilité, chocs) et les trades (achats, ventes, en
-tendance ou non, en pips). Il classe « ce qui a fait la différence » et teste des corrections sur les deux époques
-(filtres ADX, EMA 200, pente, volatilité, un seul sens, stops) : « recommandée » si elle améliore l'époque faible sans
-dégrader l'autre ; une correction qui supprime presque tous les trades est écartée. « Appliquer » relance les
-simulations, puis propose de l'ajouter à la stratégie.
+**🔬 Analyseur d'époque** : analyse toutes les époques affichées sous « Par époque » (vos époques, sinon celles par
+défaut). Les simulations de chaque époque sont rechargées (8 par époque, réglable) pour mesurer le marché (direction du
+prix par an, temps au-dessus de l'EMA 200, ADX, temps en tendance, netteté du mouvement, retour à la moyenne,
+volatilité, chocs) et les trades (achats, ventes, en tendance ou non, en pips) de chaque époque. Il compare les époques
+perdantes aux gagnantes pour classer « ce qui a fait la différence », montre les événements de chaque époque, et teste
+des corrections (filtres ADX, EMA 200, pente, volatilité, un seul sens, stops) sur toutes les époques : « recommandée »
+si elle améliore les époques perdantes sans dégrader les gagnantes ; une correction qui supprime presque tous les
+trades est écartée. « Appliquer » relance les simulations, puis propose de l'ajouter à la stratégie.
 
 **Plage du lot** : à côté de « Lot de tests aléatoires », « Plage : de … à … » limite les périodes tirées à ces années
 (ex. 1997 à 2005). Vide : tout l'historique (MT5 : depuis 2015 par défaut ; BCE : depuis 1999). L'onglet Batchs montre
