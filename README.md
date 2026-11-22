@@ -199,7 +199,8 @@ ou régulier : chaque mois / tous les X jours, % du compte, somme fixe ou % de l
   après, capital de départ préservé) et un tableau par simulation ;
 - la somme retirée par simulation et l'évolution moyenne mois par mois (compte et retraits cumulés) ;
 - un verdict (effet sur les intérêts composés, rythme de retrait trop élevé…).
-**Appliquer à** : tout le batch (les simulations affichées), les simulations sélectionnées, ou une seule ; le bouton
+**Appliquer à** : liste des simulations affichées — clic : une seule ; glisser la souris : plusieurs à la suite ;
+Maj (ou Ctrl) + clic : en ajouter ou retirer une à une ; « Tout le batch » / « Aucune » ; le bouton
 « 💸 Resimuler avec un retrait » du panneau d'une barre ouvre la fenêtre sur cette simulation. Les résultats sont gardés
 par mécanique et par simulation : rechoisir une mécanique enregistrée réaffiche directement ses graphiques, sans rien relancer ;
 « Resimuler » ne calcule que les simulations qui n'ont pas encore de résultat.

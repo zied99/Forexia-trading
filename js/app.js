@@ -3070,7 +3070,7 @@
     const all = evalFiltered(evalList()).map((x) => x.e).filter((e) => e.strategy && e.config && !e.tag);
     if (!all.length) return toast('Aucune simulation à resimuler.', false);
     const sel = all.filter((e) => barSel.has(e.key));
-    wdState = { all: all, scope: sel.length > 1 ? 'sel' : sel.length === 1 ? sel[0].key : 'all', sel: sel.map((e) => e.key), w: $('withdrawOn').checked ? wdFromForm() : { on: true, mode: 'periodic', every: 'month', days: 30, type: 'pct', value: 5, pct: 20, share: 100, when: 'close' }, status: 'idle', rows: null };
+    wdState = { all: all, sel: (sel.length ? sel : all).map((e) => e.key), w: $('withdrawOn').checked ? wdFromForm() : { on: true, mode: 'periodic', every: 'month', days: 30, type: 'pct', value: 5, pct: 20, share: 100, when: 'close' }, status: 'idle', rows: null };
     $('wdModal').hidden = false; document.body.style.overflow = 'hidden';
     wdShowCached();
   }
@@ -3078,9 +3078,7 @@
   /** Simulations visées : toutes celles affichées (le batch), la sélection, ou une seule. */
   function wdTargets() {
     const st = wdState;
-    if (st.scope === 'all') return st.all;
-    if (st.scope === 'sel') return st.all.filter((e) => st.sel.includes(e.key));
-    return st.all.filter((e) => e.key === st.scope);
+    return st.all.filter((e) => st.sel.includes(e.key));
   }
   // Résultats déjà calculés pour cette mécanique et ces simulations : affichés tout de suite, sinon calcul.
   function wdShowCached(autoRun) {
@@ -3104,10 +3102,12 @@
   function wdFormHtml(w) {
     const st = wdState, opt = (cur, list) => list.map(([v, l]) => '<option value="' + v + '"' + (String(cur) === v ? ' selected' : '') + '>' + l + '</option>').join('');
     const per = w.mode === 'periodic', pres = wdPresets(), all = evalList();
-    const scopeOpts = [['all', 'Tout le batch : les ' + st.all.length + ' simulations affichées']].concat(st.sel.length > 1 ? [['sel', 'Les ' + st.sel.length + ' simulations sélectionnées']] : [])
-      .concat(st.all.map((e) => [e.key, 'Une seule : #' + (all.findIndex((x) => x.key === e.key) + 1) + ' · ' + frDate(e.from) + ' → ' + frDate(e.to) + ' (' + signed(e.returnPct, num1) + ' %)']));
     const n = wdTargets().length;
-    return '<div class="wd-form"><div class="wd-presets"><label class="field wd-scope">Appliquer à<select id="wdScope">' + scopeOpts.map(([v, l]) => '<option value="' + esc(v) + '"' + (st.scope === v ? ' selected' : '') + '>' + esc(l) + '</option>').join('') + '</select></label></div>' +
+    return '<div class="wd-form"><div class="wd-scope"><div class="wd-scope-head"><b>Appliquer à</b> <span id="wdSelCount">' + wdSelLabel() + '</span>' +
+      '<button type="button" class="secondary small" id="wdSelAll">Tout le batch (' + st.all.length + ')</button><button type="button" class="ghost small" id="wdSelNone">Aucune</button></div>' +
+      '<p class="hint">Cliquez sur une simulation pour la choisir seule ; <b>glissez la souris</b> pour en choisir plusieurs à la suite ; <b>Maj</b> (ou Ctrl) + clic pour en ajouter ou retirer une à une.</p>' +
+      '<ul class="wd-pick" id="wdPick">' + st.all.map((e, i) => '<li data-i="' + i + '" class="' + (st.sel.includes(e.key) ? 'on' : '') + '"><span class="wd-chk"></span><b>#' + (all.findIndex((x) => x.key === e.key) + 1) + '</b> ' + frDate(e.from) + ' → ' + frDate(e.to) +
+        ' <small>' + durationLabel(e.from, e.to) + '</small> <span class="' + cls(e.returnPct) + '">' + signed(e.returnPct, num1) + ' %</span></li>').join('') + '</ul></div>' +
       '<div class="wd-presets"><label class="field">Mécanique enregistrée<select id="wdPreset"><option value="">—</option>' + pres.map((p) => '<option value="' + esc(p.id) + '"' + (st.presetId === p.id ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('') + '</select></label>' +
       (st.presetId ? '<button type="button" class="ghost small" id="wdPresetDel" title="Supprimer cette mécanique">🗑</button>' : '') +
       '<button type="button" class="secondary small" id="wdSave">💾 Enregistrer cette mécanique</button><button type="button" class="ghost small" id="wdToForm" title="Mettre cette mécanique dans la section « Retrait fictif des gains » du formulaire">Utiliser dans le formulaire</button></div>' +
@@ -3118,7 +3118,7 @@
         '<label class="field">' + (w.type === 'fixed' ? 'Somme' : 'Pourcentage (%)') + '<input id="wdValue" type="number" min="0" step="any" value="' + esc(w.value) + '"></label>'
         : '<label class="field">Seuil de gain (%)<input id="wdPct" type="number" min="1" max="1000" value="' + esc(w.pct) + '"></label><label class="field">Part du gain retirée (%)<input id="wdShare" type="number" min="1" max="100" value="' + esc(w.share) + '"></label>' +
         '<label class="field">Moment<select id="wdWhen">' + opt(w.when, [['immediate', 'Dès le seuil (position clôturée)'], ['close', 'À la clôture du trade']]) + '</select></label>') +
-      '<button type="button" class="primary" id="wdRun"' + (st.status === 'run' ? ' disabled' : '') + '>▶ Resimuler ' + (n > 1 ? 'les ' + n + ' simulations' : 'la simulation') + '</button></div>' +
+      '<button type="button" class="primary" id="wdRun"' + (st.status === 'run' || !n ? ' disabled' : '') + '>▶ Resimuler ' + (n > 1 ? 'les ' + n + ' simulations' : n ? 'la simulation' : '(choisissez des simulations)') + '</button></div>' +
       '<p class="hint">Mécanique : <b>' + esc(wdDesc(w)) + '</b>. Comme chez un courtier, seule la marge libre peut être retirée : si une position bloque la marge, le retrait attend sa clôture.</p></div>';
   }
   function renderWdModal() {
@@ -3130,7 +3130,9 @@
     if (st.status === 'idle' && !st.rows) h += '<p class="hint wd-idle">' + (st.presetId ? 'Cette mécanique n\'a pas encore de résultats sur ' + (n > 1 ? 'ces simulations' : 'cette simulation') + ' : cliquez sur « Resimuler ».' : 'Choisissez la mécanique puis « Resimuler ».') + ' Les résultats calculés sont gardés : en rechoisissant la mécanique, ils s\'affichent sans relancer.</p>';
     if (st.status === 'done' && st.cached && st.missing > 0) h += '<p class="banner info wd-partial">Résultats déjà calculés pour ' + st.rows.length + ' simulation' + (st.rows.length > 1 ? 's' : '') + ' sur ' + n + '. « Resimuler » calcule seulement les ' + st.missing + ' autre' + (st.missing > 1 ? 's' : '') + '.</p>';
     if (st.rows && st.rows.length) h += wdResultHtml(st);
+    const pick = $('wdPick'), sc = pick ? pick.scrollTop : 0;
     $('wdBody').innerHTML = h;
+    if ($('wdPick')) $('wdPick').scrollTop = sc; // la liste garde sa position
     if (st.rows && st.rows.length && st.status !== 'run') mountWdCharts(st);
   }
   /** Résumé compact d'une simulation relancée (gardé en mémoire : assez pour tous les graphiques). */
@@ -3240,6 +3242,8 @@
     if (t.closest('[data-close]')) return closeWdModal();
     if (t.id === 'wdRun') return runWd();
     if (t.id === 'wdStop') { checkStop = true; return; }
+    if (t.id === 'wdSelAll') { wdState.sel = wdState.all.map((e) => e.key); return wdCommitSel(); }
+    if (t.id === 'wdSelNone') { wdState.sel = []; wdPaint(); wdState.rows = null; wdState.status = 'idle'; return renderWdModal(); }
     if (t.id === 'wdSave') {
       wdReadForm();
       const name = (prompt('Nom de cette mécanique de retrait :', wdDesc(wdState.w)) || '').trim().slice(0, 80);
@@ -3267,10 +3271,40 @@
     if (checkRunning === 'wd') return;
     // mécanique enregistrée rechoisie : ses résultats s'affichent (calculés au besoin)
     if (id === 'wdPreset') { const p = wdPresets().find((x) => x.id === ev.target.value); wdState.presetId = ev.target.value; if (p) { wdState.w = Object.assign({}, p.w); return wdShowCached(false); } return renderWdModal(); }
-    if (id === 'wdScope') { wdState.scope = ev.target.value; return wdShowCached(); }
     if (['wdMode', 'wdEvery', 'wdType'].includes(id)) { wdReadForm(); wdState.presetId = ''; return wdShowCached(); }
     if (id && id.startsWith('wd')) { wdReadForm(); wdState.presetId = ''; return wdShowCached(); }
   });
+  function wdSelLabel() { const n = wdState.sel.length, a = wdState.all.length; return n === a ? 'tout le batch (' + a + ' simulations)' : n ? n + ' simulation' + (n > 1 ? 's' : '') + ' sur ' + a : 'aucune simulation'; }
+  let wdDrag = null; // { anchor, base:Set, moved }
+  function wdPaint() {
+    document.querySelectorAll('#wdPick li').forEach((li) => li.classList.toggle('on', wdState.sel.includes(wdState.all[+li.dataset.i].key)));
+    const c = $('wdSelCount'); if (c) c.textContent = wdSelLabel();
+  }
+  function wdCommitSel() { if (checkRunning === 'wd') return; wdShowCached(); }
+  $('wdModal').addEventListener('pointerdown', (ev) => {
+    const li = ev.target.closest('#wdPick li');
+    if (!li || ev.button || checkRunning === 'wd') return;
+    ev.preventDefault();
+    const i = +li.dataset.i, key = wdState.all[i].key;
+    if (ev.shiftKey || ev.ctrlKey || ev.metaKey) {
+      // une par une : ajoute ou retire cette simulation
+      wdState.sel = wdState.sel.includes(key) ? wdState.sel.filter((k) => k !== key) : wdState.sel.concat(key);
+      wdPaint(); return wdCommitSel();
+    }
+    wdDrag = { anchor: i, last: i };
+    wdState.sel = [key]; wdPaint();
+  });
+  $('wdModal').addEventListener('pointerover', (ev) => {
+    if (!wdDrag) return;
+    const li = ev.target.closest('#wdPick li');
+    if (!li) return;
+    const i = +li.dataset.i;
+    if (i === wdDrag.last) return;
+    wdDrag.last = i;
+    const a = Math.min(wdDrag.anchor, i), b = Math.max(wdDrag.anchor, i);
+    wdState.sel = wdState.all.slice(a, b + 1).map((e) => e.key); wdPaint();
+  });
+  document.addEventListener('pointerup', () => { if (wdDrag) { wdDrag = null; wdCommitSel(); } });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('wdModal').hidden) closeWdModal(); });
   $('evalWdBtn').addEventListener('click', () => openWdModal());
 

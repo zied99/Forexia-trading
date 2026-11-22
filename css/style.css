@@ -756,3 +756,16 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 /* calcul en cours : « Lancer » et « Arrêter » flottent devant les fenêtres */
 .run-bar.running { position: fixed; left: 16px; bottom: 16px; z-index: 200; width: min(460px, calc(100% - 32px)); margin: 0; filter: drop-shadow(0 8px 24px rgba(0,0,0,.35)); }
 .run-bar.running #runBtn { font-size: 14px; }
+.wd-scope-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.wd-scope-head button { width: auto; margin: 0; }
+#wdSelCount { color: var(--accent); font-weight: 600; font-size: 13px; }
+.wd-pick { list-style: none; margin: 6px 0 0; padding: 4px; max-height: 210px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); user-select: none; touch-action: pan-y; }
+.wd-pick li { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 7px; cursor: pointer; font-size: 13px; }
+.wd-pick li:hover { background: var(--panel-2); }
+.wd-pick li.on { background: var(--accent-soft); }
+.wd-pick li small { color: var(--muted, #64748b); }
+.wd-chk { width: 15px; height: 15px; border: 1.5px solid var(--border); border-radius: 4px; flex: none; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; }
+.wd-pick li.on .wd-chk { background: var(--accent); border-color: var(--accent); }
+.wd-pick li.on .wd-chk::after { content: '✓'; color: var(--accent-ink); }
+.wd-scope .hint { margin: 4px 0 0; }
+.wd-scope { margin-bottom: 10px; }
