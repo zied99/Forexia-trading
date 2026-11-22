@@ -626,6 +626,15 @@
       min = F.data.addMonths(new Date(csvBars[0].date.slice(0, 10) + 'T00:00:00Z'), 12);
       max = new Date(csvBars[csvBars.length - 1].date.slice(0, 10) + 'T00:00:00Z');
     }
+    // années choisies (« Années de la période aléatoire ») : limitent le tirage
+    const yf = Math.round(Number($('randomYFrom').value)) || 0, yt = Math.round(Number($('randomYTo').value)) || 0;
+    const floor = src === 'synthetic' ? Date.UTC(1996, 0, 1) : src === 'ecb' ? Date.UTC(2000, 0, 1) : src === 'csv' ? min.getTime() : Date.UTC(1971, 0, 1);
+    let yearsNote = '';
+    if (yf || yt) {
+      const nmin = new Date(Math.max(floor, yf ? Date.UTC(yf, 0, 1) : min.getTime())), nmax = new Date(Math.min(max.getTime(), yt ? Date.UTC(yt, 11, 31) : max.getTime()));
+      if (nmax - nmin >= 32 * day) { min = nmin; max = nmax; yearsNote = ' entre ' + min.getUTCFullYear() + ' et ' + max.getUTCFullYear(); }
+      else yearsNote = ' (années choisies hors de l\'historique disponible : ignorées)';
+    }
     const pool = randomDurations();
     let choices = pool.filter(([m]) => F.data.addMonths(min, m) <= max);
     let short = false;
@@ -641,7 +650,7 @@
     syncPeriodUI();
     setDates(start, end);
     $('randomPeriodNote').hidden = false;
-    $('randomPeriodNote').textContent = '🎲 Période tirée au hasard : ' + label + ', du ' + frDate(F.data.iso(start)) + ' au ' + frDate(F.data.iso(end)) +
+    $('randomPeriodNote').textContent = '🎲 Période tirée au hasard' + yearsNote + ' : ' + label + ', du ' + frDate(F.data.iso(start)) + ' au ' + frDate(F.data.iso(end)) +
       (/^exact:/.test($('randomSpan').value) ? ' (durée fixe)' : $('randomSpan').value ? ' (' + $('randomSpan').selectedOptions[0].textContent.toLowerCase() + ')' : '') +
       (short ? ', historique trop court pour cette durée : période raccourcie' : '') +
       '. Cliquez de nouveau sur « Période aléatoire » pour en tirer une autre.';
@@ -2632,6 +2641,106 @@
   function evalSave(list) { evalMemory = list; evalStore.set(list); updateEvalCount(); }
   // Onglet « Stratégie en cours » (par défaut) ou « Historique complet ».
   let evalScope = 'current';
+  // ---------- Analyse temporelle (graphiques de l'évaluation) ----------
+  const tDate = (d) => Date.parse(String(d).slice(0, 10) + 'T00:00:00Z');
+  /** Frise : chaque simulation est un trait de sa date de début à sa date de fin, à la hauteur de son résultat. */
+  function timelineSvg(list, T, cap) {
+    const W = 800, H = 230, L = 46, R = 10, TOP = 10, B = 26;
+    const x0 = Date.UTC(T.minYear, 0, 1), x1 = Date.UTC(T.maxYear + 1, 0, 1);
+    const x = (t) => L + ((t - x0) / (x1 - x0)) * (W - L - R), y = (v) => TOP + ((cap - Math.max(-cap, Math.min(cap, v))) / (2 * cap)) * (H - TOP - B);
+    let g = '';
+    const band = (z, c) => z ? '<rect class="tl-band ' + c + '" x="' + x(Date.UTC(z.from, 0, 1)).toFixed(1) + '" y="' + TOP + '" width="' + (x(Date.UTC(z.to + 1, 0, 1)) - x(Date.UTC(z.from, 0, 1))).toFixed(1) + '" height="' + (H - TOP - B) + '"><title>Époque ' + (c === 'weak' ? 'faible' : 'forte') + ' : ' + esc(z.label) + '</title></rect>' : '';
+    g += band(T.weak, 'weak') + band(T.strong, 'strong');
+    for (const gp of T.gaps) g += '<rect class="tl-gap" x="' + x(Date.UTC(gp.from, 0, 1)).toFixed(1) + '" y="' + TOP + '" width="' + (x(Date.UTC(gp.to + 1, 0, 1)) - x(Date.UTC(gp.from, 0, 1))).toFixed(1) + '" height="' + (H - TOP - B) + '"><title>Aucune simulation en ' + (gp.from === gp.to ? gp.from : gp.from + '–' + gp.to) + '</title></rect>';
+    const span = T.maxYear - T.minYear + 1, step = Math.max(1, Math.ceil(span / 12));
+    for (let yv = T.minYear; yv <= T.maxYear + 1; yv += step) g += '<line class="tl-grid" x1="' + x(Date.UTC(yv, 0, 1)).toFixed(1) + '" x2="' + x(Date.UTC(yv, 0, 1)).toFixed(1) + '" y1="' + TOP + '" y2="' + (H - B) + '"/>' + (yv <= T.maxYear ? '<text class="tl-tick" x="' + x(Date.UTC(yv, 6, 1)).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle">' + yv + '</text>' : '');
+    for (const v of [cap, cap / 2, 0, -cap / 2, -cap]) g += '<text class="tl-tick" x="' + (L - 6) + '" y="' + (y(v) + 4).toFixed(1) + '" text-anchor="end">' + (v > 0 ? '+' : v < 0 ? '−' : '') + Math.round(Math.abs(v)) + '%</text>';
+    g += '<line class="tl-zero" x1="' + L + '" x2="' + (W - R) + '" y1="' + y(0).toFixed(1) + '" y2="' + y(0).toFixed(1) + '"/>';
+    const all = evalList();
+    for (const e of list) {
+      const xa = x(tDate(e.from)), xb = Math.max(xa + 3, x(tDate(e.to))), yy = y(e.returnPct).toFixed(1);
+      g += '<line class="tl-run ' + (e.returnPct > 0 ? 'up' : 'down') + '" x1="' + xa.toFixed(1) + '" x2="' + xb.toFixed(1) + '" y1="' + yy + '" y2="' + yy + '"><title>#' + (all.findIndex((z) => z.key === e.key) + 1) + ' · ' + frDate(e.from) + ' → ' + frDate(e.to) + ' : ' + signed(e.returnPct, num1) + ' %</title></line>';
+    }
+    return '<svg class="tl-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Résultat de chaque simulation selon sa période">' + g + '</svg>';
+  }
+  /** Barres par année (année du milieu de la période) : résultat médian, et part de gagnantes au-dessus. */
+  function yearBarsSvg(T, cap) {
+    const W = 800, H = 170, L = 46, R = 10, TOP = 22, B = 24, n = T.byYear.length;
+    const bw = (W - L - R) / n, y = (v) => TOP + ((cap - Math.max(-cap, Math.min(cap, v))) / (2 * cap)) * (H - TOP - B), y0 = y(0);
+    let g = '<line class="tl-zero" x1="' + L + '" x2="' + (W - R) + '" y1="' + y0.toFixed(1) + '" y2="' + y0.toFixed(1) + '"/>';
+    const lab = Math.max(1, Math.ceil(n / 16));
+    T.byYear.forEach((st, i) => {
+      const cx = L + i * bw, yv = y(st.medianRet), top = Math.min(yv, y0), h = Math.max(1, Math.abs(yv - y0));
+      g += '<rect class="yb ' + (st.medianRet > 0 ? 'up' : 'down') + '" x="' + (cx + bw * 0.15).toFixed(1) + '" y="' + top.toFixed(1) + '" width="' + (bw * 0.7).toFixed(1) + '" height="' + h.toFixed(1) + '"><title>' + st.year + ' : ' + st.n + ' simulation' + (st.n > 1 ? 's' : '') +
+        ', ' + Math.round(st.posRate) + ' % gagnantes, médiane ' + signed(st.medianRet, num1) + ' % (moyenne ' + signed(st.meanRet, num1) + ' %)</title></rect>';
+      if (bw >= 26) g += '<text class="yb-rate ' + (st.posRate >= 50 ? 'up' : 'down') + '" x="' + (cx + bw / 2).toFixed(1) + '" y="' + (TOP - 8) + '" text-anchor="middle">' + Math.round(st.posRate) + '%</text>';
+      if (i % lab === 0) g += '<text class="tl-tick" x="' + (cx + bw / 2).toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle">' + st.year + '</text>';
+    });
+    for (const v of [cap, 0, -cap]) g += '<text class="tl-tick" x="' + (L - 6) + '" y="' + (y(v) + 4).toFixed(1) + '" text-anchor="end">' + (v > 0 ? '+' : v < 0 ? '−' : '') + Math.round(Math.abs(v)) + '%</text>';
+    return '<svg class="tl-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Résultat médian par année">' + g + '</svg>';
+  }
+  let timeLotOpt = null; // {n, from, to} proposé dans la section
+  function timeSectionHtml(list) {
+    const T = F.advisor.timeline(list);
+    if (T.n < 2) return '';
+    const abs = list.map((e) => Math.abs(e.returnPct)).sort((a, b) => a - b);
+    const cap = Math.max(20, Math.min(2 * (abs[Math.floor(abs.length * 0.9)] || 20), abs[abs.length - 1] || 20));
+    const mt5 = list.some((e) => /^MT5/.test(e.data)), ecb = list.some((e) => /^BCE/.test(e.data));
+    const warn = [];
+    if (mt5 && T.minYear >= 2014) warn.push('Les tirages aléatoires avec MetaTrader 5 commencent en 2015 par défaut : aucune simulation ne couvre les années d\'avant. Pour tester par exemple 1997, choisissez les années ci-dessous (l\'historique de votre courtier MT5 doit remonter jusque-là).');
+    if (ecb) warn.push('Les cours BCE commencent en 1999 : pour des années plus anciennes, utilisez MT5 ou un fichier CSV.');
+    if (T.gaps.length) warn.push('Années sans simulation : ' + T.gaps.map((g) => (g.from === g.to ? g.from : g.from + '–' + g.to)).join(', ') + ' (zones hachurées).');
+    // lot proposé : l'époque faible, sinon le premier trou, sinon les années anciennes
+    const def = T.weak ? { from: T.weak.from, to: T.weak.to } : T.gaps.length ? { from: T.gaps[0].from, to: T.gaps[0].to } : { from: Math.max(1996, T.minYear - 10), to: T.minYear };
+    timeLotOpt = timeLotOpt && timeLotOpt.list === list.length ? timeLotOpt : { n: 10, from: def.from, to: def.to, list: list.length };
+    const weakList = T.weak ? list.filter((e) => { const y = F.advisor.midYear(e); return y >= T.weak.from && y <= T.weak.to; }) : [];
+    const worst = weakList.filter((e) => e.strategy && e.config).sort((a, b) => a.returnPct - b.returnPct)[0];
+    const lotBtn = (z, txt) => '<button type="button" class="secondary small" data-time-lot="' + z.from + '-' + z.to + '">🎲 ' + txt + '</button>';
+    return '<section class="eval-chart time-sec" id="timeSection"><h4>📅 Analyse temporelle</h4>' +
+      '<p class="hint">La stratégie marche-t-elle mieux à certaines époques ? Chaque simulation est placée selon ses dates.</p>' +
+      '<div class="modal-note">' + T.verdict.map((v) => '<p>' + v + '</p>').join('') + '</div>' +
+      (warn.length ? '<div class="banner warn">' + warn.map((w) => '<p>' + w + '</p>').join('') + '</div>' : '') +
+      '<h5>Résultat de chaque simulation selon sa période</h5><p class="hint">Un trait = une simulation (du début à la fin de sa période), en hauteur son résultat.' + (T.weak ? ' Fond rouge : époque faible ; vert : époque forte.' : '') + '</p>' + timelineSvg(list, T, cap) +
+      '<h5>Par année</h5><p class="hint">Résultat médian des simulations dont la période est centrée sur l\'année ; au-dessus, la part de gagnantes.</p>' + yearBarsSvg(T, cap) +
+      '<div class="eval-charts-grid">' + hbars('Résultat médian par époque', T.byEra) + '</div>' +
+      '<div class="time-actions"><b>Vérifier une époque</b><p class="hint">Lance un lot de tests aléatoires limité à ces années (un nouveau batch). Comparez ensuite les deux époques dans « Voir toutes les simulations ».</p>' +
+      '<div class="row buttons">' + (T.weak ? lotBtn(T.weak, '10 tests ' + T.weak.label + ' (' + T.weak.from + '–' + T.weak.to + ')') + lotBtn(T.strong, '10 tests ' + T.strong.label + ' (' + T.strong.from + '–' + T.strong.to + ')') : '') +
+      (worst ? '<button type="button" class="secondary small" data-time-ana="' + esc(worst.key) + '">🔍 Analyser la pire simulation ' + esc(T.weak.label) + ' (#' + (evalList().findIndex((z) => z.key === worst.key) + 1) + ')</button>' : '') + '</div>' +
+      '<div class="row buttons time-lot">Lot de <input id="tlN" type="number" min="1" max="100" value="' + timeLotOpt.n + '"> tests entre <input id="tlFrom" type="number" min="1970" max="2100" value="' + timeLotOpt.from + '"> et <input id="tlTo" type="number" min="1970" max="2100" value="' + timeLotOpt.to + '">' +
+      '<button type="button" class="primary small" id="tlRun">🎲 Lancer</button></div></div></section>';
+  }
+  function launchTimeLot(from, to, n) {
+    if (batchRunning || checkRunning) return;
+    from = Math.round(from); to = Math.round(to);
+    if (!(from >= 1970 && to >= from)) return toast('Années invalides.', false);
+    $('randomYFrom').value = from; $('randomYTo').value = to;
+    $('batchCount').value = Math.max(1, Math.min(100, Math.round(n) || 10));
+    closeEvaluation();
+    $('batchCount').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    $('batchRun').click();
+  }
+  $('evalBody').addEventListener('click', (ev) => {
+    const b = ev.target.closest('[data-time-lot],[data-time-ana],#tlRun');
+    if (!b) return;
+    if (b.dataset.timeLot) { const [f, t] = b.dataset.timeLot.split('-').map(Number); return launchTimeLot(f, t, 10); }
+    if (b.dataset.timeAna) return analyzeBar(b.dataset.timeAna);
+    if (b.id === 'tlRun') launchTimeLot(+$('tlFrom').value, +$('tlTo').value, +$('tlN').value);
+  });
+  $('evalBody').addEventListener('input', (ev) => {
+    if (!timeLotOpt) return;
+    if (ev.target.id === 'tlN') timeLotOpt.n = +ev.target.value; if (ev.target.id === 'tlFrom') timeLotOpt.from = +ev.target.value; if (ev.target.id === 'tlTo') timeLotOpt.to = +ev.target.value;
+  });
+  /** Mini-frise d'un batch (onglet Batchs) : un point par simulation, à l'année de son milieu, vert ou rouge. */
+  function batchDotsSvg(entries, y0, y1) {
+    const W = 140, H = 26, span = Math.max(1, y1 - y0 + 1), x = (t) => 4 + ((t - Date.UTC(y0, 0, 1)) / (Date.UTC(y0 + span, 0, 1) - Date.UTC(y0, 0, 1))) * (W - 8);
+    let g = '<line class="tl-zero" x1="2" x2="' + (W - 2) + '" y1="13" y2="13"/>';
+    for (const e of entries) {
+      const m = (tDate(e.from) + tDate(e.to)) / 2;
+      g += '<circle class="' + (e.returnPct > 0 ? 'up' : 'down') + '" cx="' + x(m).toFixed(1) + '" cy="' + (e.returnPct > 0 ? 8 : 18) + '" r="3"><title>' + frDate(e.from) + ' → ' + frDate(e.to) + ' : ' + signed(e.returnPct, num1) + ' %</title></circle>';
+    }
+    return '<svg class="batch-dots" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Simulations du batch dans le temps">' + g + '</svg><small class="eval-tag">' + y0 + ' → ' + y1 + '</small>';
+  }
+
   // ---------- Batchs : lots de simulations enregistrés, rechargeables ----------
   const BATCH_KEY = 'forexia.batches';
   const batchStore = {
@@ -2676,7 +2785,7 @@
   function startLotBatch(n) {
     const st = currentStrategy(), d = new Date();
     const b = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), at: d.toISOString(), auto: true, entries: [],
-      name: st.name + ' · ' + $('pair').value + ' · lot de ' + n + ' · ' + d.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) };
+      name: st.name + ' · ' + $('pair').value + ' · lot de ' + n + ($('randomYFrom').value || $('randomYTo').value ? ' · ' + ($('randomYFrom').value || '…') + '–' + ($('randomYTo').value || '…') : '') + ' · ' + d.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) };
     const list = batchStore.get(); list.push(b); batchStore.set(list);
     activeBatchId = b.id;
     evalBatch = { id: b.id, keys: new Set() };
@@ -2707,6 +2816,7 @@
       return;
     }
     const p = (v) => '<span class="' + cls(v) + '">' + signed(v, num1) + ' %</span>';
+    const allE = list.flatMap((b) => b.entries), gy0 = Math.min(...allE.map((e) => +e.from.slice(0, 4))), gy1 = Math.max(...allE.map((e) => +e.to.slice(0, 4)));
     const rows = list.map((b, i) => {
       const s = batchStats(b.entries);
       return '<tr><td class="l name" title="' + esc(b.name) + '"><b>' + esc(b.name) + '</b><small class="eval-tag">' + (s.strategies.length > 1 || b.name.indexOf(s.strategies[0]) < 0 ? esc(s.strategies.join(', ')) + ' · ' : '') + 'enregistré le ' +
@@ -2715,15 +2825,15 @@
         '<td>' + s.n + '</td><td title="Moyenne des résultats de chaque simulation (rendement global : ' + signed(s.globalReturn, num1) + ' %)">' + p(s.avgReturn) + '</td>' +
         '<td><span class="batch-rate ' + (s.winRate >= 50 ? 'pos' : 'neg') + '">' + Math.round(s.winRate) + ' %</span></td>' +
         '<td title="Capital de départ moyen : ' + money.format(s.avgStart) + '">' + money.format(s.avgFinal) + '<small class="eval-tag">départ ' + money.format(s.avgStart) + '</small></td>' +
-        '<td>−' + num1.format(s.avgDD) + ' %</td>' +
+        '<td>−' + num1.format(s.avgDD) + ' %</td><td class="l">' + (b.entries.length ? batchDotsSvg(b.entries, gy0, gy1) : '') + '</td>' +
         '<td class="batch-acts"><button type="button" class="reload" data-batch-load="' + i + '">Recharger</button>' +
         '<button type="button" class="ghost small" data-batch-ren="' + i + '" title="Renommer" aria-label="Renommer le batch">✏️</button>' +
         '<button type="button" class="ghost small" data-batch-del="' + i + '" title="Supprimer" aria-label="Supprimer le batch">🗑</button></td></tr>';
     }).join('');
     $('evalBody').innerHTML = '<p class="hint">Un batch est un lot de simulations enregistré ensemble (par exemple un lot de tests aléatoires). « Recharger » remet la stratégie dans le formulaire ' +
-      'et affiche les simulations du batch dans les graphiques, où vous pouvez les prolonger, les améliorer, etc.</p>' +
+      'et affiche les simulations du batch dans les graphiques (avec l\'analyse temporelle), où vous pouvez les prolonger, les améliorer, etc.</p>' +
       '<div class="table-wrap"><table class="eval batch-table"><thead><tr><th class="l">Batch</th><th class="l">Devise</th><th class="l">Période des simulations</th><th>Simulations</th>' +
-      '<th>Rendement moyen</th><th>Probabilité de gain</th><th>Capital moyen (final)</th><th>Drawdown moyen</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+      '<th>Rendement moyen</th><th>Probabilité de gain</th><th>Capital moyen (final)</th><th>Drawdown moyen</th><th class="l" title="Un point par simulation, placé à l\'année du milieu de sa période (même échelle pour tous les batchs) ; en haut vert = gagnante, en bas rouge = perdante">Dans le temps</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>';
   }
   function loadBatch(b) {
     // les simulations du batch retournent dans l'historique si elles en ont été effacées
@@ -3002,7 +3112,7 @@
     const A = F.advisor.analyze(list), G = A.groups;
     $('evalBody').innerHTML = (filtered ? '<p class="eval-count">Graphiques sur les ' + list.length + ' simulations affichées (filtres appliqués).</p>' : '') +
       '<section class="eval-chart"><div class="runs-head"><div><h4>Résultat de chaque simulation</h4><p class="hint">Dans l\'ordre où elles ont été lancées ; survolez une barre pour le détail.</p></div><div class="runs-side">' + winDonut(list) + (evalBatch ? '' : batchSaveButton('chartSaveBatch')) + '</div></div><div id="evalRunsChart"></div>' +
-      checkToolsHtml(list) + '</section>' +
+      checkToolsHtml(list) + '</section>' + timeSectionHtml(list) +
       '<p class="hint">Les barres ci-dessous montrent le résultat <b>médian</b> (la moitié des simulations fait mieux, l\'autre moins bien) : un résultat extrême ne fausse pas la comparaison. La moyenne est dans l\'info-bulle.</p>' +
       '<div class="eval-charts-grid">' +
       hbars('Résultat médian par stratégie', G.strategy) +

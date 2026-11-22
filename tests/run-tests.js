@@ -760,6 +760,19 @@ console.log('Téléchargement des cours (API simulée)');
   eq(ol.strat.shortEntry, '');
   for (const p of a.proposals) { const x = A.applyProposal(st, se, p); if (!B.runBacktest(bars, x.strat, x.settings).stats) throw new Error(p.id); }
 });
+test('Analyse temporelle : rupture entre époques, trous, époques', () => {
+  const A = globalThis.Forexia.advisor, L = [];
+  for (const y of [1997, 1998, 1999, 2000, 2001, 2002]) L.push({ from: y + '-02-01', to: (y + 1) + '-01-31', returnPct: -20, maxDrawdownPct: 30 });
+  for (const y of [2020, 2021, 2022, 2023, 2024]) L.push({ from: y + '-02-01', to: (y + 1) + '-01-31', returnPct: 40, maxDrawdownPct: 10 });
+  const T = A.timeline(L);
+  if (!T.split || T.split.year < 2003 || T.split.year > 2020) throw new Error('rupture attendue vers 2020 : ' + (T.split && T.split.year));
+  eq(T.strong.label.startsWith('depuis'), true);
+  eq(T.weak.from, 1997);
+  if (!T.gaps.some((g) => g.from <= 2010 && g.to >= 2010)) throw new Error('trou 2004–2019 non détecté');
+  eq(T.byEra[0].label, 'Avant 2000');
+  if (!(T.corr > 0.5)) throw new Error('corrélation positive attendue');
+  eq(A.timeline([]).n, 0);
+});
 test('Pas de requête avant 1999 (début des cours BCE)', async () => {
     calls.length = 0;
     const bars = await D.fetchFrankfurter('EUR/USD', new Date('1990-01-01'), new Date('1999-06-30'));

@@ -149,5 +149,81 @@
     return out;
   }
 
-  F.advisor = { analyze, horizonOf, withdrawOf, groupBy, scoreOf, months, HORIZON_LABEL };
+  // ---------- Analyse temporelle : la stratégie marche-t-elle mieux à certaines époques ? ----------
+  /** Année du milieu de la période testée (une simulation de 2 ans compte pour l'année de son milieu). */
+  function midYear(e) { return new Date((Date.parse(e.from) + Date.parse(e.to)) / 2).getUTCFullYear(); }
+  const ERAS = [
+    { from: -Infinity, to: 1999, label: 'Avant 2000' },
+    { from: 2000, to: 2007, label: '2000 – 2007' },
+    { from: 2008, to: 2012, label: '2008 – 2012 (crise financière)' },
+    { from: 2013, to: 2019, label: '2013 – 2019' },
+    { from: 2020, to: Infinity, label: 'Depuis 2020' },
+  ];
+  /** Corrélation de rang (Spearman) entre l'année et le résultat : > 0 = meilleur avec le temps. */
+  function rankCorr(xs, ys) {
+    const rank = (a) => { const idx = a.map((v, i) => [v, i]).sort((p, q) => p[0] - q[0]), r = new Array(a.length); for (let k = 0; k < idx.length;) { let j = k; while (j + 1 < idx.length && idx[j + 1][0] === idx[k][0]) j++; for (let t = k; t <= j; t++) r[idx[t][1]] = (k + j) / 2; k = j + 1; } return r; };
+    const rx = rank(xs), ry = rank(ys), mx = mean(rx), my = mean(ry);
+    let num = 0, dx = 0, dy = 0;
+    for (let i = 0; i < xs.length; i++) { num += (rx[i] - mx) * (ry[i] - my); dx += (rx[i] - mx) ** 2; dy += (ry[i] - my) ** 2; }
+    return dx && dy ? num / Math.sqrt(dx * dy) : 0;
+  }
+  /**
+   * list : évaluations. Renvoie {
+   *   minYear, maxYear, byYear: [groupStats + year], byEra: [groupStats + era], corr,
+   *   split: {year, before, after} (rupture la plus nette, au moins 3 simulations de chaque côté) ou null,
+   *   verdict: [phrases], weak: {from, to, label} | null, strong: idem, gaps: [{from, to}] }
+   */
+  function timeline(list) {
+    const L = list.filter((e) => e.from && e.to);
+    const out = { n: L.length, byYear: [], byEra: [], corr: 0, split: null, verdict: [], weak: null, strong: null, gaps: [] };
+    if (!L.length) return out;
+    out.minYear = Math.min(...L.map((e) => +e.from.slice(0, 4)));
+    out.maxYear = Math.max(...L.map((e) => +e.to.slice(0, 4)));
+    const yrs = new Map();
+    for (const e of L) { const y = midYear(e); if (!yrs.has(y)) yrs.set(y, []); yrs.get(y).push(e); }
+    out.byYear = [...yrs].sort((a, b) => a[0] - b[0]).map(([y, l]) => Object.assign(groupStats(String(y), String(y), l), { year: y }));
+    out.byEra = ERAS.map((er) => { const l = L.filter((e) => { const y = midYear(e); return y >= er.from && y <= er.to; }); return l.length ? Object.assign(groupStats(er.label, er.label, l), { era: er }) : null; }).filter(Boolean);
+    if (L.length >= 4) out.corr = rankCorr(L.map(midYear), L.map((e) => e.returnPct));
+    // rupture : l'année qui sépare le mieux les bons et les mauvais résultats
+    const cands = [...new Set(L.map(midYear))].sort((a, b) => a - b).slice(1);
+    let best = null;
+    for (const y of cands) {
+      const b = L.filter((e) => midYear(e) < y), a = L.filter((e) => midYear(e) >= y);
+      if (b.length < 4 || a.length < 4) continue;
+      const sb = groupStats('b', 'avant ' + y, b), sa = groupStats('a', 'depuis ' + y, a);
+      const gap = Math.abs(sa.posRate - sb.posRate) / 100 + Math.abs(Math.tanh((sa.medianRet - sb.medianRet) / 50));
+      const m = Math.min(a.length, b.length), w = gap * (m / (m + 2));
+      if (!best || w > best.w) best = { year: y, before: sb, after: sa, gap: gap, w: w };
+    }
+    if (best && best.gap >= 0.5) out.split = best;
+    // trous : années sans aucune simulation entre la première et la dernière
+    const cover = new Set();
+    for (const e of L) for (let y = +e.from.slice(0, 4); y <= +e.to.slice(0, 4); y++) cover.add(y);
+    let g = null;
+    for (let y = out.minYear; y <= out.maxYear; y++) {
+      if (!cover.has(y)) { if (!g) g = { from: y, to: y }; else g.to = y; } else if (g) { out.gaps.push(g); g = null; }
+    }
+    if (g) out.gaps.push(g);
+    // verdict
+    const pc = (v) => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(0) + ' %';
+    const desc = (st) => st.n + ' simulation' + (st.n > 1 ? 's' : '') + ', ' + Math.round(st.posRate) + ' % gagnantes, résultat médian ' + pc(st.medianRet);
+    out.verdict.push('Simulations de ' + out.minYear + ' à ' + out.maxYear + ' (classées selon l\'année du milieu de leur période).');
+    if (out.split) {
+      const { year, before, after } = out.split, better = after.robust > before.robust;
+      out.verdict.push('<b>Rupture vers ' + year + '</b> : la stratégie marche ' + (better ? 'nettement mieux depuis ' + year : 'nettement moins bien depuis ' + year) + '. ' +
+        'Avant ' + year + ' : ' + desc(before) + '. Depuis ' + year + ' : ' + desc(after) + '.');
+      out.weak = better ? { from: out.minYear, to: year - 1, label: 'avant ' + year } : { from: year, to: out.maxYear, label: 'depuis ' + year };
+      out.strong = better ? { from: year, to: out.maxYear, label: 'depuis ' + year } : { from: out.minYear, to: year - 1, label: 'avant ' + year };
+      if (Math.min(before.n, after.n) < 5) out.verdict.push('Confiance ' + confidence(Math.min(before.n, after.n)) + ' : peu de simulations d\'un côté de la rupture, lancez un lot sur chaque époque pour confirmer.');
+    } else if (L.length >= 6) out.verdict.push('Pas de rupture nette dans le temps : les résultats ne dépendent pas clairement de l\'époque.');
+    if (Math.abs(out.corr) >= 0.4) out.verdict.push('Tendance générale : les résultats ' + (out.corr > 0 ? 's\'améliorent' : 'se dégradent') + ' avec les années (corrélation de rang ' + out.corr.toFixed(2).replace('.', ',') + ').');
+    if (out.byEra.length >= 2) {
+      const sorted = out.byEra.slice().sort((a, b) => b.robust - a.robust);
+      out.verdict.push('Meilleure époque : <b>' + sorted[0].label + '</b> (' + desc(sorted[0]) + ') ; la plus difficile : <b>' + sorted[sorted.length - 1].label + '</b> (' + desc(sorted[sorted.length - 1]) + ').');
+    }
+    if (L.length < 8) out.verdict.push('Seulement ' + L.length + ' simulation' + (L.length > 1 ? 's' : '') + ' : l\'analyse temporelle est indicative.');
+    return out;
+  }
+
+  F.advisor = { timeline, midYear, ERAS, analyze, horizonOf, withdrawOf, groupBy, scoreOf, months, HORIZON_LABEL };
 })(typeof window !== 'undefined' ? window : globalThis);

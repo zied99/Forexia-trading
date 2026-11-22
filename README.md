@@ -188,6 +188,22 @@ Un **batch** est un lot de simulations enregistré ensemble, par exemple un lot 
   recommandations) ; « Mettre à jour le batch » y enregistre leur état après prolongation ou amélioration.
 - Renommer ✏️ et supprimer 🗑. Les batchs sont gardés dans ce navigateur.
 
+## Analyse temporelle
+
+Dans « Évaluation › Graphiques » (et pour chaque batch rechargé), la section **📅 Analyse temporelle** montre si la
+stratégie marche mieux à certaines époques :
+- frise : chaque simulation est un trait de sa date de début à sa date de fin, à la hauteur de son résultat ;
+- résultat médian et part de gagnantes **par année** (année du milieu de la période) et **par époque**
+  (avant 2000, 2000–2007, 2008–2012, 2013–2019, depuis 2020) ;
+- verdict : **rupture** la plus nette (« marche nettement mieux depuis 2020 »), tendance avec les années,
+  meilleure et pire époque, années sans simulation ;
+- boutons pour **vérifier une époque** : lot de 10 tests sur l'époque faible ou forte, ou entre deux années au choix,
+  et analyse de la pire simulation de l'époque faible.
+
+**Plage du lot** : à côté de « Lot de tests aléatoires », « Plage : de … à … » limite les périodes tirées à ces années
+(ex. 1997 à 2005). Vide : tout l'historique (MT5 : depuis 2015 par défaut ; BCE : depuis 1999). L'onglet Batchs montre
+aussi chaque batch « dans le temps » (un point par simulation, même échelle pour tous).
+
 ## Analyseur
 
 Le bouton **🔍 Analyseur** (à côté d'« Améliorer ») explique une simulation :

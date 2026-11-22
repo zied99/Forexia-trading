@@ -610,6 +610,31 @@ button.analyze svg { width: 16px; height: 16px; fill: none; stroke: currentColor
 .batch-acts { white-space: nowrap; }
 .batch-acts button { margin-left: 4px; }
 @media (max-width: 600px) { .runs-side { align-items: flex-start; } }
-table.eval.batch-table td.name { white-space: normal; max-width: 280px; min-width: 180px; overflow: visible; }
+table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-width: 160px; overflow: visible; }
 #anaModal { z-index: 60; }
 .ana-prop > .ana-btns { display: flex; flex-direction: column; gap: 6px; flex: none; }
+
+/* Analyse temporelle */
+.batch-row .field.batch-years { max-width: 110px; }
+.time-sec h5 { margin: 14px 0 2px; font-size: 13px; }
+.tl-svg { width: 100%; height: auto; display: block; margin: 4px 0; }
+.tl-svg .tl-grid { stroke: var(--border); stroke-width: 1; }
+.tl-svg .tl-zero { stroke: var(--muted, #94a3b8); stroke-width: 1; }
+.tl-svg .tl-tick { fill: var(--muted, #64748b); font-size: 11px; }
+.tl-svg .tl-run { stroke-width: 5; stroke-linecap: round; opacity: .85; }
+.tl-svg .tl-run.up, .yb.up, .batch-dots .up { stroke: var(--up); fill: var(--up); }
+.tl-svg .tl-run.down, .yb.down, .batch-dots .down { stroke: var(--down); fill: var(--down); }
+.tl-svg .tl-run:hover { stroke-width: 8; opacity: 1; }
+.tl-svg .tl-band.weak { fill: var(--down-soft); opacity: .6; }
+.tl-svg .tl-band.strong { fill: var(--up-soft); opacity: .6; }
+.tl-svg .tl-gap { fill: var(--border); opacity: .45; }
+.tl-svg .yb { stroke: none; }
+.tl-svg .yb-rate { font-size: 10px; font-weight: 700; }
+.tl-svg .yb-rate.up { fill: var(--up); } .tl-svg .yb-rate.down { fill: var(--down); }
+.time-sec .banner p { margin: 2px 0; }
+.time-actions { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+.time-actions .hint { margin: 2px 0 6px; }
+.time-lot { align-items: center; gap: 6px; flex-wrap: wrap; }
+.time-lot input { width: 80px; }
+.batch-dots { width: 110px; height: 26px; display: block; }
+.batch-dots .tl-zero { stroke: var(--border); }
