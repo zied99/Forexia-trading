@@ -3214,33 +3214,73 @@
         '<td class="' + (r.w.final >= r.capital ? 'pos' : 'neg') + '">' + money.format(r.w.final) + '</td><td>−' + num1.format(r.w.dd) + ' %</td></tr>'; }).join('') +
       '</tbody>' + (n > 1 ? '<tfoot><tr><td colspan="3" class="l">Moyenne (' + n + ')</td><td>' + pc(avg((r) => r.b.ret)) + '</td><td>' + pc(avg((r) => r.w.ret)) + '</td><td>' + money.format(wdT / n) + '</td><td>' + num1.format(avg((r) => r.w.n)) + '</td><td>' + money.format(wdT / Math.max(1, months)) + '</td><td>' +
         (R.some((r) => wdDerive(r).first) ? 'mois ' + num1.format(mean(R.map((r) => wdDerive(r).first).filter(Boolean))) : '—') + '</td><td>' + num1.format(avg((r) => wdDerive(r).yearly)) + ' %</td><td>' + money.format(avg((r) => r.w.final)) + '</td><td>−' + num1.format(avg((r) => r.w.dd)) + ' %</td></tr></tfoot>' : '') + '</table></div>';
-    if (n > 1) {
-      h += wdSummaryHtml(st);
-      h += '<div class="eval-charts-grid wd-charts">' +
-        '<section class="eval-chart"><h4>Somme retirée par simulation</h4><div id="wdAmounts"></div></section>' +
-        '<section class="eval-chart"><h4>Compte final (en % du capital de départ)</h4><p class="hint">Au-dessus de 100 % : le capital de départ est intact malgré les retraits.</p><div id="wdFinal"></div></section>' +
-        '<section class="eval-chart"><h4>Rente annuelle (retraits par an, % du capital)</h4><div id="wdYearly"></div></section>' +
-        '<section class="eval-chart"><h4>Délai avant le premier retrait (mois)</h4><div id="wdFirst"></div></section></div>';
-    }
-    h += wdVerdict(st);
+    h += '<div id="wdBottom"></div>';
     return h;
   }
-  /** Chiffres sur l'ensemble des simulations relancées. */
-  function wdSummaryHtml(st) {
-    const R = st.rows, D = R.map(wdDerive), med = (a) => { const v = a.slice().sort((x, y) => x - y); return v.length % 2 ? v[v.length >> 1] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2; };
-    const best = R.slice().sort((a, b) => b.w.wd - a.w.wd)[0], worst = R.slice().sort((a, b) => a.w.final / a.capital - b.w.final / b.capital)[0];
-    const totMonths = D.reduce((a, d) => a + d.monthly.length, 0), withM = D.reduce((a, d) => a + d.withMonths, 0);
-    const firsts = D.map((d) => d.first).filter(Boolean);
-    const li = (k, v) => '<li><span>' + k + '</span><b>' + v + '</b></li>';
-    return '<section class="eval-chart wd-summary"><h4>Sur l\'ensemble</h4><ul class="wd-facts">' +
-      li('Somme retirée médiane', money.format(med(R.map((r) => r.w.wd)))) +
-      li('Rente annuelle moyenne', num1.format(mean(D.map((d) => d.yearly))) + ' % du capital par an') +
-      li('Mois avec un retrait', Math.round((withM / Math.max(1, totMonths)) * 100) + ' % (' + withM + ' sur ' + totMonths + ')') +
-      li('Délai moyen avant le premier retrait', firsts.length ? num1.format(mean(firsts)) + ' mois' : 'aucun retrait') +
-      li('Retrait le plus élevé', '#' + best.idx + ' : ' + money.format(best.w.wd)) +
-      li('Compte final le plus bas', '#' + worst.idx + ' : ' + num1.format(wdDerive(worst).finalPct) + ' % du capital') +
-      li('Compte final médian', num1.format(med(D.map((d) => d.finalPct))) + ' % du capital') +
-      li('Écart moyen avec / sans retrait', signed(mean(R.map((r) => r.w.ret - r.b.ret)), num1) + ' points') + '</ul></section>';
+  /** Bas de la fenêtre : chiffres et 4 graphiques. Ensemble / sélection : une barre par simulation ;
+   *  une seule simulation choisie : une barre par mois de cette simulation. */
+  function renderWdBottom(st) {
+    const box = $('wdBottom');
+    if (!box) return;
+    const all = st.rows, foc = st.focus && st.focus.length ? all.filter((r) => st.focus.includes(r.key)) : all, one = foc.length === 1 ? foc[0] : null;
+    const li = (k, v, c) => '<li><span>' + k + '</span><b class="' + (c || '') + '">' + v + '</b></li>';
+    const sec = (id, title, hint) => '<section class="eval-chart"><h4>' + title + '</h4>' + (hint ? '<p class="hint">' + hint + '</p>' : '') + '<div id="' + id + '"></div></section>';
+    const med = (a) => { const v = a.filter(Number.isFinite).sort((x, y) => x - y); return v.length ? (v.length % 2 ? v[v.length >> 1] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2) : NaN; };
+    if (!one) {
+      const D = foc.map(wdDerive), title = foc.length === all.length ? 'Sur l\'ensemble' : 'Sur la sélection (' + foc.map((r) => '#' + r.idx).join(', ') + ')';
+      const best = foc.slice().sort((a, b) => b.w.wd - a.w.wd)[0], worst = foc.slice().sort((a, b) => a.w.final / a.capital - b.w.final / b.capital)[0];
+      const totMonths = D.reduce((a, d) => a + d.monthly.length, 0), withM = D.reduce((a, d) => a + d.withMonths, 0), firsts = D.map((d) => d.first).filter(Boolean);
+      box.innerHTML = '<section class="eval-chart wd-summary"><h4>' + esc(title) + '</h4><p class="hint">Cliquez sur une barre pour passer aux mois de cette simulation.</p><ul class="wd-facts">' +
+        li('Somme retirée médiane', money.format(med(foc.map((r) => r.w.wd)))) +
+        li('Rente annuelle moyenne', num1.format(mean(D.map((d) => d.yearly))) + ' % du capital par an') +
+        li('Mois avec un retrait', Math.round((withM / Math.max(1, totMonths)) * 100) + ' % (' + withM + ' sur ' + totMonths + ')') +
+        li('Délai moyen avant le premier retrait', firsts.length ? num1.format(mean(firsts)) + ' mois' : 'aucun retrait') +
+        li('Retrait le plus élevé', '#' + best.idx + ' : ' + money.format(best.w.wd)) +
+        li('Compte final le plus bas', '#' + worst.idx + ' : ' + num1.format(wdDerive(worst).finalPct) + ' % du capital') +
+        li('Compte final médian', num1.format(med(D.map((d) => d.finalPct))) + ' % du capital') +
+        li('Écart moyen avec / sans retrait', signed(mean(foc.map((r) => r.w.ret - r.b.ret)), num1) + ' points') + '</ul></section>' +
+        '<div class="eval-charts-grid wd-charts">' + sec('wdAmounts', 'Somme retirée par simulation') + sec('wdFinal', 'Compte final (en % du capital de départ)', 'Au-dessus de 100 % : le capital de départ est intact malgré les retraits.') +
+        sec('wdYearly', 'Rente annuelle (retraits par an, % du capital)') + sec('wdFirst', 'Délai avant le premier retrait (mois)') + '</div>';
+      const labels = foc.map((r) => '#' + r.idx);
+      const click = (i) => { st.focus = [foc[i].key]; mountWdCharts(st); wdPaintRows(st); $('wdBottom').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+      const range = (a, b) => { st.focus = foc.slice(a, b + 1).map((r) => r.key); mountWdCharts(st); wdPaintRows(st); };
+      const small = (id, values, fmt, titles) => F.chart.mountBars($(id), { labels: labels, values: values, format: fmt, height: 170, titles: titles, onBarClick: click, onBarRange: range });
+      small('wdAmounts', foc.map((r) => r.w.wd), wdCompact, foc.map((r) => '#' + r.idx + ' : ' + money.format(r.w.wd) + ' retirés en ' + r.w.n + ' fois'));
+      small('wdFinal', D.map((d) => d.finalPct - 100), (v) => num1.format(v + 100) + ' %', foc.map((r, i) => '#' + r.idx + ' : compte final ' + money.format(r.w.final) + ' (' + num1.format(D[i].finalPct) + ' % du capital de départ)'));
+      small('wdYearly', D.map((d) => d.yearly), (v) => num1.format(v) + ' %', foc.map((r, i) => '#' + r.idx + ' : ' + num1.format(D[i].yearly) + ' % du capital retiré par an'));
+      small('wdFirst', D.map((d) => d.first || 0), (v) => num1.format(v), foc.map((r, i) => '#' + r.idx + ' : ' + (D[i].first ? 'premier retrait au mois ' + D[i].first : 'aucun retrait')));
+      box.insertAdjacentHTML('beforeend', wdVerdict({ rows: foc }));
+      return;
+    }
+    // une seule simulation : les mois de la vraie simulation
+    const r = one, d = wdDerive(r), C = r.curve, cap = r.capital;
+    const lab = C.map((p, k) => (/^\d{4}-\d{2}$/.test(p.m || '') ? p.m.slice(5, 7) + '/' + p.m.slice(2, 4) : 'M' + (k + 1)));
+    const long = C.map((p, k) => (/^\d{4}-\d{2}$/.test(p.m || '') ? monthLong(p.m) : 'Mois ' + (k + 1)));
+    const amt = d.monthly.map((v) => (v * cap) / 100);
+    const accPct = C.map((p) => p.acc);
+    const ofAcc = C.map((p, k) => (d.monthly[k] > 0 ? (d.monthly[k] / (p.acc + d.monthly[k])) * 100 : 0)); // part du compte retirée ce mois-là
+    const gain = C.map((p, k) => { const prev = k ? C[k - 1].acc : 100; return prev > 0 ? ((p.acc + d.monthly[k] - prev) / prev) * 100 : 0; }); // résultat du mois avant retrait
+    const gainB = C.map((p, k) => { const prev = k ? C[k - 1].b : 100; return p.b != null && prev > 0 ? ((p.b - prev) / prev) * 100 : null; });
+    const kMax = amt.indexOf(Math.max(...amt)), kLow = accPct.indexOf(Math.min(...accPct)), kBest = gain.indexOf(Math.max(...gain)), kWorst = gain.indexOf(Math.min(...gain));
+    const wd = amt.filter((v) => v > 0);
+    box.innerHTML = '<section class="eval-chart wd-summary"><h4>Sur la simulation #' + r.idx + ', mois par mois</h4><p class="hint">' + frDate(r.from) + ' → ' + frDate(r.to) + ' · ' + C.length + ' mois. ' + (all.length > 1 ? 'Recliquez sur sa barre (ou « Revenir à l\'ensemble ») pour revenir aux graphiques de l\'ensemble.' : '') + '</p><ul class="wd-facts">' +
+      li('Retrait mensuel médian', wd.length ? money.format(med(wd)) : '—') +
+      li('Mois avec un retrait', d.withMonths + ' sur ' + C.length) +
+      li('Plus gros retrait', wd.length ? long[kMax] + ' : ' + money.format(amt[kMax]) : '—') +
+      li('Premier retrait', d.first ? long[d.first - 1] : 'aucun') +
+      li('Meilleur mois', long[kBest] + ' : ' + signed(gain[kBest], num1) + ' %', 'pos') +
+      li('Pire mois', long[kWorst] + ' : ' + signed(gain[kWorst], num1) + ' %', 'neg') +
+      li('Compte le plus bas', long[kLow] + ' : ' + num1.format(accPct[kLow]) + ' % du capital', accPct[kLow] < 100 ? 'neg' : '') +
+      li('Compte final', money.format(r.w.final) + ' (' + num1.format(d.finalPct) + ' %)', d.finalPct >= 100 ? 'pos' : 'neg') + '</ul></section>' +
+      '<div class="eval-charts-grid wd-charts">' + sec('wdAmounts', 'Somme retirée chaque mois') + sec('wdFinal', 'Compte en fin de mois (en % du capital de départ)', 'Au-dessus de 100 % : le capital de départ est intact.') +
+      sec('wdYearly', 'Part du compte retirée chaque mois (%)') + sec('wdFirst', 'Résultat de chaque mois (%)', 'Plein : avec retrait (avant le retrait du mois) ; pointillé : sans retrait.') + '</div>';
+    const bars = (id, values, fmt, titles, extra) => F.chart.mountBars($(id), Object.assign({ labels: lab, values: values, format: fmt, height: 170, titles: titles }, extra || {}));
+    bars('wdAmounts', amt, wdCompact, amt.map((v, k) => long[k] + ' : ' + money.format(v) + ' retirés'));
+    bars('wdFinal', accPct.map((v) => v - 100), (v) => num1.format(v + 100) + ' %', accPct.map((v, k) => long[k] + ' : compte à ' + num1.format(v) + ' % du capital (' + money.format((v * cap) / 100) + ')'));
+    bars('wdYearly', ofAcc, (v) => num1.format(v) + ' %', ofAcc.map((v, k) => long[k] + ' : ' + num1.format(v) + ' % du compte retiré'));
+    bars('wdFirst', gain, (v) => num1.format(v) + ' %', gain.map((v, k) => long[k] + ' : ' + signed(v, num1) + ' % avec retrait' + (gainB[k] != null ? ', ' + signed(gainB[k], num1) + ' % sans retrait' : '')),
+      { ghosts: gainB.map((v, i) => (v == null ? null : { i: i, value: v, kind: v > 0 ? 'up' : 'blue' })).filter(Boolean) });
+    box.insertAdjacentHTML('beforeend', wdVerdict({ rows: [r] }));
   }
   function wdVerdict(st) {
     const R = st.rows, d = mean(R.map((r) => r.w.ret - r.b.ret)), ruined = R.filter((r) => r.w.final < r.capital * 0.5).length, t = [];
@@ -3266,14 +3306,7 @@
       titles: R.map((r) => '#' + r.idx + ' · sans retrait ' + signed(r.b.ret, num1) + ' % · avec retrait ' + signed(r.w.ret, num1) + ' % · retiré ' + money.format(r.w.wd) + ' en ' + r.w.n + ' fois'),
       selected: sel, onBarClick: many ? click : null, onBarRange: many ? range : null,
     });
-    if (many) {
-      const D = R.map(wdDerive), labels = R.map((r) => '#' + r.idx);
-      const small = (id, values, fmt, titles) => F.chart.mountBars($(id), { labels: labels, values: values, format: fmt, height: 170, titles: titles, selected: sel, onBarClick: click, onBarRange: range });
-      small('wdAmounts', R.map((r) => r.w.wd), wdCompact, R.map((r) => '#' + r.idx + ' : ' + money.format(r.w.wd) + ' retirés en ' + r.w.n + ' fois'));
-      small('wdFinal', D.map((d) => d.finalPct - 100), (v) => num1.format(v + 100) + ' %', R.map((r, i) => '#' + r.idx + ' : compte final ' + money.format(r.w.final) + ' (' + num1.format(D[i].finalPct) + ' % du capital de départ)'));
-      small('wdYearly', D.map((d) => d.yearly), (v) => num1.format(v) + ' %', R.map((r, i) => '#' + r.idx + ' : ' + num1.format(D[i].yearly) + ' % du capital retiré par an'));
-      small('wdFirst', D.map((d) => d.first || 0), (v) => num1.format(v), R.map((r, i) => '#' + r.idx + ' : ' + (D[i].first ? 'premier retrait au mois ' + D[i].first : 'aucun retrait')));
-    }
+    renderWdBottom(st);
     renderWdFocus(st);
   }
   function wdPaintRows(st) { document.querySelectorAll('#wdBody tr[data-wd-row]').forEach((tr) => tr.classList.toggle('focus', (st.focus || []).includes(tr.dataset.wdRow))); }
@@ -3297,7 +3330,7 @@
       fact('Drawdown sans → avec retrait', '−' + num1.format(mean(F0.map((r) => r.b.dd))) + ' % → −' + num1.format(mean(F0.map((r) => r.w.dd))) + ' %') + '</div>' +
       '<div class="eval-charts-grid"><section><h5>Compte et retraits, mois par mois</h5><p class="hint">En % du capital de départ' + (one ? '' : ' (moyenne des simulations encore en cours ce mois-là)') + '.</p><div id="wdCurve"></div>' +
       '<div class="legend"><span><i style="background:var(--accent)"></i>Compte avec retrait</span><span><i style="background:var(--muted)"></i>Compte sans retrait</span><span><i style="background:var(--star-edge)"></i>Retraits cumulés</span><span><i style="background:var(--grid)"></i>Capital de départ (100 %)</span></div></section>' +
-      '<section><h5>Retrait de chaque mois</h5><p class="hint">' + (one ? 'Somme retirée chaque mois.' : 'Moyenne, en % du capital de départ.') + '</p><div id="wdMonthly"></div></section></div>';
+      (one ? '' : '<section><h5>Retrait de chaque mois</h5><p class="hint">Moyenne, en % du capital de départ.</p><div id="wdMonthly"></div></section>') + '</div>';
     box.innerHTML = h;
     const M = Math.max(...F0.map((r) => r.curve.length));
     const avgAt = (k, f) => { const v = F0.filter((r) => r.curve.length > k).map((r) => f(r.curve[k], r)).filter((x) => x != null && Number.isFinite(x)); return v.length ? mean(v) : NaN; };
@@ -3315,7 +3348,7 @@
       panels: [{ height: 220, format: (v) => num1.format(v) + ' %', series: series, refLines: [{ value: 100, color: 'var(--muted)' }] }],
       ariaLabel: 'Compte et retraits cumulés, mois par mois',
     });
-    F.chart.mountBars($('wdMonthly'), { labels: lab.map((s) => (/^\d{4}-\d{2}$/.test(s) ? s.slice(5, 7) + '/' + s.slice(2, 4) : s.replace('Mois ', 'M'))), values: mon.map((v) => (Number.isFinite(v) ? v : 0)), height: 200,
+    if ($('wdMonthly')) F.chart.mountBars($('wdMonthly'), { labels: lab.map((s) => (/^\d{4}-\d{2}$/.test(s) ? s.slice(5, 7) + '/' + s.slice(2, 4) : s.replace('Mois ', 'M'))), values: mon.map((v) => (Number.isFinite(v) ? v : 0)), height: 200,
       format: one ? (v) => wdCompact(v) : (v) => num1.format(v) + ' %', titles: mon.map((v, k) => lab[k] + ' : ' + (one ? money.format(v || 0) : num1.format(v || 0) + ' % du capital')) });
   }
   $('wdModal').addEventListener('click', (ev) => {

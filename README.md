@@ -202,7 +202,10 @@ ou régulier : chaque mois / tous les X jours, % du compte, somme fixe ou % de l
 - **clic sur une barre** (ou sur une ligne du tableau) : détail de cette simulation — indicateurs, courbes mois par mois
   (compte avec et sans retrait, retraits cumulés) et retrait de chaque mois ; glisser sur plusieurs barres : moyenne de la
   sélection ; « Revenir à l'ensemble » ;
-- « Sur l'ensemble » : somme retirée médiane, rente annuelle moyenne, mois avec un retrait, délai avant le premier
+- une seule simulation choisie : le bas de la fenêtre passe à ses **mois** (somme retirée chaque mois, compte en fin
+  de mois, part du compte retirée, résultat de chaque mois avec / sans retrait ; meilleur et pire mois, plus gros
+  retrait, compte le plus bas…) ;
+- « Sur l'ensemble » (ou la sélection) : somme retirée médiane, rente annuelle moyenne, mois avec un retrait, délai avant le premier
   retrait, extrêmes ; graphiques du compte final en % du capital, de la rente annuelle et du délai avant le premier retrait.
 **Appliquer à** : liste des simulations affichées — clic : une seule ; glisser la souris : plusieurs à la suite ;
 Maj (ou Ctrl) + clic : en ajouter ou retirer une à une ; « Tout le batch » / « Aucune » ; le bouton
