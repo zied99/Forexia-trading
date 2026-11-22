@@ -2789,35 +2789,100 @@
   // Onglet « Stratégie en cours » (par défaut) ou « Historique complet ».
   let evalScope = 'current';
   // ---------- Époques modifiables et « Analyseur d'époque » ----------
-  const ERA_KEY = 'forexia.eraCuts';
-  function eraCuts() { try { const c = JSON.parse(localStorage.getItem(ERA_KEY)); return Array.isArray(c) ? c : F.advisor.DEFAULT_CUTS; } catch (e) { return F.advisor.DEFAULT_CUTS; } }
-  function setEraCuts(c) { try { if (c) localStorage.setItem(ERA_KEY, JSON.stringify(c)); else localStorage.removeItem(ERA_KEY); } catch (e) { /* ignoré */ } renderEvaluation(); }
-  function eraEditorHtml(T) {
-    const isDef = JSON.stringify(eraCuts()) === JSON.stringify(F.advisor.DEFAULT_CUTS);
-    return '<div class="era-edit"><b>Époques</b><p class="hint">Une simulation compte dans l\'époque qui contient le <b>milieu</b> de sa période. ' +
-      (isDef ? 'Coupures par défaut, aux grands changements du marché des changes : ' + F.advisor.DEFAULT_CUTS.map((y, k) => { const e = F.events.cutEvents()[k]; return '<b>' + y + '</b> : ' + (e ? esc(e.title) + ' (' + frDate(e.date) + ')' : ''); }).join(' ; ') + '.' : 'Coupures personnalisées.') +
-      ' Modifiez les années de coupure (séparées par des virgules) :</p><div class="row buttons era-row"><input id="eraCutsIn" type="text" value="' + esc(eraCuts().join(', ')) + '" aria-label="Années de coupure des époques" placeholder="ex. 2005, 2015, 2020">' +
-      '<button type="button" class="secondary small" id="eraApply">Appliquer</button>' + (isDef ? '' : '<button type="button" class="ghost small" id="eraDefault">Par défaut</button>') +
-      (T.split ? '<button type="button" class="ghost small" id="eraSplit" title="Deux époques : avant et depuis la rupture détectée">Couper à la rupture (' + T.split.year + ')</button>' : '') + '</div>' +
-      '<div class="era-ctx"><b>Ce qui s\'est passé dans chaque époque</b>' + T.byEra.map((g) => {
-        const L = eventsFor(T.pair, { from: (g.era.from === -Infinity ? T.minYear : g.era.from) + '-01-01', to: (g.era.to === Infinity ? T.maxYear : g.era.to) + '-12-31', minImp: 3 }).filter((e) => e.source !== 'auto' || e.named);
-        return '<div class="era-ctx-row"><span class="era-ctx-name">' + esc(g.label) + '</span>' + (L.length ? L.map((e) => '<span class="ev-chip" title="' + esc(frDate(e.date) + ' · ' + (e.text || '')) + '">' + e.date.slice(0, 4) + ' · ' + esc(e.title) + '</span>').join('') : '<span class="hint">aucun événement majeur connu</span>') + '</div>';
-      }).join('') + '</div></div>';
+  // Vos époques : [{id, name, from, to}] (dates AAAA-MM-JJ ; '' = début / aujourd'hui). Vide = époques par défaut de Forexia.
+  const ERA_KEY = 'forexia.eras';
+  function userEras() { try { const c = JSON.parse(localStorage.getItem(ERA_KEY)); return Array.isArray(c) ? c.filter((x) => x && typeof x === 'object') : []; } catch (e) { return eraMem || []; } }
+  let eraMem = null, eraDraft = null; // eraDraft : époque en cours de saisie {id?, name, from, to}
+  function setUserEras(l) { eraMem = l; try { if (l && l.length) localStorage.setItem(ERA_KEY, JSON.stringify(l)); else localStorage.removeItem(ERA_KEY); } catch (e) { /* ignoré */ } eraDraft = null; renderEvaluation(); }
+  function activeEras() { const u = userEras(); return u.length ? u : F.advisor.DEFAULT_CUTS; }
+  const eraFromNorm = (er) => ({ id: 'e' + Math.random().toString(36).slice(2, 8), name: er.label, from: er.fromD === '0000-01-01' ? '' : er.fromD, to: er.toD === '9999-12-31' ? '' : er.toD });
+  const eraSpan = (er) => (er.from ? frDate(er.from) : 'le début') + ' → ' + (er.to ? frDate(er.to) : 'aujourd\'hui');
+  function eraFormHtml(d) {
+    return '<div class="era-form" id="eraForm"><b>' + (d.id ? 'Modifier l\'époque' : 'Nouvelle époque') + '</b>' +
+      '<label class="field">Nom<input id="eraFName" type="text" maxlength="60" value="' + esc(d.name || '') + '" placeholder="ex. Dollar fort, Après Covid…"></label>' +
+      '<label class="field">Du<input id="eraFFrom" type="date" value="' + esc(d.from || '') + '"></label>' +
+      '<label class="field">Au<input id="eraFTo" type="date" value="' + esc(d.to || '') + '"></label>' +
+      '<button type="button" class="primary small" id="eraFSave">' + (d.id ? 'Enregistrer' : 'Ajouter l\'époque') + '</button><button type="button" class="secondary small" id="eraFCancel">Annuler</button>' +
+      '<span class="hint">Date vide = depuis le début / jusqu\'à aujourd\'hui.</span></div>';
   }
-  let eraState = null; // { list, T, a, b, max, status, res }
+  function eraEditorHtml(T, list) {
+    const mine = userEras(), isMine = mine.length > 0;
+    const count = (er) => { const n = F.advisor.normEras([er])[0]; return list.filter((e) => { const m = F.advisor.midDate(e); return m >= n.fromD && m <= n.toD; }).length; };
+    let h = '<div class="era-edit" id="eraEdit"><div class="era-title"><b>Époques</b> <span class="ev-badge ' + (isMine ? 'user' : '') + '">' + (isMine ? 'vos époques' : 'par défaut (Forexia)') + '</span></div>' +
+      '<p class="hint">Une simulation compte dans l\'époque qui contient le <b>milieu</b> de sa période. ' +
+      (isMine ? '' : 'Époques par défaut, aux grands changements du marché des changes : ' + F.advisor.DEFAULT_CUTS.map((y, k) => { const e = F.events.cutEvents()[k]; return '<b>' + y + '</b> : ' + (e ? esc(e.title) + ' (' + frDate(e.date) + ')' : ''); }).join(' ; ') + '. ') +
+      '<b>Pour définir vos époques : glissez la souris sur la frise ci-dessus</b> pour sélectionner une plage, ou ajoutez-les à la main. L\'analyseur d\'époque utilise ensuite vos époques.</p>';
+    if (isMine) h += '<table class="ana-table era-table"><thead><tr><th>Époque</th><th>Plage</th><th>Simulations</th><th></th></tr></thead><tbody>' + mine.map((er) =>
+      '<tr><td><b>' + esc(er.name) + '</b></td><td>' + eraSpan(er) + '</td><td>' + count(er) + '</td><td class="era-acts"><button type="button" class="ghost small" data-era-edit="' + esc(er.id) + '" title="Modifier">✏️</button><button type="button" class="ghost small" data-era-del="' + esc(er.id) + '" title="Supprimer">🗑</button></td></tr>').join('') + '</tbody></table>' +
+      (T.outside ? '<p class="hint">' + T.outside + ' simulation' + (T.outside > 1 ? 's' : '') + ' en dehors de vos époques (non comptée' + (T.outside > 1 ? 's' : '') + ').</p>' : '');
+    if (eraDraft) h += eraFormHtml(eraDraft);
+    h += '<div class="row buttons era-row"><button type="button" class="secondary small" id="eraAddManual">＋ Ajouter une époque à la main</button>' +
+      '<span class="era-quick">Découper par années : <input id="eraCutsIn" type="text" placeholder="ex. 2015, 2020" aria-label="Années de coupure"><button type="button" class="secondary small" id="eraApply">Créer</button></span>' +
+      (T.split ? '<button type="button" class="ghost small" id="eraSplit" title="Deux époques : avant et depuis la rupture détectée">Couper à la rupture (' + T.split.year + ')</button>' : '') +
+      (isMine ? '<button type="button" class="ghost small" id="eraDefault">Revenir aux époques par défaut</button>' : '') + '</div>';
+    h += '<div class="era-ctx"><b>Ce qui s\'est passé dans chaque époque</b>' + T.byEra.map((g) => {
+      const L = eventsFor(T.pair, { from: g.era.fromD < T.minYear + '-01-01' ? T.minYear + '-01-01' : g.era.fromD, to: g.era.toD > T.maxYear + '-12-31' ? T.maxYear + '-12-31' : g.era.toD, minImp: 3 }).filter((e) => e.source !== 'auto' || e.named);
+      return '<div class="era-ctx-row"><span class="era-ctx-name">' + esc(g.label) + '</span>' + (L.length ? L.map((e) => '<span class="ev-chip" title="' + esc(frDate(e.date) + ' · ' + (e.text || '')) + '">' + e.date.slice(0, 4) + ' · ' + esc(e.title) + '</span>').join('') : '<span class="hint">aucun événement majeur connu</span>') + '</div>';
+    }).join('') + '</div></div>';
+    return h;
+  }
+  /** Sélection d'une plage à la souris (ou au doigt) sur la frise : propose une nouvelle époque. */
+  function wireTimeline() {
+    const svg = document.querySelector('#timeSection svg.tl-sel');
+    if (!svg) return;
+    const x0 = +svg.dataset.x0, x1 = +svg.dataset.x1, L = +svg.dataset.l, R = +svg.dataset.r, W = +svg.dataset.w, H = +svg.dataset.h;
+    const vx = (cx) => { const b = svg.getBoundingClientRect(); return ((cx - b.left) / b.width) * W; };
+    const toT = (v) => x0 + Math.max(0, Math.min(1, (v - L) / (W - L - R))) * (x1 - x0);
+    let start = null, rect = null;
+    svg.addEventListener('pointerdown', (ev) => {
+      if (ev.button) return;
+      start = Math.max(L, Math.min(W - R, vx(ev.clientX)));
+      rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rect.setAttribute('class', 'tl-selrect'); rect.setAttribute('y', '0'); rect.setAttribute('height', String(H)); rect.setAttribute('x', String(start)); rect.setAttribute('width', '0');
+      svg.appendChild(rect); svg.setPointerCapture(ev.pointerId); ev.preventDefault();
+    });
+    svg.addEventListener('pointermove', (ev) => {
+      if (start == null) return;
+      const v = Math.max(L, Math.min(W - R, vx(ev.clientX)));
+      rect.setAttribute('x', String(Math.min(start, v))); rect.setAttribute('width', String(Math.abs(v - start)));
+    });
+    svg.addEventListener('pointerup', (ev) => {
+      if (start == null) return;
+      const v = Math.max(L, Math.min(W - R, vx(ev.clientX))), a = toT(Math.min(start, v)), b = toT(Math.max(start, v));
+      start = null;
+      if (b - a < 20 * 864e5) { rect.remove(); return; } // simple clic
+      // arrondi au mois : début au 1er du mois le plus proche, fin au dernier jour du mois
+      const d0 = new Date(a + 15 * 864e5), d1 = new Date(b - 15 * 864e5);
+      const from = new Date(Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth(), 1)), to = new Date(Date.UTC(d1.getUTCFullYear(), d1.getUTCMonth() + 1, 0));
+      const iso = (t) => t.toISOString().slice(0, 10);
+      eraDraft = { name: 'Époque ' + (userEras().length + 1), from: iso(from), to: iso(to > from ? to : new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + 1, 0))) };
+      renderEvaluation();
+      const f = $('eraForm'); if (f) { f.scrollIntoView({ behavior: 'smooth', block: 'center' }); $('eraFName').select(); }
+    });
+  }
+  let eraState = null; // { list, T, a, b, max, status, res, opts }
+  // Choix d'époques de l'analyseur : vos époques (et « tout sauf … »), sinon les époques par défaut et la rupture.
   function eraOptions(T) {
-    const o = T.byEra.map((g) => ({ v: 'e:' + g.era.from + ':' + g.era.to, label: g.label + ' (' + g.n + ')' }));
-    if (T.split) o.unshift({ v: 'e:-Infinity:' + (T.split.year - 1), label: 'Avant ' + T.split.year + ' (' + T.split.before.n + ')' }, { v: 'e:' + T.split.year + ':Infinity', label: 'Depuis ' + T.split.year + ' (' + T.split.after.n + ')' });
+    const o = T.byEra.map((g) => ({ v: 'in|' + g.era.fromD + '|' + g.era.toD + '|' + g.label, label: g.label + ' (' + g.n + ')' }));
+    if (T.byEra.some((g) => g.era.custom)) {
+      T.byEra.forEach((g) => o.push({ v: 'out|' + g.era.fromD + '|' + g.era.toD + '|' + g.label, label: 'Tout sauf « ' + g.label + ' »' }));
+    } else if (T.split) {
+      o.unshift({ v: 'in|0000-01-01|' + (T.split.year - 1) + '-12-31|Avant ' + T.split.year, label: 'Avant ' + T.split.year + ' (' + T.split.before.n + ')' },
+        { v: 'in|' + T.split.year + '-01-01|9999-12-31|Depuis ' + T.split.year, label: 'Depuis ' + T.split.year + ' (' + T.split.after.n + ')' });
+    }
     return o;
   }
-  const eraRange = (v) => { const [, f, t] = v.split(':'); return { from: Number(f), to: Number(t) }; };
-  const eraLabelOf = (v) => { const r = eraRange(v); return r.from === -Infinity ? 'avant ' + (r.to + 1) : r.to === Infinity ? 'depuis ' + r.from : 'de ' + r.from + ' à ' + r.to; };
+  const eraRange = (v) => { const [kind, fromD, toD, label] = v.split('|'); return { out: kind === 'out', fromD: fromD, toD: toD, label: label }; };
+  const eraLabelOf = (v) => { const r = eraRange(v); return r.out ? 'hors de « ' + r.label + ' »' : /^(Avant|Depuis) \d{4}$/.test(r.label) ? r.label.toLowerCase() : 'pendant « ' + r.label + ' »'; };
+  const inEraV = (e, v) => { const r = eraRange(v), m = F.advisor.midDate(e), inside = m >= r.fromD && m <= r.toD; return r.out ? !inside : inside; };
   function openEraAnalyzer(list) {
-    const T = F.advisor.timeline(list, eraCuts()), opts = eraOptions(T);
-    if (opts.length < 2) return toast('Il faut des simulations dans au moins deux époques.', false);
-    const sorted = T.byEra.slice().sort((x, y) => x.robust - y.robust);
-    const a = T.split ? opts[T.split.after.robust > T.split.before.robust ? 0 : 1].v : 'e:' + sorted[0].era.from + ':' + sorted[0].era.to;
-    const b = T.split ? opts[T.split.after.robust > T.split.before.robust ? 1 : 0].v : 'e:' + sorted[sorted.length - 1].era.from + ':' + sorted[sorted.length - 1].era.to;
+    const T = F.advisor.timeline(list, activeEras()), opts = eraOptions(T);
+    if (opts.length < 2) return toast('Il faut des simulations dans au moins deux époques (ou une époque et « tout sauf » celle-ci).', false);
+    const custom = T.byEra.some((g) => g.era.custom), sorted = T.byEra.slice().sort((x, y) => x.robust - y.robust), vOf = (g) => 'in|' + g.era.fromD + '|' + g.era.toD + '|' + g.label;
+    let a, b;
+    if (!custom && T.split) { const up = T.split.after.robust > T.split.before.robust; a = opts[up ? 0 : 1].v; b = opts[up ? 1 : 0].v; }
+    else if (sorted.length >= 2) { a = vOf(sorted[0]); b = vOf(sorted[sorted.length - 1]); }
+    else { a = vOf(sorted[0]); b = 'out|' + sorted[0].era.fromD + '|' + sorted[0].era.toD + '|' + sorted[0].label; }
     eraState = { list: list, T: T, a: a, b: b, max: 10, status: 'idle' };
     $('eraModal').hidden = false; document.body.style.overflow = 'hidden';
     renderEraModal();
@@ -2839,7 +2904,7 @@
     if (checkRunning || st.status === 'run') return;
     st.a = $('eraA').value; st.b = $('eraB').value; st.max = Math.max(2, Math.min(30, Math.round(+$('eraMax').value) || 10));
     if (st.a === st.b) { st.status = 'err'; st.msg = 'Choisissez deux époques différentes.'; return renderEraModal(); }
-    const inR = (e, v) => { const r = eraRange(v), y = F.advisor.midYear(e); return y >= r.from && y <= r.to; };
+    const inR = inEraV;
     const usable = st.list.filter((e) => e.strategy && e.config && !e.tag);
     const names = {}; usable.forEach((e) => { names[e.name] = (names[e.name] || 0) + 1; });
     const name = Object.keys(names).sort((x, y) => names[y] - names[x])[0];
@@ -2895,9 +2960,10 @@
       '<div class="era-card good"><b>' + esc(cap(r.lb)) + '</b>' + B.n + ' simulations · ' + Math.round(B.win) + ' % gagnantes · médiane ' + pc(B.ret) + '</div></div>';
     h += '<section class="ana-sec warn"><h3>Ce qui a fait la différence</h3>' + (c.causes.length ? '<ol>' + c.causes.slice(0, 6).map((x) => '<li>' + x.text + '</li>').join('') + '</ol>' : '<p>Pas de différence marquée du marché entre les deux époques : l\'écart vient peut-être du hasard. Rechargez plus de simulations par époque.</p>') +
       '<p class="hint">Stratégie ' + ({ trend: 'de suivi de tendance', reversion: 'de retour à la moyenne', mixed: 'mixte' })[c.kind] + '. Les différences sont classées par importance.</p></section>';
-    const eraEv = (v) => { const r0 = eraRange(v), yrs = r.ctxA.concat(r.ctxB).map((x) => x.e); const y0 = Math.min(...yrs.map((e) => +e.from.slice(0, 4))), y1 = Math.max(...yrs.map((e) => +e.to.slice(0, 4)));
-      return eventsFor(yrs[0].pair, { from: Math.max(r0.from, y0) + '-01-01', to: Math.min(r0.to, y1) + '-12-31', minImp: 2 }).filter((e) => e.source !== 'auto' || e.named || e.imp >= 3).slice(-10); };
-    const evA = eraEv(st.a), evB = eraEv(st.b);
+    // événements pendant les simulations de chaque époque (de la plus ancienne date de début à la plus récente date de fin)
+    const eraEv = (L) => { const f = L.map((x) => x.e.from).sort()[0], t = L.map((x) => x.e.to).sort().pop();
+      return eventsFor(L[0].e.pair, { from: f, to: t, minImp: 2 }).filter((e) => (e.source !== 'auto' || e.named || e.imp >= 3) && L.some((x) => e.date >= x.e.from && e.date <= x.e.to)).slice(-12); };
+    const evA = eraEv(r.ctxA), evB = eraEv(r.ctxB);
     h += '<details class="ana-sec" open><summary><b>📰 Ce qui s\'est passé pendant chaque époque</b> (événements de marché)</summary><div class="era-sum ev-cols"><div><b>' + esc(cap(r.la)) + '</b><ul class="ev-list">' + (evA.map((e) => evLine(e)).join('') || '<li class="hint">Aucun événement connu.</li>') + '</ul></div>' +
       '<div><b>' + esc(cap(r.lb)) + '</b><ul class="ev-list">' + (evB.map((e) => evLine(e)).join('') || '<li class="hint">Aucun événement connu.</li>') + '</ul></div></div>' +
       '<p class="hint">Rapprochez ces événements des différences de marché ci-dessus (direction, tendance, volatilité). Ajoutez ou complétez des événements dans <button type="button" class="link" data-ev-open="' + esc(r.ctxA[0].e.pair) + '">Tous les événements</button>.</p></details>';
@@ -2932,35 +2998,69 @@
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('eraModal').hidden) closeEraModal(); });
   $('evalBody').addEventListener('click', (ev) => {
     const id = ev.target.id;
+    const listNow = () => evalFiltered(evalList()).map((x) => x.e);
     if (id === 'eraApply') {
       const c = ($('eraCutsIn').value.match(/\d{4}/g) || []).map(Number).filter((y) => y >= 1971 && y <= 2100);
       if (!c.length) return toast('Indiquez au moins une année de coupure (ex. 2020).', false);
-      return setEraCuts([...new Set(c)].sort((a, b) => a - b));
+      return setUserEras(F.advisor.erasFromCuts([...new Set(c)]).map(eraFromNorm));
     }
-    if (id === 'eraDefault') return setEraCuts(null);
-    if (id === 'eraSplit') { const T = F.advisor.timeline(evalFiltered(evalList()).map((x) => x.e), eraCuts()); if (T.split) setEraCuts([T.split.year]); return; }
+    if (id === 'eraDefault') return setUserEras([]);
+    if (id === 'eraSplit') { const T = F.advisor.timeline(listNow(), activeEras()); if (T.split) setUserEras(F.advisor.erasFromCuts([T.split.year]).map(eraFromNorm)); return; }
+    if (id === 'eraAddManual') { eraDraft = { name: 'Époque ' + (userEras().length + 1), from: '', to: '' }; renderEvaluation(); const f = $('eraForm'); if (f) { f.scrollIntoView({ behavior: 'smooth', block: 'center' }); $('eraFName').select(); } return; }
+    if (id === 'eraFCancel') { eraDraft = null; return renderEvaluation(); }
+    if (id === 'eraFSave') {
+      const name = $('eraFName').value.trim().replace(/\|/g, '/').slice(0, 60) || 'Époque', from = $('eraFFrom').value, to = $('eraFTo').value;
+      if (from && to && from > to) return toast('La date de début doit précéder la date de fin.', false);
+      const l = userEras().slice();
+      // première époque personnalisée : on part de zéro (les époques par défaut ne sont pas recopiées)
+      if (eraDraft && eraDraft.id) { const k = l.findIndex((x) => x.id === eraDraft.id); if (k >= 0) l[k] = { id: eraDraft.id, name: name, from: from, to: to }; }
+      else l.push({ id: 'e' + Date.now().toString(36), name: name, from: from, to: to });
+      l.sort((x, y) => (x.from || '0000') < (y.from || '0000') ? -1 : 1);
+      return setUserEras(l);
+    }
+    const ed = ev.target.closest('[data-era-edit]');
+    if (ed) { const er = userEras().find((x) => x.id === ed.dataset.eraEdit); if (er) { eraDraft = Object.assign({}, er); renderEvaluation(); const f = $('eraForm'); if (f) f.scrollIntoView({ behavior: 'smooth', block: 'center' }); } return; }
+    const dl = ev.target.closest('[data-era-del]');
+    if (dl) return setUserEras(userEras().filter((x) => x.id !== dl.dataset.eraDel));
     if (id === 'eraAnalyze') return openEraAnalyzer(evalFiltered(evalList()).map((x) => x.e));
   });
-  $('evalBody').addEventListener('keydown', (ev) => { if (ev.target.id === 'eraCutsIn' && ev.key === 'Enter') $('eraApply').click(); });
+  $('evalBody').addEventListener('keydown', (ev) => {
+    if (ev.target.id === 'eraCutsIn' && ev.key === 'Enter') $('eraApply').click();
+    if (['eraFName', 'eraFFrom', 'eraFTo'].includes(ev.target.id) && ev.key === 'Enter') $('eraFSave').click();
+  });
 
   // ---------- Analyse temporelle (graphiques de l'évaluation) ----------
   const tDate = (d) => Date.parse(String(d).slice(0, 10) + 'T00:00:00Z');
   /** Frise : chaque simulation est un trait de sa date de début à sa date de fin, à la hauteur de son résultat. */
   function timelineSvg(list, T, cap) {
-    const W = 800, H = 240, L = 46, R = 10, TOP = 22, B = 26;
+    const W = 800, H = 256, L = 46, R = 10, TOP = 40, B = 26;
     const x0 = Date.UTC(T.minYear, 0, 1), x1 = Date.UTC(T.maxYear + 1, 0, 1);
     const x = (t) => L + ((t - x0) / (x1 - x0)) * (W - L - R), y = (v) => TOP + ((cap - Math.max(-cap, Math.min(cap, v))) / (2 * cap)) * (H - TOP - B);
     let g = '';
     const band = (z, c) => z ? '<rect class="tl-band ' + c + '" x="' + x(Date.UTC(z.from, 0, 1)).toFixed(1) + '" y="' + TOP + '" width="' + (x(Date.UTC(z.to + 1, 0, 1)) - x(Date.UTC(z.from, 0, 1))).toFixed(1) + '" height="' + (H - TOP - B) + '"><title>Époque ' + (c === 'weak' ? 'faible' : 'forte') + ' : ' + esc(z.label) + '</title></rect>' : '';
-    g += band(T.weak, 'weak') + band(T.strong, 'strong');
+    const mine = T.eras.filter((er) => er.custom);
+    if (mine.length) {
+      // vos époques : bandes colorées avec leur nom
+      const xs = (d) => x(Math.max(x0, Math.min(x1, Date.parse(d === '0000-01-01' ? '1900-01-01' : d === '9999-12-31' ? '2999-12-31' : d))));
+      mine.forEach((er, k) => {
+        const a = xs(er.fromD), b = xs(er.toD);
+        if (b - a < 1) return;
+        g += '<rect class="tl-era c' + (k % 4) + '" x="' + a.toFixed(1) + '" y="' + TOP + '" width="' + (b - a).toFixed(1) + '" height="' + (H - TOP - B) + '"><title>' + esc(er.label) + '</title></rect>' +
+          '<text class="tl-era-label" x="' + (a + 4).toFixed(1) + '" y="' + (H - B - 6) + '">' + esc(er.label.length > Math.max(4, (b - a) / 6.5) ? er.label.slice(0, Math.max(3, Math.floor((b - a) / 6.5))) + '…' : er.label) + '</text>';
+      });
+    } else g += band(T.weak, 'weak') + band(T.strong, 'strong');
     for (const gp of T.gaps) g += '<rect class="tl-gap" x="' + x(Date.UTC(gp.from, 0, 1)).toFixed(1) + '" y="' + TOP + '" width="' + (x(Date.UTC(gp.to + 1, 0, 1)) - x(Date.UTC(gp.from, 0, 1))).toFixed(1) + '" height="' + (H - TOP - B) + '"><title>Aucune simulation en ' + (gp.from === gp.to ? gp.from : gp.from + '–' + gp.to) + '</title></rect>';
     const span = T.maxYear - T.minYear + 1, step = Math.max(1, Math.ceil(span / 12));
     for (let yv = T.minYear; yv <= T.maxYear + 1; yv += step) g += '<line class="tl-grid" x1="' + x(Date.UTC(yv, 0, 1)).toFixed(1) + '" x2="' + x(Date.UTC(yv, 0, 1)).toFixed(1) + '" y1="' + TOP + '" y2="' + (H - B) + '"/>' + (yv <= T.maxYear ? '<text class="tl-tick" x="' + x(Date.UTC(yv, 6, 1)).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle">' + yv + '</text>' : '');
     for (const v of [cap, cap / 2, 0, -cap / 2, -cap]) g += '<text class="tl-tick" x="' + (L - 6) + '" y="' + (y(v) + 4).toFixed(1) + '" text-anchor="end">' + (v > 0 ? '+' : v < 0 ? '−' : '') + Math.round(Math.abs(v)) + '%</text>';
     g += '<line class="tl-zero" x1="' + L + '" x2="' + (W - R) + '" y1="' + y(0).toFixed(1) + '" y2="' + y(0).toFixed(1) + '"/>';
+    // numéros des événements sur deux rangées quand ils sont trop proches
+    const lastX = [-1e9, -1e9];
     (T.events || []).forEach((ev, k) => {
-      const xe = x(tDate(ev.date)).toFixed(1);
-      g += '<g class="tl-ev"><line x1="' + xe + '" x2="' + xe + '" y1="' + (TOP - 2) + '" y2="' + (H - B) + '"/><circle cx="' + xe + '" cy="' + (TOP - 10) + '" r="8"/><text x="' + xe + '" y="' + (TOP - 6.5) + '" text-anchor="middle">' + (k + 1) + '</text>' +
+      const xv = x(tDate(ev.date)), row = xv - lastX[0] >= 18 ? 0 : xv - lastX[1] >= 18 ? 1 : 0;
+      lastX[row] = xv;
+      const cy = row ? TOP - 28 : TOP - 10, xe = xv.toFixed(1);
+      g += '<g class="tl-ev"><line x1="' + xe + '" x2="' + xe + '" y1="' + (cy + 8) + '" y2="' + (H - B) + '"/><circle cx="' + xe + '" cy="' + cy + '" r="8"/><text x="' + xe + '" y="' + (cy + 3.5) + '" text-anchor="middle">' + (k + 1) + '</text>' +
         '<title>' + frDate(ev.date) + ' · ' + esc(ev.title) + '</title></g>';
     });
     const all = evalList();
@@ -2968,7 +3068,7 @@
       const xa = x(tDate(e.from)), xb = Math.max(xa + 3, x(tDate(e.to))), yy = y(e.returnPct).toFixed(1);
       g += '<line class="tl-run ' + (e.returnPct > 0 ? 'up' : 'down') + '" x1="' + xa.toFixed(1) + '" x2="' + xb.toFixed(1) + '" y1="' + yy + '" y2="' + yy + '"><title>#' + (all.findIndex((z) => z.key === e.key) + 1) + ' · ' + frDate(e.from) + ' → ' + frDate(e.to) + ' : ' + signed(e.returnPct, num1) + ' %</title></line>';
     }
-    return '<svg class="tl-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Résultat de chaque simulation selon sa période">' + g + '</svg>';
+    return '<svg class="tl-svg tl-sel" viewBox="0 0 ' + W + ' ' + H + '" data-x0="' + x0 + '" data-x1="' + x1 + '" data-l="' + L + '" data-r="' + R + '" data-w="' + W + '" data-h="' + H + '" role="img" aria-label="Résultat de chaque simulation selon sa période ; glissez pour sélectionner une époque">' + g + '</svg>';
   }
   /** Barres par année (année du milieu de la période) : résultat médian, et part de gagnantes au-dessus. */
   function yearBarsSvg(T, cap) {
@@ -2988,7 +3088,7 @@
   }
   let timeLotOpt = null; // {n, from, to} proposé dans la section
   function timeSectionHtml(list) {
-    const T = F.advisor.timeline(list, eraCuts());
+    const T = F.advisor.timeline(list, activeEras());
     if (T.n < 2) return '';
     const mainPair = (() => { const c = {}; list.forEach((e) => { c[e.pair] = (c[e.pair] || 0) + 1; }); return Object.keys(c).sort((a, b) => c[b] - c[a])[0]; })();
     T.pair = mainPair;
@@ -3010,15 +3110,17 @@
       '<p class="hint">La stratégie marche-t-elle mieux à certaines époques ? Chaque simulation est placée selon ses dates.</p>' +
       '<div class="modal-note">' + T.verdict.map((v) => '<p>' + v + '</p>').join('') + '</div>' +
       (warn.length ? '<div class="banner warn">' + warn.map((w) => '<p>' + w + '</p>').join('') + '</div>' : '') +
-      '<h5>Résultat de chaque simulation selon sa période</h5><p class="hint">Un trait = une simulation (du début à la fin de sa période), en hauteur son résultat.' + (T.weak ? ' Fond rouge : époque faible ; vert : époque forte.' : '') + ' Numéros violets : grands événements de marché (' + esc(mainPair) + ').</p>' + timelineSvg(list, T, cap) +
+      '<h5>Résultat de chaque simulation selon sa période</h5><p class="hint">Un trait = une simulation (du début à la fin de sa période), en hauteur son résultat.' + (T.eras.some((er) => er.custom) ? ' Bandes colorées : vos époques.' : T.weak ? ' Fond rouge : époque faible ; vert : époque forte.' : '') + ' Numéros violets : grands événements de marché (' + esc(mainPair) + '). <b>Glissez la souris sur la frise pour définir une époque.</b></p>' + timelineSvg(list, T, cap) +
       (T.events.length ? '<details class="ev-legend"><summary>Événements numérotés sur la frise (' + T.events.length + ')</summary><ul class="ev-list">' + T.events.map((e, k) => evLine(e, k + 1)).join('') + '</ul></details>' : '') +
       '<div class="row buttons"><button type="button" class="secondary small" data-ev-open="' + esc(mainPair) + '">📰 Tous les événements de ' + esc(mainPair) + '</button></div>' +
       '<h5>Par année</h5><p class="hint">Résultat médian des simulations dont la période est centrée sur l\'année ; au-dessus, la part de gagnantes.</p>' + yearBarsSvg(T, cap) +
       '<div class="era-head"><h5>Par époque</h5><button type="button" class="primary small" id="eraAnalyze">🔬 Analyseur d\'époque</button></div>' +
       '<p class="hint">L\'analyseur d\'époque compare deux époques (marché, trades) pour expliquer ce qui a fait la différence, et teste des corrections.</p>' +
-      '<div class="eval-charts-grid">' + hbars('Résultat médian par époque', T.byEra) + '</div>' + eraEditorHtml(T) +
+      '<div class="eval-charts-grid">' + hbars('Résultat médian par époque', T.byEra) + '</div>' +
+      (T.emptyEras.length ? '<p class="hint">Sans simulation : ' + T.emptyEras.map(esc).join(', ') + '.</p>' : '') + eraEditorHtml(T, list) +
       '<div class="time-actions"><b>Vérifier une époque</b><p class="hint">Lance un lot de tests aléatoires limité à ces années (un nouveau batch). Comparez ensuite les deux époques dans « Voir toutes les simulations ».</p>' +
-      '<div class="row buttons">' + (T.weak ? lotBtn(T.weak, '10 tests ' + T.weak.label + ' (' + T.weak.from + '–' + T.weak.to + ')') + lotBtn(T.strong, '10 tests ' + T.strong.label + ' (' + T.strong.from + '–' + T.strong.to + ')') : '') +
+      '<div class="row buttons">' + T.eras.filter((er) => er.custom).map((er) => lotBtn({ from: er.from === -Infinity ? Math.max(1996, T.minYear) : er.from, to: er.to === Infinity ? new Date().getUTCFullYear() : er.to }, '10 tests sur « ' + esc(er.label) + ' »')).join('') +
+      (T.weak && !T.eras.some((er) => er.custom) ? lotBtn(T.weak, '10 tests ' + T.weak.label + ' (' + T.weak.from + '–' + T.weak.to + ')') + lotBtn(T.strong, '10 tests ' + T.strong.label + ' (' + T.strong.from + '–' + T.strong.to + ')') : '') +
       (worst ? '<button type="button" class="secondary small" data-time-ana="' + esc(worst.key) + '">🔍 Analyser la pire simulation ' + esc(T.weak.label) + ' (#' + (evalList().findIndex((z) => z.key === worst.key) + 1) + ')</button>' : '') + '</div>' +
       '<div class="row buttons time-lot">Lot de <input id="tlN" type="number" min="1" max="100" value="' + timeLotOpt.n + '"> tests entre <input id="tlFrom" type="number" min="1970" max="2100" value="' + timeLotOpt.from + '"> et <input id="tlTo" type="number" min="1970" max="2100" value="' + timeLotOpt.to + '">' +
       '<button type="button" class="primary small" id="tlRun">🎲 Lancer</button></div></div></section>';
@@ -3345,7 +3447,7 @@
     }
     const list = shown.map((x) => x.e);
     const filt = shown.length < all.length && !evalBatch;
-    if (evalView === 'charts') { renderEvalCharts(list, filt); return addBatchBanner(); }
+    if (evalView === 'charts') { renderEvalCharts(list, filt); wireTimeline(); return addBatchBanner(); }
     if (evalView === 'reco') { renderEvalReco(list, filt); return addBatchBanner(); }
     const p = (v) => '<span class="' + cls(v) + '">' + signed(v, num2) + ' %</span>';
     const rows = shown.map(({ e, i }) => '<tr>' +

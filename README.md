@@ -220,6 +220,12 @@ stratégie marche mieux à certaines époques :
 d'actifs) et 2020 (Covid, inflation, hausse des taux) ; une simulation compte dans l'époque du milieu de sa période.
 Les années de coupure se modifient sous le graphique « Par époque » (ou « Couper à la rupture »).
 
+**Vos époques** : glissez la souris sur la frise de l'analyse temporelle pour sélectionner une plage (arrondie au
+mois), donnez-lui un nom, ou ajoutez une époque à la main (nom, du, au ; date vide = début ou aujourd'hui). Elles
+s'affichent en bandes colorées sur la frise, se modifient (✏️) ou se suppriment (🗑), et remplacent les époques par
+défaut dans les graphiques et l'analyseur d'époque (avec aussi « Tout sauf « … » » pour comparer une époque au reste).
+« Découper par années » crée des époques à partir d'années de coupure ; « Revenir aux époques par défaut » les efface.
+
 **🔬 Analyseur d'époque** : compare deux époques (par défaut, avant et depuis la rupture détectée). Les simulations
 sont rechargées pour mesurer le marché de chaque époque (direction du prix par an, temps au-dessus de l'EMA 200, ADX,
 temps en tendance, netteté du mouvement, retour à la moyenne, volatilité, chocs) et les trades (achats, ventes, en

@@ -701,3 +701,21 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 .ev-cols .ev-list { max-height: 320px; overflow: auto; }
 @media (max-width: 640px) { .ev-form { grid-template-columns: 1fr 1fr; } .era-ctx-name { min-width: 0; width: 100%; } }
 #evalBody .era-edit button, #evalBody .time-actions button { width: auto !important; flex: 0 0 auto !important; }
+
+/* Vos époques */
+.tl-svg.tl-sel { cursor: crosshair; touch-action: pan-y; user-select: none; }
+.tl-svg .tl-selrect { fill: var(--accent); opacity: .18; stroke: var(--accent); stroke-dasharray: 4 3; }
+.tl-svg .tl-era { opacity: .16; }
+.tl-svg .tl-era.c0 { fill: #2563eb; } .tl-svg .tl-era.c1 { fill: #d97706; } .tl-svg .tl-era.c2 { fill: #059669; } .tl-svg .tl-era.c3 { fill: #db2777; }
+.tl-svg .tl-era-label { font-size: 11px; font-weight: 700; fill: var(--text); opacity: .75; }
+.era-title { display: flex; align-items: center; gap: 8px; }
+.era-table { margin: 6px 0; }
+.era-acts { white-space: nowrap; text-align: right; }
+.era-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; margin: 8px 0; padding: 10px; border: 1px solid var(--accent); border-radius: 10px; background: var(--panel-2); }
+.era-form > b { width: 100%; }
+.era-form .field { flex: 0 1 180px; }
+.era-form .field:first-of-type { flex: 1 1 200px; }
+.era-form button { width: auto !important; flex: 0 0 auto !important; }
+.era-quick { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.era-quick input { width: 130px; }
+.era-edit .row.buttons, .time-actions .row.buttons, .time-sec > .row.buttons, .ev-panel .row.buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }

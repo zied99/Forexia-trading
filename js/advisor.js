@@ -159,11 +159,22 @@
   function erasFromCuts(cuts) {
     const c = [...new Set((cuts || DEFAULT_CUTS).map(Number).filter((y) => y >= 1971 && y <= 2100))].sort((a, b) => a - b);
     const def = JSON.stringify(c) === JSON.stringify(DEFAULT_CUTS), out = [];
-    if (!c.length) return [{ from: -Infinity, to: Infinity, label: 'Toute la période' }];
+    if (!c.length) return [{ from: -Infinity, to: Infinity, label: 'Toute la période', fromD: '0000-01-01', toD: '9999-12-31' }];
     out.push({ from: -Infinity, to: c[0] - 1, label: 'Avant ' + c[0] });
     for (let i = 0; i + 1 < c.length; i++) out.push({ from: c[i], to: c[i + 1] - 1, label: c[i] + (c[i + 1] - 1 > c[i] ? ' – ' + (c[i + 1] - 1) : '') + (def ? DEFAULT_NAMES[c[i]] || '' : '') });
     out.push({ from: c[c.length - 1], to: Infinity, label: 'Depuis ' + c[c.length - 1] });
-    return out;
+    return out.map((e) => Object.assign(e, { fromD: e.from === -Infinity ? '0000-01-01' : e.from + '-01-01', toD: e.to === Infinity ? '9999-12-31' : e.to + '-12-31' }));
+  }
+  /** Date (AAAA-MM-JJ) du milieu de la période testée. */
+  function midDate(e) { return new Date((Date.parse(e.from.slice(0, 10)) + Date.parse(e.to.slice(0, 10))) / 2).toISOString().slice(0, 10); }
+  /**
+   * Époques : années de coupure [2000, 2008…] (époques par défaut), ou époques définies par l'utilisateur
+   * [{id, name, from: 'AAAA-MM-JJ' ou '' (début), to: 'AAAA-MM-JJ' ou '' (aujourd'hui)}].
+   */
+  function normEras(eras) {
+    if (!eras || !eras.length || typeof eras[0] === 'number') return erasFromCuts(eras && eras.length ? eras : DEFAULT_CUTS);
+    return eras.map((er) => ({ id: er.id, label: er.name || er.label || 'Époque', custom: true, fromD: er.from || '0000-01-01', toD: er.to || '9999-12-31',
+      from: er.from ? +er.from.slice(0, 4) : -Infinity, to: er.to ? +er.to.slice(0, 4) : Infinity }));
   }
   const ERAS = erasFromCuts(DEFAULT_CUTS);
   /** Corrélation de rang (Spearman) entre l'année et le résultat : > 0 = meilleur avec le temps. */
@@ -180,8 +191,8 @@
    *   split: {year, before, after} (rupture la plus nette, au moins 3 simulations de chaque côté) ou null,
    *   verdict: [phrases], weak: {from, to, label} | null, strong: idem, gaps: [{from, to}] }
    */
-  function timeline(list, cuts) {
-    const eras = erasFromCuts(cuts);
+  function timeline(list, erasIn) {
+    const eras = normEras(erasIn);
     const L = list.filter((e) => e.from && e.to);
     const out = { n: L.length, byYear: [], byEra: [], corr: 0, split: null, verdict: [], weak: null, strong: null, gaps: [] };
     if (!L.length) return out;
@@ -190,7 +201,11 @@
     const yrs = new Map();
     for (const e of L) { const y = midYear(e); if (!yrs.has(y)) yrs.set(y, []); yrs.get(y).push(e); }
     out.byYear = [...yrs].sort((a, b) => a[0] - b[0]).map(([y, l]) => Object.assign(groupStats(String(y), String(y), l), { year: y }));
-    out.byEra = eras.map((er) => { const l = L.filter((e) => { const y = midYear(e); return y >= er.from && y <= er.to; }); return l.length ? Object.assign(groupStats(er.label, er.label, l), { era: er }) : null; }).filter(Boolean);
+    const inEra = (e, er) => { const m = midDate(e); return m >= er.fromD && m <= er.toD; };
+    out.eras = eras;
+    out.byEra = eras.map((er) => { const l = L.filter((e) => inEra(e, er)); return l.length ? Object.assign(groupStats(er.label, er.label, l), { era: er }) : null; }).filter(Boolean);
+    out.emptyEras = eras.filter((er) => !L.some((e) => inEra(e, er))).map((er) => er.label);
+    out.outside = L.filter((e) => !eras.some((er) => inEra(e, er))).length;
     if (L.length >= 4) out.corr = rankCorr(L.map(midYear), L.map((e) => e.returnPct));
     // rupture : l'année qui sépare le mieux les bons et les mauvais résultats
     const cands = [...new Set(L.map(midYear))].sort((a, b) => a - b).slice(1);
@@ -233,5 +248,5 @@
     return out;
   }
 
-  F.advisor = { timeline, midYear, ERAS, erasFromCuts, DEFAULT_CUTS, analyze, horizonOf, withdrawOf, groupBy, scoreOf, months, HORIZON_LABEL };
+  F.advisor = { timeline, midYear, midDate, normEras, ERAS, erasFromCuts, DEFAULT_CUTS, analyze, horizonOf, withdrawOf, groupBy, scoreOf, months, HORIZON_LABEL };
 })(typeof window !== 'undefined' ? window : globalThis);

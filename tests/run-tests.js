@@ -812,6 +812,16 @@ test('Événements de marché : base, filtre par paire, détection et apprentiss
   st.edits[id].hidden = true;
   if (Ev.list(st, 'GBP/USD').some((e) => e.id === id)) throw new Error('masquage ignoré');
 });
+test('Époques définies par l\'utilisateur (plages de dates)', () => {
+  const Ad = globalThis.Forexia.advisor, L = [];
+  for (const y of [1998, 1999, 2000, 2018, 2019, 2021, 2022]) L.push({ from: y + '-01-01', to: y + '-12-31', returnPct: y < 2010 ? -10 : 20, maxDrawdownPct: 10 });
+  const T = Ad.timeline(L, [{ id: 'a', name: 'Anciennes', from: '1997-06-01', to: '2000-12-31' }, { id: 'b', name: 'Récentes', from: '2020-01-01', to: '' }, { id: 'c', name: 'Vide', from: '2005-01-01', to: '2006-12-31' }]);
+  eq(T.byEra.map((g) => g.label + ':' + g.n).join('|'), 'Anciennes:3|Récentes:2');
+  eq(T.emptyEras.join(), 'Vide');
+  eq(T.outside, 2); // 2018 et 2019 hors des époques
+  eq(Ad.midDate({ from: '2020-01-01', to: '2020-12-31' }), '2020-07-01');
+  eq(Ad.timeline(L).byEra.length > 0, true); // sans époques : celles par défaut
+});
 test('Pas de requête avant 1999 (début des cours BCE)', async () => {
     calls.length = 0;
     const bars = await D.fetchFrankfurter('EUR/USD', new Date('1990-01-01'), new Date('1999-06-30'));
