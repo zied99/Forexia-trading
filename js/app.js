@@ -3082,6 +3082,7 @@
   }
   // Résultats déjà calculés pour cette mécanique et ces simulations : affichés tout de suite, sinon calcul.
   function wdShowCached(autoRun) {
+    if (wdState.view === 'compare') { wdState.cmp.status = 'idle'; wdState.cmp.msg = ''; return renderWdModal(); }
     const st = wdState, T = wdTargets(), cache = wdResStore.get(), k = wdKey(st.w);
     const rows = T.map((e) => cache[k + '#' + e.key]).filter(Boolean);
     // résultats déjà calculés (tous ou une partie) : affichés sans relancer ; le reste se calcule avec « Resimuler »
@@ -3110,7 +3111,7 @@
         ' <small>' + durationLabel(e.from, e.to) + '</small> <span class="' + cls(e.returnPct) + '">' + signed(e.returnPct, num1) + ' %</span></li>').join('') + '</ul></div>' +
       '<div class="wd-presets"><label class="field">Mécanique enregistrée<select id="wdPreset"><option value="">—</option>' + pres.map((p) => '<option value="' + esc(p.id) + '"' + (st.presetId === p.id ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('') + '</select></label>' +
       (st.presetId ? '<button type="button" class="ghost small" id="wdPresetDel" title="Supprimer cette mécanique">🗑</button>' : '') +
-      '<button type="button" class="secondary small" id="wdSave">💾 Enregistrer cette mécanique</button><button type="button" class="ghost small" id="wdToForm" title="Mettre cette mécanique dans la section « Retrait fictif des gains » du formulaire">Utiliser dans le formulaire</button></div>' +
+      '<button type="button" class="secondary small" id="wdSave">💾 Enregistrer cette mécanique</button><button type="button" class="secondary small wd-cmp-btn" id="wdCmp" title="Comparer deux mécaniques enregistrées sur les simulations choisies">⚖️ Comparer</button><button type="button" class="ghost small" id="wdToForm" title="Mettre cette mécanique dans la section « Retrait fictif des gains » du formulaire">Utiliser dans le formulaire</button></div>' +
       '<div class="wd-fields"><label class="field">Type de retrait<select id="wdMode">' + opt(w.mode, [['threshold', 'Quand le gain atteint un seuil'], ['periodic', 'Régulier : chaque mois ou tous les X jours']]) + '</select></label>' +
       (per ? '<label class="field">Fréquence<select id="wdEvery">' + opt(w.every, [['month', 'Chaque mois'], ['days', 'Tous les X jours']]) + '</select></label>' +
         (w.every === 'days' ? '<label class="field">Tous les (jours, min. 15)<input id="wdDays" type="number" min="15" max="366" value="' + esc(w.days) + '"></label>' : '') +
@@ -3125,6 +3126,12 @@
     const st = wdState, n = wdTargets().length;
     let h = '<div class="modal-note"><b>Ce qu\'on fait :</b> ' + (n > 1 ? 'chaque simulation choisie (' + n + ') est relancée' : 'la simulation choisie est relancée') + ' sur les <b>mêmes dates</b> et avec les <b>mêmes réglages</b>, une fois <b>sans retrait</b> et une fois avec la <b>mécanique de retrait fictif</b> ci-dessous : l\'argent retiré est mis à l\'abri et ne sert plus à trader. ' +
       'Le résultat « avec retrait » compte le compte final <b>plus</b> les sommes retirées. Les simulations du tableau ne sont pas modifiées.</div>' + wdFormHtml(st.w);
+    if (st.view === 'compare') {
+      const pick = $('wdPick'), sc = pick ? pick.scrollTop : 0;
+      $('wdBody').innerHTML = h + wdCompareHtml(st);
+      if ($('wdPick')) $('wdPick').scrollTop = sc;
+      return mountWdCompare(st);
+    }
     if (st.status === 'run') h += '<div class="modal-loading"><span class="spinner"></span>' + esc(st.msg || '') + ' <button type="button" class="secondary small" id="wdStop">Arrêter</button></div>';
     if (st.status === 'err') h += '<p class="val ko">' + esc(st.msg) + '</p>';
     if (st.status === 'idle' && !st.rows) h += '<p class="hint wd-idle">' + (st.presetId ? 'Cette mécanique n\'a pas encore de résultats sur ' + (n > 1 ? 'ces simulations' : 'cette simulation') + ' : cliquez sur « Resimuler ».' : 'Choisissez la mécanique puis « Resimuler ».') + ' Les résultats calculés sont gardés : en rechoisissant la mécanique, ils s\'affichent sans relancer.</p>';
@@ -3159,21 +3166,15 @@
     const years = Math.max(1 / 12, r.curve.length / 12);
     return { monthly: monthly, first: first >= 0 ? first + 1 : null, withMonths: monthly.filter((v) => v > 0).length, yearly: (r.w.wd / r.capital) * 100 / years, finalPct: (r.w.final / r.capital) * 100 };
   }
-  async function runWd() {
-    const st = wdState;
-    if (checkRunning) return;
-    wdReadForm();
-    const w = st.w, T = wdTargets();
-    if (w.mode === 'periodic' ? !(Number(w.value) > 0) : !(Number(w.pct) > 0)) { st.status = 'err'; st.msg = 'Indiquez ' + (w.mode === 'periodic' ? 'le montant du retrait.' : 'le seuil de gain.'); return renderWdModal(); }
-    if (T.length > 60 && !confirm(T.length + ' simulations à relancer : cela peut prendre un moment. Continuer ?')) return;
+  /** Relance les simulations T avec la mécanique w (celles déjà calculées sont reprises). onStep(i, n) pour la progression. */
+  async function wdCompute(w, T, onStep) {
     const saved = captureForm(), rows = [], cache = wdResStore.get(), k = wdKey(w);
-    st.status = 'run'; st.rows = null; st.focus = null; checkRunning = 'wd'; checkStop = false;
+    checkRunning = 'wd'; checkStop = false;
     try {
       for (let i = 0; i < T.length && !checkStop; i++) {
         const e = T[i];
-        // déjà calculée avec cette mécanique : pas besoin de la relancer
         if (cache[k + '#' + e.key]) { rows.push(cache[k + '#' + e.key]); continue; }
-        st.msg = 'Simulation ' + (i + 1) + ' / ' + T.length + '…'; renderWdModal(); setRunLabel('Retrait ' + (i + 1) + ' / ' + T.length);
+        if (onStep) onStep(i, T.length); setRunLabel('Retrait ' + (i + 1) + ' / ' + T.length);
         const c = await ctxOf(e);
         if (!c) continue;
         const run = (se) => { try { return se.broker ? F.broker.runBrokerBacktest(c.bars, c.strat, se, se.broker) : F.backtest.runBacktest(c.bars, c.strat, se); } catch (err) { return null; } };
@@ -3187,7 +3188,132 @@
       finally { restoring = false; }
     }
     wdResStore.set(cache);
-    st.rows = rows.map((r) => Object.assign({}, r, { idx: evalList().findIndex((x) => x.key === r.key) + 1 }));
+    return rows.map((r) => Object.assign({}, r, { idx: evalList().findIndex((x) => x.key === r.key) + 1 }));
+  }
+  // ----- Comparer deux mécaniques enregistrées sur les mêmes simulations -----
+  function openWdCompare() {
+    const pres = wdPresets(), st = wdState;
+    if (pres.length < 2) return toast('Enregistrez au moins deux mécaniques de retrait (💾) pour les comparer.', false);
+    if (!wdTargets().length) return toast('Choisissez au moins une simulation dans la liste.', false);
+    st.view = 'compare';
+    st.cmp = st.cmp && pres.some((p) => p.id === st.cmp.a) && pres.some((p) => p.id === st.cmp.b) ? st.cmp : { a: pres[0].id, b: pres[1].id };
+    runWdCompare();
+  }
+  async function runWdCompare() {
+    const st = wdState, c = st.cmp, pres = wdPresets(), T = wdTargets();
+    const A = pres.find((p) => p.id === c.a), B = pres.find((p) => p.id === c.b);
+    if (!A || !B || A.id === B.id) { c.status = 'err'; c.msg = 'Choisissez deux mécaniques différentes.'; return renderWdModal(); }
+    if (checkRunning) return;
+    c.status = 'run'; c.ra = c.rb = null; renderWdModal();
+    const cache = wdResStore.get(), miss = (w) => T.filter((e) => !cache[wdKey(w) + '#' + e.key]).length, total = miss(A.w) + miss(B.w);
+    if (total > 60 && !confirm(total + ' simulations à calculer pour la comparaison. Continuer ?')) { c.status = 'idle'; return renderWdModal(); }
+    let done = 0;
+    const step = (name) => () => { done++; c.msg = 'Calcul de « ' + name + ' » : simulation ' + done + ' / ' + total + '…'; renderWdModal(); };
+    c.ra = await wdCompute(A.w, T, step(A.name));
+    if (!checkStop) c.rb = await wdCompute(B.w, T, step(B.name));
+    c.status = c.ra && c.rb && c.ra.length && c.rb.length ? 'done' : 'err';
+    if (c.status === 'err') c.msg = checkStop ? 'Comparaison arrêtée.' : 'Simulations impossibles à relancer : ' + ($('formError').textContent || 'données indisponibles');
+    c.A = A; c.B = B;
+    renderWdModal();
+  }
+  /** Indicateurs d'une mécanique sur un ensemble de simulations. */
+  function wdAgg(R) {
+    const D = R.map(wdDerive), n = R.length, med = (a) => { const v = a.filter(Number.isFinite).sort((x, y) => x - y); return v.length ? (v.length % 2 ? v[v.length >> 1] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2) : NaN; };
+    const year = R.map((r) => { const k = Math.min(11, r.curve.length - 1), p = r.curve[k]; return p.acc + p.wd - 100; });
+    const months = R.reduce((a, r) => a + r.w.months, 0), totM = D.reduce((a, d) => a + d.monthly.length, 0), withM = D.reduce((a, d) => a + d.withMonths, 0), firsts = D.map((d) => d.first).filter(Boolean);
+    const o = {
+      wd: R.reduce((a, r) => a + r.w.wd, 0), perMonth: R.reduce((a, r) => a + r.w.wd, 0) / Math.max(1, months), yearly: mean(D.map((d) => d.yearly)),
+      ret: mean(R.map((r) => r.w.ret)), year: mean(year), finalMed: med(D.map((d) => d.finalPct)), kept: R.filter((r) => r.w.final >= r.capital).length,
+      ruined: R.filter((r) => r.w.final < r.capital * 0.5).length, dd: mean(R.map((r) => r.w.dd)), withPct: (withM / Math.max(1, totM)) * 100,
+      first: firsts.length ? mean(firsts) : NaN, n: n,
+    };
+    // note d'équilibre : ce que la méthode rapporte au total (compte + retraits), moins le risque, plus la préservation du capital
+    o.score = o.ret - 0.5 * o.dd + 20 * (o.kept / Math.max(1, n)) - 25 * (o.ruined / Math.max(1, n));
+    return o;
+  }
+  function wdCompareHtml(st) {
+    const c = st.cmp, pres = wdPresets(), T = wdTargets();
+    const sel = (id, cur) => '<select id="' + id + '">' + pres.map((p) => '<option value="' + esc(p.id) + '"' + (p.id === cur ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('') + '</select>';
+    let h = '<section class="wd-cmp"><div class="wd-cmp-head"><h3>⚖️ Comparer deux mécaniques de retrait</h3><button type="button" class="secondary small" id="wdCmpBack">← Retour aux résultats</button></div>' +
+      '<div class="wd-cmp-pick"><label class="field"><span><i class="wd-dot a"></i>Mécanique A</span>' + sel('wdCmpA', c.a) + '</label><span class="wd-vs">contre</span><label class="field"><span><i class="wd-dot b"></i>Mécanique B</span>' + sel('wdCmpB', c.b) + '</label>' +
+      '<button type="button" class="primary small" id="wdCmpRun"' + (c.status === 'run' ? ' disabled' : '') + '>Comparer</button></div>' +
+      '<p class="hint">Sur ' + (T.length > 1 ? 'les ' + T.length + ' simulations choisies dans la liste ci-dessus' : 'la simulation choisie') + ' (même stratégie, mêmes dates). Les simulations jamais calculées avec une mécanique sont relancées une fois, puis gardées.</p>';
+    if (c.status === 'run') return h + '<div class="modal-loading"><span class="spinner"></span>' + esc(c.msg || 'Comparaison…') + ' <button type="button" class="secondary small" id="wdStop">Arrêter</button></div></section>';
+    if (c.status === 'err') return h + '<p class="val ko">' + esc(c.msg) + '</p></section>';
+    if (c.status !== 'done') return h + '</section>';
+    const keys = c.ra.map((r) => r.key).filter((k) => c.rb.some((r) => r.key === k));
+    const RA = keys.map((k) => c.ra.find((r) => r.key === k)), RB = keys.map((k) => c.rb.find((r) => r.key === k));
+    const a = wdAgg(RA), b = wdAgg(RB), nA = esc(c.A.name), nB = esc(c.B.name);
+    const pc = (v) => (Number.isFinite(v) ? signed(v, num1) + ' %' : '—');
+    // lignes : [libellé, valeur A, valeur B, format, plus grand = mieux ?]
+    const rows = [
+      ['Total retiré', a.wd, b.wd, (v) => money.format(v), true],
+      ['Retrait moyen par mois', a.perMonth, b.perMonth, (v) => money.format(v), true],
+      ['Rente annuelle moyenne (% du capital)', a.yearly, b.yearly, (v) => num1.format(v) + ' %', true],
+      ['Résultat moyen (compte + retraits)', a.ret, b.ret, pc, true],
+      ['Gain moyen après 1 an (compte + retraits)', a.year, b.year, pc, true],
+      ['Compte final médian (% du capital)', a.finalMed, b.finalMed, (v) => num1.format(v) + ' %', true],
+      ['Capital de départ préservé', a.kept, b.kept, (v) => v + ' / ' + keys.length, true],
+      ['Comptes sous 50 % du capital', a.ruined, b.ruined, (v) => v + ' / ' + keys.length, false],
+      ['Drawdown moyen', a.dd, b.dd, (v) => '−' + num1.format(v) + ' %', false],
+      ['Mois avec un retrait', a.withPct, b.withPct, (v) => Math.round(v) + ' %', null],
+      ['Délai moyen avant le premier retrait', a.first, b.first, (v) => (Number.isFinite(v) ? num1.format(v) + ' mois' : '—'), false],
+    ];
+    const winA = rows.filter((r) => r[4] !== null && (r[4] ? r[1] > r[2] : r[1] < r[2])).length, winB = rows.filter((r) => r[4] !== null && (r[4] ? r[2] > r[1] : r[2] < r[1])).length;
+    const best = a.score >= b.score ? 'a' : 'b';
+    const cell = (v, other, f, up, side) => { const better = up === null || v === other || !Number.isFinite(v) || !Number.isFinite(other) ? '' : (up ? v > other : v < other) ? ' win' : ''; return '<td class="wd-' + side + better + '">' + f(v) + '</td>'; };
+    h += '<div class="wd-cmp-verdict"><div class="wd-cmp-card ' + (best === 'a' ? 'best' : '') + '"><i class="wd-dot a"></i><b>' + nA + '</b><span>' + esc(wdDesc(c.A.w)) + '</span><span>Meilleure sur ' + winA + ' critère' + (winA > 1 ? 's' : '') + '</span></div>' +
+      '<div class="wd-cmp-card ' + (best === 'b' ? 'best' : '') + '"><i class="wd-dot b"></i><b>' + nB + '</b><span>' + esc(wdDesc(c.B.w)) + '</span><span>Meilleure sur ' + winB + ' critère' + (winB > 1 ? 's' : '') + '</span></div></div>';
+    const X = best === 'a' ? a : b, Y = best === 'a' ? b : a, nX = best === 'a' ? nA : nB, nY = best === 'a' ? nB : nA;
+    const lines = ['<b>Pour cette stratégie, « ' + nX + ' » est la meilleure méthode de retrait</b> sur ces ' + keys.length + ' simulation' + (keys.length > 1 ? 's' : '') + ' (équilibre entre ce qui est gagné au total, le risque et la préservation du capital).'];
+    if (Y.wd > X.wd * 1.05) lines.push('« ' + nY + ' » retire plus d\'argent (' + money.format(Y.wd) + ' contre ' + money.format(X.wd) + '), mais ' + (Y.kept < X.kept ? 'préserve moins souvent le capital de départ (' + Y.kept + ' contre ' + X.kept + ')' : Y.ret < X.ret ? 'son résultat global est moins bon (' + pc(Y.ret) + ' contre ' + pc(X.ret) + ')' : 'avec plus de risque') + '.');
+    else if (X.wd > Y.wd * 1.05) lines.push('« ' + nX + ' » retire aussi plus d\'argent : ' + money.format(X.wd) + ' contre ' + money.format(Y.wd) + '.');
+    if (Math.abs(a.ret - b.ret) < 2 && Math.abs(a.wd - b.wd) < 0.05 * Math.max(a.wd, b.wd, 1)) lines.push('Les deux méthodes donnent des résultats très proches : choisissez selon le rythme de retrait qui vous convient.');
+    if (X.ruined) lines.push('Attention : même avec « ' + nX + ' », ' + X.ruined + ' simulation' + (X.ruined > 1 ? 's finissent' : ' finit') + ' sous la moitié du capital de départ.');
+    if (keys.length < 5) lines.push('Peu de simulations : élargissez la sélection (Tout le batch) pour une conclusion plus sûre.');
+    h += '<div class="modal-note wd-cmp-note">' + lines.map((x) => '<p>' + x + '</p>').join('') + '</div>';
+    h += '<div class="table-wrap"><table class="ana-table wd-cmp-table"><thead><tr><th>Critère</th><th class="wd-a"><i class="wd-dot a"></i>' + nA + '</th><th class="wd-b"><i class="wd-dot b"></i>' + nB + '</th></tr></thead><tbody>' +
+      rows.map((r) => '<tr><td>' + r[0] + '</td>' + cell(r[1], r[2], r[3], r[4], 'a') + cell(r[2], r[1], r[3], r[4], 'b') + '</tr>').join('') + '</tbody></table></div>';
+    h += '<div class="eval-charts-grid wd-charts">' +
+      '<section class="eval-chart"><h4>Résultat par simulation (compte + retraits)</h4><p class="hint">Plein : A ; pointillé : B.</p><div id="wdCmpRet"></div></section>' +
+      '<section class="eval-chart"><h4>Somme retirée par simulation</h4><p class="hint">Plein : A ; pointillé : B.</p><div id="wdCmpWd"></div></section>' +
+      '<section class="eval-chart"><h4>Compte final (% du capital de départ)</h4><p class="hint">Plein : A ; pointillé : B. Au-dessus de 100 % : capital intact.</p><div id="wdCmpFinal"></div></section>' +
+      '<section class="eval-chart"><h4>Évolution moyenne, mois par mois</h4><p class="hint">En % du capital : compte et retraits cumulés de A et de B.</p><div id="wdCmpCurve"></div>' +
+      '<div class="legend"><span><i style="background:var(--accent)"></i>Compte A</span><span><i style="background:#d97706"></i>Compte B</span><span><i style="background:#60a5fa"></i>Retraits A</span><span><i style="background:#fbbf24"></i>Retraits B</span></div></section></div>';
+    h += '<div class="table-wrap"><table class="eval wd-cmp-sims"><thead><tr><th>#</th><th class="l">Période</th><th class="wd-a">Retiré A</th><th class="wd-b">Retiré B</th><th class="wd-a">Résultat A</th><th class="wd-b">Résultat B</th><th class="wd-a">Compte final A</th><th class="wd-b">Compte final B</th><th>Meilleure</th></tr></thead><tbody>' +
+      RA.map((r, i) => { const q = RB[i], sa = r.w.ret - 0.5 * r.w.dd + (r.w.final >= r.capital ? 10 : 0), sb = q.w.ret - 0.5 * q.w.dd + (q.w.final >= q.capital ? 10 : 0);
+        return '<tr><td>' + r.idx + '</td><td class="l">' + frDate(r.from) + ' → ' + frDate(r.to) + '</td><td>' + money.format(r.w.wd) + '</td><td>' + money.format(q.w.wd) + '</td><td class="' + cls(r.w.ret) + '">' + pc(r.w.ret) + '</td><td class="' + cls(q.w.ret) + '">' + pc(q.w.ret) + '</td>' +
+          '<td class="' + (r.w.final >= r.capital ? 'pos' : 'neg') + '">' + money.format(r.w.final) + '</td><td class="' + (q.w.final >= q.capital ? 'pos' : 'neg') + '">' + money.format(q.w.final) + '</td><td><b>' + (Math.abs(sa - sb) < 0.5 ? '=' : sa > sb ? 'A' : 'B') + '</b></td></tr>'; }).join('') + '</tbody></table></div>';
+    st.cmpRows = { RA: RA, RB: RB };
+    return h + '</section>';
+  }
+  function mountWdCompare(st) {
+    const R = st.cmpRows;
+    if (!R || !$('wdCmpRet')) return;
+    const { RA, RB } = R, labels = RA.map((r) => '#' + r.idx);
+    const pair = (id, va, vb, fmt, tt) => F.chart.mountBars($(id), { labels: labels, values: va, format: fmt, height: 190, ghosts: vb.map((v, i) => ({ i: i, value: v, kind: v >= 0 ? 'up' : 'blue' })), titles: labels.map((l, i) => tt(i)) });
+    const abs = RA.map((r) => Math.abs(r.w.ret)).concat(RB.map((r) => Math.abs(r.w.ret))).sort((x, y) => x - y), cap = Math.max(20, 2 * (abs[Math.floor(abs.length * 0.9)] || 20)), clip = (v) => Math.max(-cap, Math.min(cap, v));
+    pair('wdCmpRet', RA.map((r) => clip(r.w.ret)), RB.map((r) => clip(r.w.ret)), (v) => num1.format(v) + ' %', (i) => labels[i] + ' · A ' + signed(RA[i].w.ret, num1) + ' % · B ' + signed(RB[i].w.ret, num1) + ' %');
+    pair('wdCmpWd', RA.map((r) => r.w.wd), RB.map((r) => r.w.wd), wdCompact, (i) => labels[i] + ' · A ' + money.format(RA[i].w.wd) + ' · B ' + money.format(RB[i].w.wd));
+    pair('wdCmpFinal', RA.map((r) => (r.w.final / r.capital) * 100 - 100), RB.map((r) => (r.w.final / r.capital) * 100 - 100), (v) => num1.format(v + 100) + ' %', (i) => labels[i] + ' · A ' + num1.format((RA[i].w.final / RA[i].capital) * 100) + ' % · B ' + num1.format((RB[i].w.final / RB[i].capital) * 100) + ' %');
+    const M = Math.max(...RA.concat(RB).map((r) => r.curve.length));
+    const avgAt = (L, k, f) => { const v = L.filter((r) => r.curve.length > k).map((r) => f(r.curve[k])); return v.length ? mean(v) : NaN; };
+    const lab = [], s = [[], [], [], []];
+    for (let k = 0; k < M; k++) { lab.push('M' + (k + 1)); s[0].push(avgAt(RA, k, (p) => p.acc)); s[1].push(avgAt(RB, k, (p) => p.acc)); s[2].push(avgAt(RA, k, (p) => p.wd)); s[3].push(avgAt(RB, k, (p) => p.wd)); }
+    F.chart.mount($('wdCmpCurve'), { labels: lab, panels: [{ height: 210, format: (v) => num1.format(v) + ' %', refLines: [{ value: 100, color: 'var(--muted)' }],
+      series: [{ name: 'Compte A', values: s[0], color: 'var(--accent)', width: 2 }, { name: 'Compte B', values: s[1], color: '#d97706', width: 2 }, { name: 'Retraits A', values: s[2], color: '#60a5fa', width: 1.5, dash: '5 3' }, { name: 'Retraits B', values: s[3], color: '#fbbf24', width: 1.5, dash: '5 3' }] }],
+      ariaLabel: 'Compte et retraits cumulés moyens des deux mécaniques' });
+  }
+  async function runWd() {
+    const st = wdState;
+    if (checkRunning) return;
+    wdReadForm();
+    const w = st.w, T = wdTargets();
+    if (w.mode === 'periodic' ? !(Number(w.value) > 0) : !(Number(w.pct) > 0)) { st.status = 'err'; st.msg = 'Indiquez ' + (w.mode === 'periodic' ? 'le montant du retrait.' : 'le seuil de gain.'); return renderWdModal(); }
+    if (T.length > 60 && !confirm(T.length + ' simulations à relancer : cela peut prendre un moment. Continuer ?')) return;
+    st.status = 'run'; st.rows = null; st.focus = null; st.view = null;
+    const rows = await wdCompute(w, T, (i, n) => { st.msg = 'Simulation ' + (i + 1) + ' / ' + n + '…'; renderWdModal(); });
+    st.rows = rows;
     st.status = rows.length ? 'done' : 'err'; st.cached = false;
     if (!rows.length) st.msg = 'Aucune simulation n\'a pu être relancée : ' + ($('formError').textContent || 'données indisponibles');
     st.ran = Object.assign({}, w);
@@ -3366,6 +3492,9 @@
     if (t.closest('[data-close]')) return closeWdModal();
     if (t.id === 'wdRun') return runWd();
     if (t.id === 'wdStop') { checkStop = true; return; }
+    if (t.id === 'wdCmp') return openWdCompare();
+    if (t.id === 'wdCmpBack') { wdState.view = null; return wdShowCached(); }
+    if (t.id === 'wdCmpRun') { wdState.cmp.a = $('wdCmpA').value; wdState.cmp.b = $('wdCmpB').value; return runWdCompare(); }
     if (t.id === 'wdFocusAll') { wdState.focus = null; mountWdCharts(wdState); return wdPaintRows(wdState); }
     const tr = t.closest('tr[data-wd-row]');
     if (tr && wdState.rows && wdState.rows.length > 1) { const k = tr.dataset.wdRow; wdState.focus = wdState.focus && wdState.focus.length === 1 && wdState.focus[0] === k ? null : [k]; mountWdCharts(wdState); wdPaintRows(wdState); $('wdFocus').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
@@ -3396,6 +3525,7 @@
   $('wdModal').addEventListener('change', (ev) => {
     const id = ev.target.id;
     if (checkRunning === 'wd') return;
+    if (id === 'wdCmpA' || id === 'wdCmpB') { wdState.cmp[id === 'wdCmpA' ? 'a' : 'b'] = ev.target.value; return; }
     // mécanique enregistrée rechoisie : ses résultats s'affichent (calculés au besoin)
     if (id === 'wdPreset') { const p = wdPresets().find((x) => x.id === ev.target.value); wdState.presetId = ev.target.value; if (p) { wdState.w = Object.assign({}, p.w); return wdShowCached(false); } return renderWdModal(); }
     if (['wdMode', 'wdEvery', 'wdType'].includes(id)) { wdReadForm(); wdState.presetId = ''; return wdShowCached(); }

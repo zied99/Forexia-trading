@@ -212,6 +212,12 @@ Maj (ou Ctrl) + clic : en ajouter ou retirer une à une ; « Tout le batch » / 
 « 💸 Resimuler avec un retrait » du panneau d'une barre ouvre la fenêtre sur cette simulation. Les résultats sont gardés
 par mécanique et par simulation : rechoisir une mécanique enregistrée réaffiche directement ses graphiques, sans rien relancer ;
 « Resimuler » ne calcule que les simulations qui n'ont pas encore de résultat.
+**⚖️ Comparer** : choisit deux mécaniques enregistrées (A et B) et les compare sur les simulations choisies (celles
+jamais calculées avec une mécanique sont relancées une fois) : verdict « meilleure méthode de retrait pour cette
+stratégie » (équilibre entre le gain total compte + retraits, le risque et la préservation du capital), tableau de
+critères avec le meilleur coché (total retiré, rente annuelle, résultat, gain après 1 an, compte final, capital préservé,
+comptes sous 50 %, drawdown…), graphiques A (plein) / B (pointillé) par simulation, évolution moyenne mois par mois, et
+la meilleure mécanique pour chaque simulation.
 Les simulations du tableau ne sont pas modifiées. **💾 Enregistrer cette mécanique** la garde sous un nom : elle est
 ensuite proposée dans la fenêtre et dans « Retrait fictif des gains » du formulaire (« Mécanique enregistrée »).
 

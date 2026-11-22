@@ -785,3 +785,27 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 .wd-facts li { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
 .wd-facts li span { color: var(--muted, #64748b); }
 .wd-focus-facts .wd-sub { display: block; font-size: 11px; font-weight: 500; color: var(--muted, #64748b); }
+/* Comparer deux mécaniques de retrait */
+.wd-cmp { margin-top: 12px; }
+.wd-cmp-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.wd-cmp-head h3 { margin: 0; font-size: 16px; }
+.wd-cmp-head button, .wd-cmp-pick button { width: auto; margin: 0; flex: 0 0 auto; }
+.wd-cmp-pick { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-top: 10px; }
+.wd-cmp-pick .field { flex: 1 1 220px; }
+.wd-cmp-pick .field > span { display: inline-flex; align-items: center; gap: 6px; }
+.wd-vs { padding-bottom: 10px; color: var(--muted, #64748b); font-weight: 600; }
+.wd-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+.wd-dot.a { background: var(--accent); } .wd-dot.b { background: #d97706; }
+.wd-cmp-verdict { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
+.wd-cmp-card { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.wd-cmp-card b { font-size: 15px; }
+.wd-cmp-card span { color: var(--muted, #64748b); }
+.wd-cmp-card.best { border-color: var(--up); background: var(--up-soft); }
+.wd-cmp-card.best b::after { content: ' ★ meilleure'; color: var(--up); font-size: 12px; }
+.wd-cmp-note p { margin: 3px 0; }
+.wd-cmp-table td.win { color: var(--up); font-weight: 700; }
+.wd-cmp-table td.win::after { content: ' ✓'; }
+.wd-cmp-table th, .wd-cmp-table td { white-space: nowrap; }
+.wd-cmp-table td:first-child { white-space: normal; }
+.wd-cmp-btn { background: var(--accent-soft); }
+@media (max-width: 560px) { .wd-cmp-verdict { grid-template-columns: 1fr; } }
