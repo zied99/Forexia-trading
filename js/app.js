@@ -3326,6 +3326,16 @@
       fact('Premier retrait', one ? (D[0].first ? 'mois ' + D[0].first : 'aucun') : (D.some((d) => d.first) ? 'mois ' + num1.format(mean(D.map((d) => d.first).filter(Boolean))) + ' en moyenne' : 'aucun')) +
       fact('Rente annuelle', num1.format(mean(D.map((d) => d.yearly))) + ' % du capital') +
       fact('Résultat sans → avec retrait', signed(mean(F0.map((r) => r.b.ret)), num1) + ' % → ' + signed(mean(F0.map((r) => r.w.ret)), num1) + ' %', cls(mean(F0.map((r) => r.w.ret)))) +
+      (() => {
+        // gain au bout de 12 mois (fin du 12e mois), sans retrait et avec retrait (compte + sommes retirées)
+        const at = (r) => { const k = Math.min(11, r.curve.length - 1), p = r.curve[k]; return { m: k + 1, b: p.b != null ? p.b - 100 : null, w: p.acc + p.wd - 100 }; };
+        const G = F0.map(at), full = G.filter((g) => g.m === 12), use = full.length ? full : G;
+        const bs = use.map((g) => g.b).filter((v) => v != null), wv = mean(use.map((g) => g.w));
+        const label = 'Gain après 1 an sans → avec retrait' + (full.length ? '' : ' (' + (one ? use[0].m + ' mois seulement' : 'moins d\'un an') + ')');
+        const txt = (bs.length ? signed(mean(bs), num1) + ' %' : '—') + ' → ' + signed(wv, num1) + ' %';
+        const sub = one ? ' (' + (bs.length ? signed((mean(bs) * one.capital) / 100, money) : '—') + ' → ' + signed((wv * one.capital) / 100, money) + ')' : (full.length < F0.length && full.length ? ' · ' + full.length + ' simulation' + (full.length > 1 ? 's' : '') + ' d\'au moins un an' : '');
+        return fact(label, txt + '<small class="wd-sub">' + sub + '</small>', cls(wv));
+      })() +
       fact('Compte final', one ? money.format(one.w.final) + ' (' + num1.format(D[0].finalPct) + ' %)' : num1.format(mean(D.map((d) => d.finalPct))) + ' % du capital', mean(D.map((d) => d.finalPct)) >= 100 ? 'pos' : 'neg') +
       fact('Drawdown sans → avec retrait', '−' + num1.format(mean(F0.map((r) => r.b.dd))) + ' % → −' + num1.format(mean(F0.map((r) => r.w.dd))) + ' %') + '</div>' +
       '<div class="eval-charts-grid"><section><h5>Compte et retraits, mois par mois</h5><p class="hint">En % du capital de départ' + (one ? '' : ' (moyenne des simulations encore en cours ce mois-là)') + '.</p><div id="wdCurve"></div>' +
