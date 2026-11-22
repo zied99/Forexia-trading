@@ -1036,10 +1036,17 @@
   $('form').addEventListener('submit', (e) => { e.preventDefault(); if (!batchRunning) runFromForm(); });
   // Compteur affiché dans le bouton pendant un lot ou une vérification (« Test 3 / 10 »)
   let runLabel = '';
+  let runBarSpot = null;
   function setRunLabel(t) {
     runLabel = t;
     // bouton « Arrêter » visible pendant un lot, une prolongation, un découpage ou un changement de capital
     $('runStop').hidden = !t || t === 'Analyse';
+    // pendant un calcul, les boutons passent devant les fenêtres (en bas à droite de l'écran) :
+    // la barre est déplacée au niveau de la page (sinon elle reste sous les fenêtres), puis remise à sa place
+    const bar = document.querySelector('.run-bar');
+    if (t && !runBarSpot) { runBarSpot = document.createComment('run-bar'); bar.parentNode.insertBefore(runBarSpot, bar); document.body.appendChild(bar); }
+    if (!t && runBarSpot) { runBarSpot.parentNode.insertBefore(bar, runBarSpot); runBarSpot.remove(); runBarSpot = null; }
+    bar.classList.toggle('running', !!t);
     if (!t) { $('runBtn').disabled = false; $('runBtn').textContent = 'Lancer le backtest'; $('runStop').disabled = false; $('runStop').textContent = '■ Arrêter'; }
   }
   $('runStop').addEventListener('click', () => {

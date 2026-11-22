@@ -753,3 +753,6 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 #eraBody .era-cards { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 #eraBody .era-grid td:not(:first-child), #eraBody .era-grid th:not(:first-child) { white-space: nowrap; }
 .wd-scope { flex: 1 1 100% !important; } .wd-idle { margin: 12px 0; }
+/* calcul en cours : « Lancer » et « Arrêter » flottent devant les fenêtres */
+.run-bar.running { position: fixed; left: 16px; bottom: 16px; z-index: 200; width: min(460px, calc(100% - 32px)); margin: 0; filter: drop-shadow(0 8px 24px rgba(0,0,0,.35)); }
+.run-bar.running #runBtn { font-size: 14px; }
