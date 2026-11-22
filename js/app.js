@@ -3016,10 +3016,10 @@
     if (['eraFName', 'eraFFrom', 'eraFTo'].includes(ev.target.id) && ev.key === 'Enter') $('eraFSave').click();
   });
 
-  // ---------- « Resimuler avec un retrait » : les simulations affichées relancées avec un retrait fictif des gains ----------
-  const WD_KEY = 'forexia.wdPresets';
+  // ---------- « Resimuler avec un retrait » : simulations relancées avec un retrait fictif des gains ----------
+  const WD_KEY = 'forexia.wdPresets', WD_RES_KEY = 'forexia.wdResults';
   const wdPresets = () => { try { const l = JSON.parse(localStorage.getItem(WD_KEY)); return Array.isArray(l) ? l : []; } catch (e) { return wdPresetMem || []; } };
-  let wdPresetMem = null;
+  let wdPresetMem = null, wdResMem = {};
   function setWdPresets(l) { wdPresetMem = l; try { localStorage.setItem(WD_KEY, JSON.stringify(l)); } catch (e) { /* ignoré */ } refreshWdPresetPick(); }
   /** Réglages de simulation avec la mécanique de retrait w ({on, mode, pct, share, when, every, days, type, value}). */
   function wdApply(se, w) {
@@ -3032,12 +3032,19 @@
     return s;
   }
   const wdDesc = (w) => (w && w.on ? withdrawLabel(wdApply({}, w)) + (w.mode !== 'periodic' && Number(w.share) < 100 ? ', ' + w.share + ' % du gain retiré' : '') : 'sans retrait');
+  // clé d'une mécanique (seuls les champs utiles) : sert à retrouver les résultats déjà calculés
+  const wdKey = (w) => (w.mode === 'periodic' ? ['p', w.every, w.every === 'days' ? Math.max(15, Number(w.days) || 30) : '', w.type, Number(w.value)] : ['t', Number(w.pct), Number(w.share), w.when]).join('|');
   const wdFromForm = () => ({ on: true, mode: $('withdrawMode').value, pct: $('withdrawPct').value, share: $('withdrawShare').value, when: $('withdrawWhen').value, every: $('withdrawEvery').value, days: $('withdrawDays').value, type: $('withdrawType').value, value: $('withdrawValue').value });
   function wdToForm(w) {
     $('withdrawOn').checked = true; $('withdrawMode').value = w.mode || 'threshold'; $('withdrawPct').value = w.pct || 20; $('withdrawShare').value = w.share || 100; $('withdrawWhen').value = w.when || 'close';
     $('withdrawEvery').value = w.every || 'month'; $('withdrawDays').value = w.days || 30; $('withdrawType').value = w.type || 'pct'; $('withdrawValue').value = w.value || 5;
     updateWithdrawUI();
   }
+  // Résultats déjà calculés : par mécanique et par simulation (gardés dans ce navigateur, 400 au plus)
+  const wdResStore = {
+    get() { try { return JSON.parse(localStorage.getItem(WD_RES_KEY)) || {}; } catch (e) { return wdResMem; } },
+    set(o) { wdResMem = o; const k = Object.keys(o); if (k.length > 400) k.sort((a, b) => (o[a].t || 0) - (o[b].t || 0)).slice(0, k.length - 400).forEach((x) => delete o[x]); try { localStorage.setItem(WD_RES_KEY, JSON.stringify(o)); } catch (e) { /* ignoré */ } },
+  };
   // Liste des mécaniques enregistrées, aussi dans la section « Retrait fictif » du formulaire
   function refreshWdPresetPick() {
     const l = wdPresets(), sel = $('wdPresetPick');
@@ -3051,15 +3058,32 @@
     $('wdPresetPick').value = '';
   });
   refreshWdPresetPick();
-  let wdState = null; // { list, w, status, msg, rows, presetId }
+  let wdState = null; // { all, scope, w, status, msg, rows, presetId, ran }
   function openWdModal() {
-    const list = evalFiltered(evalList()).map((x) => x.e).filter((e) => e.strategy && e.config && !e.tag);
-    if (!list.length) return toast('Aucune simulation à resimuler.', false);
-    wdState = { list: list, w: $('withdrawOn').checked ? wdFromForm() : { on: true, mode: 'periodic', every: 'month', days: 30, type: 'pct', value: 5, pct: 20, share: 100, when: 'close' }, status: 'idle', rows: null };
+    const all = evalFiltered(evalList()).map((x) => x.e).filter((e) => e.strategy && e.config && !e.tag);
+    if (!all.length) return toast('Aucune simulation à resimuler.', false);
+    const sel = all.filter((e) => barSel.has(e.key));
+    wdState = { all: all, scope: sel.length > 1 ? 'sel' : sel.length === 1 ? sel[0].key : 'all', sel: sel.map((e) => e.key), w: $('withdrawOn').checked ? wdFromForm() : { on: true, mode: 'periodic', every: 'month', days: 30, type: 'pct', value: 5, pct: 20, share: 100, when: 'close' }, status: 'idle', rows: null };
     $('wdModal').hidden = false; document.body.style.overflow = 'hidden';
-    renderWdModal();
+    wdShowCached();
   }
   function closeWdModal() { if (checkRunning === 'wd') checkStop = true; $('wdModal').hidden = true; if ($('evalModal').hidden) document.body.style.overflow = ''; }
+  /** Simulations visées : toutes celles affichées (le batch), la sélection, ou une seule. */
+  function wdTargets() {
+    const st = wdState;
+    if (st.scope === 'all') return st.all;
+    if (st.scope === 'sel') return st.all.filter((e) => st.sel.includes(e.key));
+    return st.all.filter((e) => e.key === st.scope);
+  }
+  // Résultats déjà calculés pour cette mécanique et ces simulations : affichés tout de suite, sinon calcul.
+  function wdShowCached(autoRun) {
+    const st = wdState, T = wdTargets(), cache = wdResStore.get(), k = wdKey(st.w);
+    const rows = T.map((e) => cache[k + '#' + e.key]).filter(Boolean);
+    if (rows.length === T.length && rows.length) { st.rows = rows.map((r) => Object.assign({}, r, { idx: evalList().findIndex((x) => x.key === r.key) + 1 })); st.status = 'done'; st.ran = Object.assign({}, st.w); st.cached = true; renderWdModal(); return; }
+    st.rows = null; st.status = 'idle'; st.cached = false;
+    renderWdModal();
+    if (autoRun) runWd();
+  }
   function wdReadForm() {
     const w = wdState.w, v = (id) => ($(id) ? $(id).value : undefined);
     if (!$('wdMode')) return;
@@ -3069,10 +3093,14 @@
     for (const k in map) { const x = v(map[k]); if (x !== undefined) w[k] = x; }
   }
   function wdFormHtml(w) {
-    const opt = (cur, list) => list.map(([v, l]) => '<option value="' + v + '"' + (String(cur) === v ? ' selected' : '') + '>' + l + '</option>').join('');
-    const per = w.mode === 'periodic', pres = wdPresets();
-    return '<div class="wd-form"><div class="wd-presets"><label class="field">Mécanique enregistrée<select id="wdPreset"><option value="">—</option>' + pres.map((p) => '<option value="' + esc(p.id) + '"' + (wdState.presetId === p.id ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('') + '</select></label>' +
-      (wdState.presetId ? '<button type="button" class="ghost small" id="wdPresetDel" title="Supprimer cette mécanique">🗑</button>' : '') +
+    const st = wdState, opt = (cur, list) => list.map(([v, l]) => '<option value="' + v + '"' + (String(cur) === v ? ' selected' : '') + '>' + l + '</option>').join('');
+    const per = w.mode === 'periodic', pres = wdPresets(), all = evalList();
+    const scopeOpts = [['all', 'Tout le batch : les ' + st.all.length + ' simulations affichées']].concat(st.sel.length > 1 ? [['sel', 'Les ' + st.sel.length + ' simulations sélectionnées']] : [])
+      .concat(st.all.map((e) => [e.key, 'Une seule : #' + (all.findIndex((x) => x.key === e.key) + 1) + ' · ' + frDate(e.from) + ' → ' + frDate(e.to) + ' (' + signed(e.returnPct, num1) + ' %)']));
+    const n = wdTargets().length;
+    return '<div class="wd-form"><div class="wd-presets"><label class="field wd-scope">Appliquer à<select id="wdScope">' + scopeOpts.map(([v, l]) => '<option value="' + esc(v) + '"' + (st.scope === v ? ' selected' : '') + '>' + esc(l) + '</option>').join('') + '</select></label></div>' +
+      '<div class="wd-presets"><label class="field">Mécanique enregistrée<select id="wdPreset"><option value="">—</option>' + pres.map((p) => '<option value="' + esc(p.id) + '"' + (st.presetId === p.id ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('') + '</select></label>' +
+      (st.presetId ? '<button type="button" class="ghost small" id="wdPresetDel" title="Supprimer cette mécanique">🗑</button>' : '') +
       '<button type="button" class="secondary small" id="wdSave">💾 Enregistrer cette mécanique</button><button type="button" class="ghost small" id="wdToForm" title="Mettre cette mécanique dans la section « Retrait fictif des gains » du formulaire">Utiliser dans le formulaire</button></div>' +
       '<div class="wd-fields"><label class="field">Type de retrait<select id="wdMode">' + opt(w.mode, [['threshold', 'Quand le gain atteint un seuil'], ['periodic', 'Régulier : chaque mois ou tous les X jours']]) + '</select></label>' +
       (per ? '<label class="field">Fréquence<select id="wdEvery">' + opt(w.every, [['month', 'Chaque mois'], ['days', 'Tous les X jours']]) + '</select></label>' +
@@ -3081,37 +3109,54 @@
         '<label class="field">' + (w.type === 'fixed' ? 'Somme' : 'Pourcentage (%)') + '<input id="wdValue" type="number" min="0" step="any" value="' + esc(w.value) + '"></label>'
         : '<label class="field">Seuil de gain (%)<input id="wdPct" type="number" min="1" max="1000" value="' + esc(w.pct) + '"></label><label class="field">Part du gain retirée (%)<input id="wdShare" type="number" min="1" max="100" value="' + esc(w.share) + '"></label>' +
         '<label class="field">Moment<select id="wdWhen">' + opt(w.when, [['immediate', 'Dès le seuil (position clôturée)'], ['close', 'À la clôture du trade']]) + '</select></label>') +
-      '<button type="button" class="primary" id="wdRun"' + (wdState.status === 'run' ? ' disabled' : '') + '>▶ Resimuler les ' + wdState.list.length + ' simulations</button></div>' +
+      '<button type="button" class="primary" id="wdRun"' + (st.status === 'run' ? ' disabled' : '') + '>▶ Resimuler ' + (n > 1 ? 'les ' + n + ' simulations' : 'la simulation') + '</button></div>' +
       '<p class="hint">Mécanique : <b>' + esc(wdDesc(w)) + '</b>. Comme chez un courtier, seule la marge libre peut être retirée : si une position bloque la marge, le retrait attend sa clôture.</p></div>';
   }
   function renderWdModal() {
-    const st = wdState;
-    let h = '<div class="modal-note"><b>Ce qu\'on fait :</b> chaque simulation affichée (' + st.list.length + ') est relancée sur les <b>mêmes dates</b> et avec les <b>mêmes réglages</b>, une fois <b>sans retrait</b> et une fois avec la <b>mécanique de retrait fictif</b> ci-dessous : l\'argent retiré est mis à l\'abri et ne sert plus à trader. ' +
+    const st = wdState, n = wdTargets().length;
+    let h = '<div class="modal-note"><b>Ce qu\'on fait :</b> ' + (n > 1 ? 'chaque simulation choisie (' + n + ') est relancée' : 'la simulation choisie est relancée') + ' sur les <b>mêmes dates</b> et avec les <b>mêmes réglages</b>, une fois <b>sans retrait</b> et une fois avec la <b>mécanique de retrait fictif</b> ci-dessous : l\'argent retiré est mis à l\'abri et ne sert plus à trader. ' +
       'Le résultat « avec retrait » compte le compte final <b>plus</b> les sommes retirées. Les simulations du tableau ne sont pas modifiées.</div>' + wdFormHtml(st.w);
     if (st.status === 'run') h += '<div class="modal-loading"><span class="spinner"></span>' + esc(st.msg || '') + ' <button type="button" class="secondary small" id="wdStop">Arrêter</button></div>';
     if (st.status === 'err') h += '<p class="val ko">' + esc(st.msg) + '</p>';
+    if (st.status === 'idle' && !st.rows) h += '<p class="hint wd-idle">Choisissez la mécanique puis « Resimuler ». Les résultats d\'une mécanique déjà calculée s\'affichent directement quand vous la rechoisissez.</p>';
     if (st.rows && st.rows.length) h += wdResultHtml(st);
     $('wdBody').innerHTML = h;
-    if (st.rows && st.rows.length) mountWdCharts(st);
+    if (st.rows && st.rows.length && st.status !== 'run') mountWdCharts(st);
+  }
+  /** Résumé compact d'une simulation relancée (gardé en mémoire : assez pour tous les graphiques). */
+  function wdRow(e, capital, base, wd) {
+    const curve = [], dates = wd.dates || [];
+    let key = null;
+    for (let j = 0; j < wd.equity.length; j++) {
+      const d = String(dates[j] || '').slice(0, 7) || String(j);
+      const pt = { acc: Math.round((wd.equity[j] / capital) * 1000) / 10, wd: Math.round(((wd.wealth[j] - wd.equity[j]) / capital) * 1000) / 10 };
+      if (d !== key) { curve.push(pt); key = d; } else curve[curve.length - 1] = pt;
+    }
+    const s = wd.stats;
+    return { key: e.key, from: e.from, to: e.to, capital: capital, t: Date.now(),
+      b: { ret: base.stats.returnPct, dd: base.stats.maxDrawdownPct },
+      w: { ret: s.returnPct, dd: s.maxDrawdownPct, wd: s.totalWithdrawn || 0, n: s.withdrawals || 0, months: Math.max(1, s.months || 1), final: s.finalAccount }, curve: curve };
   }
   async function runWd() {
     const st = wdState;
     if (checkRunning) return;
     wdReadForm();
-    const w = st.w;
+    const w = st.w, T = wdTargets();
     if (w.mode === 'periodic' ? !(Number(w.value) > 0) : !(Number(w.pct) > 0)) { st.status = 'err'; st.msg = 'Indiquez ' + (w.mode === 'periodic' ? 'le montant du retrait.' : 'le seuil de gain.'); return renderWdModal(); }
-    if (st.list.length > 60 && !confirm(st.list.length + ' simulations à relancer : cela peut prendre un moment. Continuer ?')) return;
-    const saved = captureForm(), rows = [];
+    if (T.length > 60 && !confirm(T.length + ' simulations à relancer : cela peut prendre un moment. Continuer ?')) return;
+    const saved = captureForm(), rows = [], cache = wdResStore.get(), k = wdKey(w);
     st.status = 'run'; st.rows = null; checkRunning = 'wd'; checkStop = false;
     try {
-      for (let k = 0; k < st.list.length && !checkStop; k++) {
-        const e = st.list[k];
-        st.msg = 'Simulation ' + (k + 1) + ' / ' + st.list.length + '…'; renderWdModal(); setRunLabel('Retrait ' + (k + 1) + ' / ' + st.list.length);
+      for (let i = 0; i < T.length && !checkStop; i++) {
+        const e = T[i];
+        // déjà calculée avec cette mécanique : pas besoin de la relancer
+        if (cache[k + '#' + e.key]) { rows.push(cache[k + '#' + e.key]); continue; }
+        st.msg = 'Simulation ' + (i + 1) + ' / ' + T.length + '…'; renderWdModal(); setRunLabel('Retrait ' + (i + 1) + ' / ' + T.length);
         const c = await ctxOf(e);
         if (!c) continue;
         const run = (se) => { try { return se.broker ? F.broker.runBrokerBacktest(c.bars, c.strat, se, se.broker) : F.backtest.runBacktest(c.bars, c.strat, se); } catch (err) { return null; } };
         const base = run(wdApply(c.settings, null)), wd = run(wdApply(c.settings, w));
-        if (base && wd) rows.push({ e: e, idx: evalList().findIndex((x) => x.key === e.key) + 1, base: base, wd: wd, capital: c.settings.capital });
+        if (base && wd) { const row = wdRow(e, c.settings.capital, base, wd); rows.push(row); cache[k + '#' + e.key] = row; }
       }
     } finally {
       checkRunning = ''; setRunLabel('');
@@ -3119,78 +3164,65 @@
       try { loadStrategy(saved.strat); applyConfig(saved.config); $('style').value = saved.style; $('preset').value = [...$('preset').options].some((o) => o.value === saved.preset) ? saved.preset : 'mine'; $('presetDesc').textContent = saved.desc; updateWithdrawUI(); syncFormState(); }
       finally { restoring = false; }
     }
-    st.rows = rows; st.status = rows.length ? 'done' : 'err';
+    wdResStore.set(cache);
+    st.rows = rows.map((r) => Object.assign({}, r, { idx: evalList().findIndex((x) => x.key === r.key) + 1 }));
+    st.status = rows.length ? 'done' : 'err'; st.cached = false;
     if (!rows.length) st.msg = 'Aucune simulation n\'a pu être relancée : ' + ($('formError').textContent || 'données indisponibles');
     st.ran = Object.assign({}, w);
     renderWdModal();
   }
   function wdResultHtml(st) {
     const R = st.rows, n = R.length, pc = (v) => '<span class="' + cls(v) + '">' + signed(v, num1) + ' %</span>';
-    const wdT = R.reduce((a, r) => a + (r.wd.stats.totalWithdrawn || 0), 0);
-    const months = R.reduce((a, r) => a + Math.max(1, r.wd.stats.months || 1), 0);
-    const avg = (f) => mean(R.map(f));
-    const kept = R.filter((r) => r.wd.stats.finalAccount >= r.capital).length, withW = R.filter((r) => r.wd.stats.withdrawals > 0).length;
+    const wdT = R.reduce((a, r) => a + r.w.wd, 0), months = R.reduce((a, r) => a + r.w.months, 0), avg = (f) => mean(R.map(f));
+    const kept = R.filter((r) => r.w.final >= r.capital).length, withW = R.filter((r) => r.w.n > 0).length;
     const kpi = (label, value, sub, c) => '<div class="panel kpi"><div class="label">' + label + '</div><div class="value ' + (c || '') + '">' + value + '</div><div class="sub">' + (sub || '&nbsp;') + '</div></div>';
-    let h = '<h3 class="wd-h">Résultats avec « ' + esc(wdDesc(st.ran || st.w)) + ' »</h3><div class="kpis wd-kpis">' +
-      kpi('Total retiré', money.format(wdT), 'sur ' + n + ' simulations') +
-      kpi('Retrait moyen par mois', money.format(wdT / Math.max(1, months)), 'moyenne de toutes les simulations') +
-      kpi('Simulations avec retrait', withW + ' / ' + n, Math.round((withW / n) * 100) + ' %') +
-      kpi('Résultat moyen', pc(avg((r) => r.wd.stats.returnPct)), 'sans retrait : ' + signed(avg((r) => r.base.stats.returnPct), num1) + ' %') +
-      kpi('Drawdown moyen', '−' + num1.format(avg((r) => r.wd.stats.maxDrawdownPct)) + ' %', 'sans retrait : −' + num1.format(avg((r) => r.base.stats.maxDrawdownPct)) + ' %') +
-      kpi('Capital de départ préservé', kept + ' / ' + n, 'compte final ≥ capital de départ', kept * 2 >= n ? 'pos' : 'neg') + '</div>';
-    h += '<section class="eval-chart"><h4>Résultat de chaque simulation</h4><p class="hint">Barre pleine : sans retrait ; pointillé : avec retrait (compte + retraits), vert s\'il reste gagnant, bleu sinon. Au-dessus : le résultat avec retrait et la somme retirée.</p><div id="wdBars"></div></section>';
+    let h = '<h3 class="wd-h">Résultats avec « ' + esc(wdDesc(st.ran || st.w)) + ' »' + (n > 1 ? '' : ' · simulation #' + R[0].idx) + (st.cached ? ' <span class="ev-badge">déjà calculés</span>' : '') + '</h3><div class="kpis wd-kpis">' +
+      kpi('Total retiré', money.format(wdT), n > 1 ? 'sur ' + n + ' simulations' : 'en ' + R[0].w.n + ' retrait' + (R[0].w.n > 1 ? 's' : '')) +
+      kpi('Retrait moyen par mois', money.format(wdT / Math.max(1, months)), n > 1 ? 'moyenne de toutes les simulations' : R[0].w.months + ' mois') +
+      (n > 1 ? kpi('Simulations avec retrait', withW + ' / ' + n, Math.round((withW / n) * 100) + ' %') : '') +
+      kpi(n > 1 ? 'Résultat moyen' : 'Résultat', pc(avg((r) => r.w.ret)), 'sans retrait : ' + signed(avg((r) => r.b.ret), num1) + ' %') +
+      kpi(n > 1 ? 'Drawdown moyen' : 'Drawdown', '−' + num1.format(avg((r) => r.w.dd)) + ' %', 'sans retrait : −' + num1.format(avg((r) => r.b.dd)) + ' %') +
+      kpi('Capital de départ préservé', n > 1 ? kept + ' / ' + n : (kept ? 'oui' : 'non'), 'compte final ≥ capital de départ', kept * 2 >= n ? 'pos' : 'neg') + '</div>';
+    h += '<section class="eval-chart"><h4>Résultat ' + (n > 1 ? 'de chaque simulation' : 'de la simulation') + '</h4><p class="hint">Barre pleine : sans retrait ; pointillé : avec retrait (compte + retraits), vert s\'il reste gagnant, bleu sinon. Au-dessus : le résultat avec retrait et la somme retirée.</p><div id="wdBars"></div></section>';
     h += '<div class="table-wrap"><table class="eval wd-table"><thead><tr><th>#</th><th class="l">Période</th><th>Capital</th><th>Sans retrait</th><th>Avec retrait</th><th>Retiré</th><th>Retraits</th><th>Par mois</th><th>Compte final</th><th>Drawdown</th></tr></thead><tbody>' +
-      R.map((r) => { const s = r.wd.stats, m = Math.max(1, s.months || 1); return '<tr><td>' + r.idx + '</td><td class="l">' + frDate(r.e.from) + ' → ' + frDate(r.e.to) + ' <small class="eval-tag">' + durationLabel(r.e.from, r.e.to) + '</small></td><td>' + money.format(r.capital) + '</td><td>' + pc(r.base.stats.returnPct) + '</td><td>' + pc(s.returnPct) + '</td>' +
-        '<td>' + (s.totalWithdrawn ? money.format(s.totalWithdrawn) : '—') + '</td><td>' + (s.withdrawals || 0) + '</td><td>' + (s.totalWithdrawn ? money.format(s.totalWithdrawn / m) : '—') + '</td><td class="' + (s.finalAccount >= r.capital ? 'pos' : 'neg') + '">' + money.format(s.finalAccount) + '</td><td>−' + num1.format(s.maxDrawdownPct) + ' %</td></tr>'; }).join('') +
-      '</tbody><tfoot><tr><td colspan="3" class="l">Moyenne (' + n + ')</td><td>' + pc(avg((r) => r.base.stats.returnPct)) + '</td><td>' + pc(avg((r) => r.wd.stats.returnPct)) + '</td><td>' + money.format(wdT / n) + '</td><td>' + num1.format(avg((r) => r.wd.stats.withdrawals || 0)) + '</td><td>' + money.format(wdT / Math.max(1, months)) + '</td><td>' + money.format(avg((r) => r.wd.stats.finalAccount)) + '</td><td>−' + num1.format(avg((r) => r.wd.stats.maxDrawdownPct)) + ' %</td></tr></tfoot></table></div>';
-    h += '<div class="eval-charts-grid wd-charts"><section class="eval-chart"><h4>Somme retirée par simulation</h4><div id="wdAmounts"></div></section>' +
-      '<section class="eval-chart"><h4>Évolution moyenne, mois par mois</h4><p class="hint">En % du capital de départ : retraits cumulés et compte (moyenne des simulations encore en cours ce mois-là).</p><div id="wdCurve"></div><div class="legend"><span><i style="background:var(--accent)"></i>Compte</span><span><i style="background:var(--star-edge)"></i>Retraits cumulés</span><span><i style="background:var(--muted)"></i>Capital de départ (100 %)</span></div></section></div>';
+      R.map((r) => '<tr><td>' + r.idx + '</td><td class="l">' + frDate(r.from) + ' → ' + frDate(r.to) + ' <small class="eval-tag">' + durationLabel(r.from, r.to) + '</small></td><td>' + money.format(r.capital) + '</td><td>' + pc(r.b.ret) + '</td><td>' + pc(r.w.ret) + '</td>' +
+        '<td>' + (r.w.wd ? money.format(r.w.wd) : '—') + '</td><td>' + r.w.n + '</td><td>' + (r.w.wd ? money.format(r.w.wd / r.w.months) : '—') + '</td><td class="' + (r.w.final >= r.capital ? 'pos' : 'neg') + '">' + money.format(r.w.final) + '</td><td>−' + num1.format(r.w.dd) + ' %</td></tr>').join('') +
+      '</tbody>' + (n > 1 ? '<tfoot><tr><td colspan="3" class="l">Moyenne (' + n + ')</td><td>' + pc(avg((r) => r.b.ret)) + '</td><td>' + pc(avg((r) => r.w.ret)) + '</td><td>' + money.format(wdT / n) + '</td><td>' + num1.format(avg((r) => r.w.n)) + '</td><td>' + money.format(wdT / Math.max(1, months)) + '</td><td>' + money.format(avg((r) => r.w.final)) + '</td><td>−' + num1.format(avg((r) => r.w.dd)) + ' %</td></tr></tfoot>' : '') + '</table></div>';
+    h += '<div class="eval-charts-grid wd-charts">' + (n > 1 ? '<section class="eval-chart"><h4>Somme retirée par simulation</h4><div id="wdAmounts"></div></section>' : '') +
+      '<section class="eval-chart"><h4>Évolution ' + (n > 1 ? 'moyenne, ' : '') + 'mois par mois</h4><p class="hint">En % du capital de départ : retraits cumulés et compte' + (n > 1 ? ' (moyenne des simulations encore en cours ce mois-là)' : '') + '.</p><div id="wdCurve"></div><div class="legend"><span><i style="background:var(--accent)"></i>Compte</span><span><i style="background:var(--star-edge)"></i>Retraits cumulés</span><span><i style="background:var(--muted)"></i>Capital de départ (100 %)</span></div></section></div>';
     h += wdVerdict(st);
     return h;
   }
   function wdVerdict(st) {
-    const R = st.rows, n = R.length, d = mean(R.map((r) => r.wd.stats.returnPct - r.base.stats.returnPct)), ruined = R.filter((r) => r.wd.stats.finalAccount < r.capital * 0.5).length;
-    const t = [];
-    t.push('En moyenne, le retrait ' + (d < -1 ? 'réduit le résultat global de ' + num1.format(-d) + ' points : l\'argent retiré ne produit plus d\'intérêts composés.' : d > 1 ? 'améliore le résultat global de ' + num1.format(d) + ' points : les gains mis à l\'abri ne sont pas reperdus ensuite.' : 'change peu le résultat global.'));
-    if (ruined) t.push(ruined + ' simulation' + (ruined > 1 ? 's finissent' : ' finit') + ' avec moins de la moitié du capital de départ sur le compte : ce rythme de retrait est trop élevé pour elle' + (ruined > 1 ? 's' : '') + '.');
-    const flat = R.filter((r) => !r.wd.stats.withdrawals).length;
-    if (flat) t.push(flat + ' simulation' + (flat > 1 ? 's' : '') + ' sans aucun retrait (seuil jamais atteint ou marge toujours bloquée).');
+    const R = st.rows, d = mean(R.map((r) => r.w.ret - r.b.ret)), ruined = R.filter((r) => r.w.final < r.capital * 0.5).length, t = [];
+    t.push((R.length > 1 ? 'En moyenne, le' : 'Le') + ' retrait ' + (d < -1 ? 'réduit le résultat global de ' + num1.format(-d) + ' points : l\'argent retiré ne produit plus d\'intérêts composés.' : d > 1 ? 'améliore le résultat global de ' + num1.format(d) + ' points : les gains mis à l\'abri ne sont pas reperdus ensuite.' : 'change peu le résultat global.'));
+    if (ruined) t.push(R.length > 1 ? ruined + ' simulation' + (ruined > 1 ? 's finissent' : ' finit') + ' avec moins de la moitié du capital de départ sur le compte : ce rythme de retrait est trop élevé pour elle' + (ruined > 1 ? 's' : '') + '.' : 'Le compte finit avec moins de la moitié du capital de départ : ce rythme de retrait est trop élevé.');
+    const flat = R.filter((r) => !r.w.n).length;
+    if (flat) t.push(R.length > 1 ? flat + ' simulation' + (flat > 1 ? 's' : '') + ' sans aucun retrait (seuil jamais atteint ou marge toujours bloquée).' : 'Aucun retrait (seuil jamais atteint ou marge toujours bloquée).');
     return '<div class="modal-note wd-verdict">' + t.map((x) => '<p>' + x + '</p>').join('') + '</div>';
   }
   function mountWdCharts(st) {
-    const R = st.rows, abs = R.map((r) => Math.abs(r.base.stats.returnPct)).concat(R.map((r) => Math.abs(r.wd.stats.returnPct))).sort((a, b) => a - b);
+    const R = st.rows, abs = R.map((r) => Math.abs(r.b.ret)).concat(R.map((r) => Math.abs(r.w.ret))).sort((a, b) => a - b);
     const cap = Math.max(20, 2 * (abs[Math.floor(abs.length * 0.9)] || 20)), clip = (v) => Math.max(-cap, Math.min(cap, v));
     const compactM = (v) => (v >= 1e6 ? num1.format(v / 1e6) + ' M' : v >= 1e4 ? Math.round(v / 1e3) + ' k' : Math.round(v).toString());
     F.chart.mountBars($('wdBars'), {
-      labels: R.map((r) => '#' + r.idx), values: R.map((r) => clip(r.base.stats.returnPct)), format: (v) => num1.format(v) + ' %', height: 210,
-      ghosts: R.map((r, i) => ({ i: i, value: clip(r.wd.stats.returnPct), kind: r.wd.stats.returnPct > 0 ? 'up' : 'blue' })),
-      topLabels: R.map((r) => ({ long: signed(r.wd.stats.returnPct, num1) + ' %', short: signed(Math.round(r.wd.stats.returnPct), num1), cls: r.wd.stats.returnPct > 0 ? 'pos' : 'neg', sub: r.wd.stats.totalWithdrawn ? 'retiré ' + compactM(r.wd.stats.totalWithdrawn) : 'aucun retrait', subShort: r.wd.stats.totalWithdrawn ? compactM(r.wd.stats.totalWithdrawn) : '0' })),
-      titles: R.map((r) => '#' + r.idx + ' · sans retrait ' + signed(r.base.stats.returnPct, num1) + ' % · avec retrait ' + signed(r.wd.stats.returnPct, num1) + ' % · retiré ' + money.format(r.wd.stats.totalWithdrawn || 0) + ' en ' + (r.wd.stats.withdrawals || 0) + ' fois'),
+      labels: R.map((r) => '#' + r.idx), values: R.map((r) => clip(r.b.ret)), format: (v) => num1.format(v) + ' %', height: 210,
+      ghosts: R.map((r, i) => ({ i: i, value: clip(r.w.ret), kind: r.w.ret > 0 ? 'up' : 'blue' })),
+      topLabels: R.map((r) => ({ long: signed(r.w.ret, num1) + ' %', short: signed(Math.round(r.w.ret), num1), cls: r.w.ret > 0 ? 'pos' : 'neg', sub: r.w.wd ? 'retiré ' + compactM(r.w.wd) : 'aucun retrait', subShort: r.w.wd ? compactM(r.w.wd) : '0' })),
+      titles: R.map((r) => '#' + r.idx + ' · sans retrait ' + signed(r.b.ret, num1) + ' % · avec retrait ' + signed(r.w.ret, num1) + ' % · retiré ' + money.format(r.w.wd) + ' en ' + r.w.n + ' fois'),
     });
-    F.chart.mountBars($('wdAmounts'), {
-      labels: R.map((r) => '#' + r.idx), values: R.map((r) => r.wd.stats.totalWithdrawn || 0), format: (v) => compactM(v), height: 180,
-      titles: R.map((r) => '#' + r.idx + ' : ' + money.format(r.wd.stats.totalWithdrawn || 0) + ' retirés en ' + (r.wd.stats.withdrawals || 0) + ' fois'),
+    if ($('wdAmounts')) F.chart.mountBars($('wdAmounts'), {
+      labels: R.map((r) => '#' + r.idx), values: R.map((r) => r.w.wd), format: (v) => compactM(v), height: 180,
+      titles: R.map((r) => '#' + r.idx + ' : ' + money.format(r.w.wd) + ' retirés en ' + r.w.n + ' fois'),
     });
-    // courbe moyenne par numéro de mois depuis le début de chaque simulation
-    const per = [];
-    for (const r of R) {
-      const res = r.wd, b0 = res.startIndex, months = [];
-      let key = null;
-      for (let j = 0; j < res.equity.length; j++) {
-        const d = String(r.wd.dates ? r.wd.dates[j] : '').slice(0, 7) || String(j);
-        if (d !== key) { months.push({ eq: res.equity[j], wealth: res.wealth[j] }); key = d; } else { months[months.length - 1].eq = res.equity[j]; months[months.length - 1].wealth = res.wealth[j]; }
-      }
-      per.push(months.map((m) => ({ acc: (m.eq / r.capital) * 100, wd: ((m.wealth - m.eq) / r.capital) * 100 })));
-      void b0;
-    }
-    const M = Math.max(...per.map((p) => p.length));
-    const avgAt = (k, f) => { const v = per.filter((p) => p.length > k).map((p) => f(p[k])); return v.length ? mean(v) : NaN; };
+    const M = Math.max(...R.map((r) => r.curve.length));
+    const avgAt = (k, f) => { const v = R.filter((r) => r.curve.length > k).map((r) => f(r.curve[k])); return v.length ? mean(v) : NaN; };
     const lab = [], acc = [], wd = [];
     for (let k = 0; k < M; k++) { lab.push('Mois ' + (k + 1)); acc.push(avgAt(k, (x) => x.acc)); wd.push(avgAt(k, (x) => x.wd)); }
     F.chart.mount($('wdCurve'), {
       labels: lab, formatLabel: (s) => s.replace('Mois ', 'M'),
       panels: [{ height: 200, format: (v) => num1.format(v) + ' %', series: [{ name: 'Compte (% du capital)', values: acc, color: 'var(--accent)', width: 2 }, { name: 'Retraits cumulés (% du capital)', values: wd, color: 'var(--star-edge)', width: 2, fill: true }], refLines: [{ value: 100, color: 'var(--muted)' }] }],
-      ariaLabel: 'Compte et retraits cumulés moyens, mois par mois',
+      ariaLabel: 'Compte et retraits cumulés, mois par mois',
     });
   }
   $('wdModal').addEventListener('click', (ev) => {
@@ -3222,12 +3254,15 @@
   });
   $('wdModal').addEventListener('change', (ev) => {
     const id = ev.target.id;
-    if (id === 'wdPreset') { const p = wdPresets().find((x) => x.id === ev.target.value); wdState.presetId = ev.target.value; if (p) wdState.w = Object.assign({}, p.w); return renderWdModal(); }
-    if (['wdMode', 'wdEvery', 'wdType'].includes(id)) { wdReadForm(); wdState.presetId = ''; return renderWdModal(); }
-    if (id && id.startsWith('wd')) { wdReadForm(); const hint = document.querySelector('#wdBody .wd-form > .hint b'); if (hint) hint.textContent = wdDesc(wdState.w); }
+    if (checkRunning === 'wd') return;
+    // mécanique enregistrée rechoisie : ses résultats s'affichent (calculés au besoin)
+    if (id === 'wdPreset') { const p = wdPresets().find((x) => x.id === ev.target.value); wdState.presetId = ev.target.value; if (p) { wdState.w = Object.assign({}, p.w); return wdShowCached(true); } return renderWdModal(); }
+    if (id === 'wdScope') { wdState.scope = ev.target.value; return wdShowCached(); }
+    if (['wdMode', 'wdEvery', 'wdType'].includes(id)) { wdReadForm(); wdState.presetId = ''; return wdShowCached(); }
+    if (id && id.startsWith('wd')) { wdReadForm(); wdState.presetId = ''; return wdShowCached(); }
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('wdModal').hidden) closeWdModal(); });
-  $('evalWdBtn').addEventListener('click', openWdModal);
+  $('evalWdBtn').addEventListener('click', () => openWdModal());
 
   // ---------- Analyse temporelle (graphiques de l'évaluation) ----------
   const tDate = (d) => Date.parse(String(d).slice(0, 10) + 'T00:00:00Z');
@@ -3901,6 +3936,7 @@
       (many ? 'ces simulations' : 'cette simulation') + ' sans dégrader les autres simulations de la stratégie, puis la resimule. Si le résultat vous convient, vous l\'ajoutez à la stratégie en cours.</span></div>' +
       '<div class="bp-row bp-mix"><button type="button" class="secondary small bp-analyze" id="bpAnalyze"' + (busy ? ' disabled' : '') + '>🔍 Analyseur</button><span class="hint">Explique le résultat de ' +
       (many ? 'la simulation ' + num(e) + ' (la première sélectionnée)' : 'cette simulation') + ' (chute, levier, marché…) et propose des corrections, à appliquer à cette simulation ou à tout le batch.</span></div>' +
+      '<div class="bp-row bp-mix"><button type="button" class="secondary small" id="bpWithdraw"' + (busy ? ' disabled' : '') + '>💸 Resimuler avec un retrait</button><span class="hint">Relance ' + (many ? 'ces simulations' : 'cette simulation') + ' avec un retrait fictif des gains (vous pourrez aussi choisir tout le batch).</span></div>' +
       '<div class="bp-row bp-mix bp-manual"><b>Ma propre amélioration</b>' +
       '<div class="bp-ideas">' + MANUAL_IDEAS.map((x) => '<button type="button" class="chip" data-idea="' + esc(x) + '">' + esc(x) + '</button>').join('') + '</div>' +
       '<textarea id="bpManual" class="prose" rows="2" placeholder="ex. Acheter seulement si l\'ADX 14 est au-dessus de 25. Vendre dans le cas inverse.&#10;ou : Stop suiveur 2 ATR, fermer après 20 bougies">' + esc(barOpt.manual || '') + '</textarea>' +
@@ -3943,6 +3979,7 @@
     if (id === 'bpDurRun') runChecks('ext', { keys: [...barSel], months: +barOpt.dur, sign: barOpt.durDir === 'shorter' ? -1 : 1 });
     if (id === 'bpCap') runChecks('cap', { keys: [...barSel], capMode: barOpt.capMode, capVal: barOpt.capValue });
     if (id === 'bpImprove') improveSelection([...barSel]);
+    if (id === 'bpWithdraw') openWdModal();
     if (id === 'bpAnalyze') { const k = evalFiltered(evalList()).map((x) => x.e).find((x) => barSel.has(x.key)); if (k) analyzeBar(k.key); }
     if (id === 'bpManualRun') manualImprove([...barSel]);
     if (id === 'bpDelete') deleteSims([...barSel]);

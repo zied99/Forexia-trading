@@ -752,3 +752,4 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 #eraBody .era-grid td:first-child { min-width: 170px; }
 #eraBody .era-cards { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 #eraBody .era-grid td:not(:first-child), #eraBody .era-grid th:not(:first-child) { white-space: nowrap; }
+.wd-scope { flex: 1 1 100% !important; } .wd-idle { margin: 12px 0; }
