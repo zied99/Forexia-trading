@@ -769,3 +769,18 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 .wd-pick li.on .wd-chk::after { content: '✓'; color: var(--accent-ink); }
 .wd-scope .hint { margin: 4px 0 0; }
 .wd-scope { margin-bottom: 10px; }
+/* Détail d'une simulation relancée avec retrait */
+.wd-focus { border: 1px solid var(--accent); border-radius: 12px; padding: 12px; margin: 12px 0; }
+.wd-focus-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.wd-focus-head h4 { margin: 0; }
+.wd-focus-head button { width: auto; margin: 0; }
+.wd-focus-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; margin: 10px 0; }
+.wd-focus-facts > div { background: var(--panel-2); border-radius: 8px; padding: 6px 10px; display: flex; flex-direction: column; font-size: 12px; }
+.wd-focus-facts span { color: var(--muted, #64748b); }
+.wd-focus-facts b { font-size: 14px; }
+.wd-focus h5 { margin: 6px 0 0; font-size: 13px; }
+.wd-table tr[data-wd-row] { cursor: pointer; }
+.wd-table tr.focus td { background: var(--accent-soft); }
+.wd-facts { list-style: none; margin: 6px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 4px 16px; }
+.wd-facts li { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.wd-facts li span { color: var(--muted, #64748b); }

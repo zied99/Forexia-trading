@@ -198,7 +198,12 @@ ou régulier : chaque mois / tous les X jours, % du compte, somme fixe ou % de l
 - les indicateurs (total retiré, retrait moyen par mois, simulations avec retrait, résultat et drawdown moyens avant /
   après, capital de départ préservé) et un tableau par simulation ;
 - la somme retirée par simulation et l'évolution moyenne mois par mois (compte et retraits cumulés) ;
-- un verdict (effet sur les intérêts composés, rythme de retrait trop élevé…).
+- un verdict (effet sur les intérêts composés, rythme de retrait trop élevé…) ;
+- **clic sur une barre** (ou sur une ligne du tableau) : détail de cette simulation — indicateurs, courbes mois par mois
+  (compte avec et sans retrait, retraits cumulés) et retrait de chaque mois ; glisser sur plusieurs barres : moyenne de la
+  sélection ; « Revenir à l'ensemble » ;
+- « Sur l'ensemble » : somme retirée médiane, rente annuelle moyenne, mois avec un retrait, délai avant le premier
+  retrait, extrêmes ; graphiques du compte final en % du capital, de la rente annuelle et du délai avant le premier retrait.
 **Appliquer à** : liste des simulations affichées — clic : une seule ; glisser la souris : plusieurs à la suite ;
 Maj (ou Ctrl) + clic : en ajouter ou retirer une à une ; « Tout le batch » / « Aucune » ; le bouton
 « 💸 Resimuler avec un retrait » du panneau d'une barre ouvre la fenêtre sur cette simulation. Les résultats sont gardés
