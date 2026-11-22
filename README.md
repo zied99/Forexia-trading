@@ -221,6 +221,25 @@ la meilleure mécanique pour chaque simulation.
 Les simulations du tableau ne sont pas modifiées. **💾 Enregistrer cette mécanique** la garde sous un nom : elle est
 ensuite proposée dans la fenêtre et dans « Retrait fictif des gains » du formulaire (« Mécanique enregistrée »).
 
+## FX : plans d'investissement
+
+Un **FX** est un plan d'investissement à présenter à un client qui ne connaît pas le trading. Il s'enregistre depuis la
+comparaison de deux mécaniques de retrait (« 💸 Resimuler avec un retrait » › « ⚖️ Comparer » › **💼 Enregistrer un FX**),
+avec la mécanique jugée meilleure. Le bouton **💼 FX** en haut de la page affiche les FX en cartes (nom modifiable
+directement sur la carte, « Charger » remet stratégie, capital et retrait dans le formulaire, 🗑 supprime) :
+- **Stratégie** : nom, paire, levier ;
+- **Capital à investir** : capital des simulations (médiane) ;
+- **Probabilité** : taux de réussite × gain moyen (compte + retraits), avec le gain moyen quand ça gagne et la perte
+  moyenne quand ça perd ;
+- **Taux de confiance** : note sur 100 et étoiles — nombre de simulations (20), taux de réussite (25), régularité des
+  résultats (15), drawdown (20), capital de départ préservé (10), diversité des années testées (10) ;
+- **Risque** : capital restitué au client dans un mauvais scénario — ce qu'il récupère (compte + retraits) dans les 10 %
+  de simulations les plus défavorables, la perte possible correspondante et le pire cas testé ; niveau faible (perte
+  ≤ 10 %), modéré (≤ 30 %) ou élevé ;
+- **Durée recommandée** : la durée testée qui réussit le mieux (et la plage testée) ;
+- **Retrait type** : la mécanique retenue par la comparaison, sa rente annuelle et son retrait mensuel moyen.
+Les FX sont gardés dans ce navigateur. Chiffres issus de backtests : ils ne garantissent pas les résultats futurs.
+
 ## Événements de marché
 
 Forexia connaît les grands événements du marché des changes depuis 1971 (Bretton Woods, accords du Plaza, mercredi

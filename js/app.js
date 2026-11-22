@@ -3261,6 +3261,7 @@
     ];
     const winA = rows.filter((r) => r[4] !== null && (r[4] ? r[1] > r[2] : r[1] < r[2])).length, winB = rows.filter((r) => r[4] !== null && (r[4] ? r[2] > r[1] : r[2] < r[1])).length;
     const best = a.score >= b.score ? 'a' : 'b';
+    c.bestSide = best;
     const cell = (v, other, f, up, side) => { const better = up === null || v === other || !Number.isFinite(v) || !Number.isFinite(other) ? '' : (up ? v > other : v < other) ? ' win' : ''; return '<td class="wd-' + side + better + '">' + f(v) + '</td>'; };
     h += '<div class="wd-cmp-verdict"><div class="wd-cmp-card ' + (best === 'a' ? 'best' : '') + '"><i class="wd-dot a"></i><b>' + nA + '</b><span>' + esc(wdDesc(c.A.w)) + '</span><span>Meilleure sur ' + winA + ' critère' + (winA > 1 ? 's' : '') + '</span></div>' +
       '<div class="wd-cmp-card ' + (best === 'b' ? 'best' : '') + '"><i class="wd-dot b"></i><b>' + nB + '</b><span>' + esc(wdDesc(c.B.w)) + '</span><span>Meilleure sur ' + winB + ' critère' + (winB > 1 ? 's' : '') + '</span></div></div>';
@@ -3271,7 +3272,8 @@
     if (Math.abs(a.ret - b.ret) < 2 && Math.abs(a.wd - b.wd) < 0.05 * Math.max(a.wd, b.wd, 1)) lines.push('Les deux méthodes donnent des résultats très proches : choisissez selon le rythme de retrait qui vous convient.');
     if (X.ruined) lines.push('Attention : même avec « ' + nX + ' », ' + X.ruined + ' simulation' + (X.ruined > 1 ? 's finissent' : ' finit') + ' sous la moitié du capital de départ.');
     if (keys.length < 5) lines.push('Peu de simulations : élargissez la sélection (Tout le batch) pour une conclusion plus sûre.');
-    h += '<div class="modal-note wd-cmp-note">' + lines.map((x) => '<p>' + x + '</p>').join('') + '</div>';
+    h += '<div class="modal-note wd-cmp-note">' + lines.map((x) => '<p>' + x + '</p>').join('') + '</div>' +
+      '<div class="fx-save"><button type="button" class="primary small" id="wdFxSave">💼 Enregistrer un FX</button><span class="hint">Plan d\'investissement à présenter à un client : stratégie, capital, probabilité, confiance, risque, durée et retrait « ' + esc(best === 'a' ? c.A.name : c.B.name) + ' ».</span></div>';
     h += '<div class="table-wrap"><table class="ana-table wd-cmp-table"><thead><tr><th>Critère</th><th class="wd-a"><i class="wd-dot a"></i>' + nA + '</th><th class="wd-b"><i class="wd-dot b"></i>' + nB + '</th></tr></thead><tbody>' +
       rows.map((r) => '<tr><td>' + r[0] + '</td>' + cell(r[1], r[2], r[3], r[4], 'a') + cell(r[2], r[1], r[3], r[4], 'b') + '</tr>').join('') + '</tbody></table></div>';
     h += '<div class="eval-charts-grid wd-charts">' +
@@ -3304,6 +3306,133 @@
       series: [{ name: 'Compte A', values: s[0], color: 'var(--accent)', width: 2 }, { name: 'Compte B', values: s[1], color: '#d97706', width: 2 }, { name: 'Retraits A', values: s[2], color: '#60a5fa', width: 1.5, dash: '5 3' }, { name: 'Retraits B', values: s[3], color: '#fbbf24', width: 1.5, dash: '5 3' }] }],
       ariaLabel: 'Compte et retraits cumulés moyens des deux mécaniques' });
   }
+  // ---------- FX : plan d'investissement présentable à un client ----------
+  const FX_KEY = 'forexia.fx';
+  let fxMem = null;
+  const fxList = () => { try { const l = JSON.parse(localStorage.getItem(FX_KEY)); return Array.isArray(l) ? l : []; } catch (e) { return fxMem || []; } };
+  function setFxList(l) { fxMem = l; try { localStorage.setItem(FX_KEY, JSON.stringify(l)); } catch (e) { /* ignoré */ } updateFxCount(); }
+  function updateFxCount() { if ($('fxCount')) $('fxCount').textContent = fxList().length; }
+  const pctile = (a, q) => { const v = a.filter(Number.isFinite).sort((x, y) => x - y); if (!v.length) return NaN; const k = (v.length - 1) * q, lo = Math.floor(k), hi = Math.ceil(k); return v[lo] + (v[hi] - v[lo]) * (k - lo); };
+  /**
+   * Construit un FX à partir de la comparaison : la mécanique de retrait retenue (la meilleure), ses résultats
+   * sur les simulations comparées, et les simulations elles-mêmes (stratégie, capital, durée).
+   */
+  function buildFx(c) {
+    const st = wdState, best = c.bestSide === 'b' ? 'b' : 'a';
+    const mech = best === 'a' ? c.A : c.B, other = best === 'a' ? c.B : c.A;
+    const R = (best === 'a' ? st.cmpRows.RA : st.cmpRows.RB), sims = R.map((r) => evalList().find((e) => e.key === r.key)).filter(Boolean);
+    const n = R.length, ret = R.map((r) => r.w.ret);
+    const capital = pctile(R.map((r) => r.capital), 0.5);
+    const win = R.filter((r) => r.w.ret > 0), loss = R.filter((r) => r.w.ret <= 0);
+    const winRate = (win.length / n) * 100, gainMoy = mean(ret), gainWin = win.length ? mean(win.map((r) => r.w.ret)) : 0, lossMoy = loss.length ? mean(loss.map((r) => r.w.ret)) : 0;
+    // ce que le client récupère à la fin (compte + retraits), en % du capital investi
+    const back = R.map((r) => 100 + r.w.ret), p10 = pctile(back, 0.1), worst = Math.min(...back);
+    const agg = wdAgg(R);
+    // durées testées et durée recommandée (celle des simulations qui réussissent le mieux)
+    const months = R.map((r) => Math.max(1, Math.round(durationDays(r.from, r.to) / 30.4375)));
+    const groups = {};
+    R.forEach((r, i) => { const m = months[i], k = m <= 3 ? 3 : m <= 6 ? 6 : m <= 12 ? 12 : m <= 24 ? 24 : 36; (groups[k] = groups[k] || []).push(r.w.ret); });
+    const scored = Object.keys(groups).map((k) => ({ m: +k, n: groups[k].length, score: mean(groups[k]) * (groups[k].filter((v) => v > 0).length / groups[k].length) })).sort((x, y) => y.score - x.score);
+    const recoM = scored.length > 1 && scored[0].n >= 2 ? Math.min(scored[0].m, Math.max(...months)) : Math.round(pctile(months, 0.5));
+    // taux de confiance (0 à 100) : nombre de simulations, régularité, risque, préservation du capital, diversité des périodes
+    const years = new Set(); sims.forEach((e) => { for (let y = +e.from.slice(0, 4); y <= +e.to.slice(0, 4); y++) years.add(y); });
+    const sd = Math.sqrt(mean(ret.map((v) => (v - gainMoy) ** 2)));
+    const parts = {
+      echantillon: Math.min(1, n / 30) * 20,
+      reussite: (winRate / 100) * 25,
+      regularite: (1 - Math.min(1, sd / (Math.abs(gainMoy) + sd + 1e-9))) * 15,
+      risque: (1 - Math.min(1, agg.dd / 60)) * 20,
+      capital: (agg.kept / n) * 10,
+      periodes: Math.min(1, years.size / 10) * 10,
+    };
+    const confidence = Math.round(Object.values(parts).reduce((a, b) => a + b, 0));
+    const first = sims[0] || {};
+    return {
+      id: 'fx' + Date.now().toString(36), createdAt: new Date().toISOString(),
+      name: 'FX ' + (first.name || 'stratégie') + ' · ' + mech.name,
+      strategy: { name: first.name || '', data: first.strategy || null, config: first.config || null, pair: first.pair || '', leverage: first.leverage || null, dataLabel: first.data || '' },
+      capital: capital, n: n, years: [Math.min(...years), Math.max(...years)],
+      probability: { winRate: winRate, gainMoy: gainMoy, gainWin: gainWin, lossMoy: lossMoy },
+      confidence: { score: confidence, parts: parts },
+      risk: { p10: p10, worst: worst, atRisk: Math.max(0, capital * (1 - p10 / 100)), worstLoss: Math.max(0, capital * (1 - worst / 100)), dd: agg.dd },
+      duration: { min: Math.min(...months), max: Math.max(...months), reco: recoM },
+      withdraw: { name: mech.name, w: mech.w, desc: wdDesc(mech.w), yearly: agg.yearly, perMonth: agg.perMonth, kept: agg.kept, other: other.name },
+    };
+  }
+  function saveFxFromCompare() {
+    const c = wdState.cmp;
+    if (!c || c.status !== 'done' || !wdState.cmpRows) return;
+    const fx = buildFx(c);
+    const name = (prompt('Nom du FX (plan d\'investissement) :', fx.name) || '').trim().slice(0, 80);
+    if (!name) return;
+    fx.name = name;
+    setFxList(fxList().concat(fx));
+    logEvent('fx.saved', 'FX enregistré : ' + name, { id: fx.id });
+    toast('FX « ' + name + ' » enregistré : bouton « 💼 FX » en haut de la page.', false);
+  }
+  // ----- Fenêtre « FX » : les plans sous forme de cartes -----
+  const stars = (score) => { const s = Math.round(score / 20 * 2) / 2; let h = ''; for (let i = 1; i <= 5; i++) h += '<span class="fx-star ' + (s >= i ? 'on' : s >= i - 0.5 ? 'half' : '') + '">★</span>'; return h; };
+  const confLabel = (s) => (s >= 80 ? 'Très élevé' : s >= 65 ? 'Élevé' : s >= 50 ? 'Moyen' : s >= 35 ? 'Faible' : 'Très faible');
+  const riskLevel = (lossPct) => (lossPct <= 10 ? ['Faible', 'low'] : lossPct <= 30 ? ['Modéré', 'mid'] : ['Élevé', 'high']);
+  const durTxt = (m) => (m >= 12 && m % 12 === 0 ? m / 12 + ' an' + (m > 12 ? 's' : '') : m + ' mois');
+  function fxCardHtml(fx) {
+    const p = fx.probability, r = fx.risk, c = fx.confidence, lossPct = 100 - r.p10, [rl, rc] = riskLevel(lossPct);
+    const row = (k, v, sub, tip) => '<div class="fx-row"' + (tip ? ' title="' + esc(tip) + '"' : '') + '><span class="fx-k">' + k + '</span><span class="fx-v">' + v + (sub ? '<small>' + sub + '</small>' : '') + '</span></div>';
+    const tipConf = 'Score ' + c.score + '/100 : nombre de simulations ' + Math.round(c.parts.echantillon) + '/20, réussite ' + Math.round(c.parts.reussite) + '/25, régularité ' + Math.round(c.parts.regularite) + '/15, risque ' + Math.round(c.parts.risque) + '/20, capital préservé ' + Math.round(c.parts.capital) + '/10, diversité des périodes ' + Math.round(c.parts.periodes) + '/10.';
+    return '<article class="fx-card" data-fx="' + esc(fx.id) + '"><header><textarea class="fx-name" rows="2" data-fx-name="' + esc(fx.id) + '" aria-label="Nom du FX" title="Cliquez pour modifier le nom" spellcheck="false">' + esc(fx.name) + '</textarea><span class="fx-badge">FX</span></header>' +
+      row('Stratégie', esc(fx.strategy.name), esc([fx.strategy.pair, fx.strategy.leverage ? 'levier 1:' + fx.strategy.leverage : ''].filter(Boolean).join(' · '))) +
+      row('Capital à investir', money.format(fx.capital)) +
+      row('Probabilité', '<b class="' + (p.winRate >= 50 ? 'pos' : 'neg') + '">' + Math.round(p.winRate) + ' %</b> de réussite × gain moyen <b class="' + cls(p.gainMoy) + '">' + signed(p.gainMoy, num1) + ' %</b>',
+        'quand ça gagne : ' + signed(p.gainWin, num1) + ' % · quand ça perd : ' + signed(p.lossMoy, num1) + ' %', 'Sur ' + fx.n + ' simulations, retraits compris (compte final + sommes retirées).') +
+      row('Taux de confiance', '<span class="fx-stars">' + stars(c.score) + '</span> <b>' + c.score + '/100</b>', confLabel(c.score), tipConf) +
+      row('Risque', '<span class="fx-risk ' + rc + '">' + rl + '</span> · capital restitué au moins <b>' + money.format((fx.capital * Math.min(100, r.p10)) / 100) + '</b>',
+        'dans 9 cas sur 10 (perte possible ' + money.format(r.atRisk) + ') · pire cas testé : ' + money.format((fx.capital * r.worst) / 100) + ' restitués', 'Capital à restituer au client dans un mauvais scénario : ce qu\'il récupère (compte + retraits) dans les 10 % de simulations les plus défavorables.') +
+      row('Durée recommandée', '<b>' + durTxt(fx.duration.reco) + '</b>', 'testé de ' + durTxt(fx.duration.min) + ' à ' + durTxt(fx.duration.max)) +
+      row('Retrait type', '<b>' + esc(fx.withdraw.desc) + '</b>', 'rente ≈ ' + num1.format(fx.withdraw.yearly) + ' % du capital par an · ≈ ' + money.format(fx.withdraw.perMonth) + ' / mois · meilleure que « ' + esc(fx.withdraw.other) + ' »') +
+      '<footer><span class="hint">' + fx.n + ' simulations · ' + fx.years[0] + '–' + fx.years[1] + ' · ' + esc(fx.strategy.dataLabel || '') + ' · créé le ' + new Date(fx.createdAt).toLocaleDateString('fr-FR') + '</span>' +
+      '<span class="fx-acts">' + (fx.strategy.data ? '<button type="button" class="secondary small" data-fx-load="' + esc(fx.id) + '" title="Remettre la stratégie, son capital et ce retrait dans le formulaire">Charger</button>' : '') +
+      '<button type="button" class="ghost small" data-fx-del="' + esc(fx.id) + '" title="Supprimer ce FX" aria-label="Supprimer">🗑</button></span></footer></article>';
+  }
+  function openFx() {
+    const l = fxList();
+    $('fxBody').innerHTML = l.length ? '<div class="fx-grid">' + l.slice().reverse().map(fxCardHtml).join('') + '</div>' +
+      '<p class="hint fx-note">Chiffres issus de simulations passées (backtests) : ils ne garantissent pas les résultats futurs. « Probabilité » et « Risque » comptent les retraits (compte final + sommes retirées).</p>'
+      : '<p class="eval-empty">Aucun FX pour l\'instant. Dans Évaluation › « 💸 Resimuler avec un retrait », comparez deux mécaniques (⚖️ Comparer) puis cliquez sur « 💼 Enregistrer un FX ».</p>';
+    $('fxModal').hidden = false; document.body.style.overflow = 'hidden';
+  }
+  function closeFx() { $('fxModal').hidden = true; if ($('evalModal').hidden && $('wdModal').hidden) document.body.style.overflow = ''; }
+  $('fxBtn').addEventListener('click', openFx);
+  $('fxModal').addEventListener('click', (ev) => {
+    const t = ev.target;
+    if (t.closest('[data-close]')) return closeFx();
+    const del = t.closest('[data-fx-del]');
+    if (del) { const fx = fxList().find((x) => x.id === del.dataset.fxDel); if (fx && confirm('Supprimer le FX « ' + fx.name + ' » ?')) { setFxList(fxList().filter((x) => x.id !== fx.id)); openFx(); } return; }
+    const ld = t.closest('[data-fx-load]');
+    if (ld) {
+      const fx = fxList().find((x) => x.id === ld.dataset.fxLoad);
+      if (!fx) return;
+      undoable('FX « ' + fx.name + ' » chargé', () => {
+        loadStrategy(fx.strategy.data); if (fx.strategy.config) applyConfig(fx.strategy.config);
+        $('capital').value = Math.round(fx.capital * 100) / 100; wdToForm(fx.withdraw.w);
+        $('preset').value = 'mine'; $('deleteStrat').hidden = true;
+        $('presetDesc').textContent = 'FX « ' + fx.name + ' » : ' + fx.strategy.name + ', capital ' + money.format(fx.capital) + ', retrait ' + fx.withdraw.desc + ', durée recommandée ' + durTxt(fx.duration.reco) + '.';
+        updateStyleHint();
+      });
+      closeFx();
+    }
+  });
+  // nom du FX modifiable directement sur la carte
+  $('fxModal').addEventListener('change', (ev) => {
+    const id = ev.target.dataset && ev.target.dataset.fxName;
+    if (!id) return;
+    const name = ev.target.value.trim().slice(0, 80), l = fxList(), fx = l.find((x) => x.id === id);
+    if (!fx) return;
+    if (!name) { ev.target.value = fx.name; return; }
+    fx.name = name; setFxList(l); toast('Nom du FX modifié.', false);
+  });
+  $('fxModal').addEventListener('keydown', (ev) => { if (ev.target.dataset && ev.target.dataset.fxName && ev.key === 'Enter') { ev.preventDefault(); ev.target.blur(); } });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('fxModal').hidden) closeFx(); });
+  updateFxCount();
   async function runWd() {
     const st = wdState;
     if (checkRunning) return;
@@ -3493,6 +3622,7 @@
     if (t.id === 'wdRun') return runWd();
     if (t.id === 'wdStop') { checkStop = true; return; }
     if (t.id === 'wdCmp') return openWdCompare();
+    if (t.id === 'wdFxSave') return saveFxFromCompare();
     if (t.id === 'wdCmpBack') { wdState.view = null; return wdShowCached(); }
     if (t.id === 'wdCmpRun') { wdState.cmp.a = $('wdCmpA').value; wdState.cmp.b = $('wdCmpB').value; return runWdCompare(); }
     if (t.id === 'wdFocusAll') { wdState.focus = null; mountWdCharts(wdState); return wdPaintRows(wdState); }

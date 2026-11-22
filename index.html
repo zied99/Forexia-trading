@@ -1,12 +1,12 @@
 <!doctype html>
-<html lang="fr" data-version="1.2.48">
+<html lang="fr" data-version="1.2.49">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Forexia Backtest</title>
   <meta name="description" content="Backtesting de stratégies de trading Forex basées sur RSI, MACD, stochastique, moyennes mobiles…">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%232563eb'/><path d='M6 22l6-7 5 4 9-11' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
-  <link rel="stylesheet" href="css/style.css?v=1.2.48">
+  <link rel="stylesheet" href="css/style.css?v=1.2.49">
 </head>
 <body>
   <div class="auth-gate" id="authGate" hidden>
@@ -43,6 +43,7 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>Base de données <span class="dot off" id="dbDot"></span></button>
     <button type="button" class="ghost eval-btn" id="evalBtn" title="Tableau de toutes vos simulations">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Évaluation <span class="count" id="evalCount">0</span></button>
+    <button type="button" class="ghost eval-btn fx-btn" id="fxBtn" title="Vos plans d'investissement (FX)">💼 FX <span class="count" id="fxCount">0</span></button>
     <button type="button" class="ghost theme" id="themeToggle" aria-label="Basculer thème clair / sombre" title="Thème clair / sombre"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z"/></svg></button>
     </div>
   </header>
@@ -515,7 +516,16 @@
     </section>
   </main>
 
-  <div class="modal" id="wdModal" hidden>
+  <div class="modal" id="fxModal" hidden>
+  <div class="modal-backdrop" data-close></div>
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="fxTitle">
+    <header class="modal-head"><div><h2 id="fxTitle">💼 Vos FX</h2><p class="hint">Plans d'investissement à présenter à un client. Cliquez sur le nom d'un FX pour le modifier.</p></div>
+      <button type="button" class="ghost close" data-close aria-label="Fermer">✕</button></header>
+    <div class="modal-body" id="fxBody"></div>
+    <footer class="modal-foot"><div></div><div class="modal-actions"><button type="button" class="primary" data-close>Fermer</button></div></footer>
+  </div>
+</div>
+<div class="modal" id="wdModal" hidden>
   <div class="modal-backdrop" data-close></div>
   <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="wdTitle">
     <header class="modal-head"><div><h2 id="wdTitle">💸 Resimuler avec un retrait</h2><p class="hint">Les simulations affichées, relancées avec un retrait fictif des gains.</p></div>
@@ -739,7 +749,7 @@
             <p class="hint">La passerelle est un petit programme qui tourne sur votre PC : elle dépose l'EA dans MT5, le compile, lance le testeur et peut l'ouvrir sur un graphique. Installation unique :</p>
             <ol class="steps">
               <li>Installez <a href="https://www.python.org/downloads/" target="_blank" rel="noopener">Python</a> (cochez « Add python.exe to PATH »).</li>
-              <li>Téléchargez <a href="bridge/forexia_bridge.py?v=1.2.48" download="forexia_bridge.py">forexia_bridge.py</a> et <a href="bridge/demarrer-passerelle.bat?v=1.2.48" download="demarrer-passerelle.bat">demarrer-passerelle.bat</a> dans un même dossier.</li>
+              <li>Téléchargez <a href="bridge/forexia_bridge.py?v=1.2.49" download="forexia_bridge.py">forexia_bridge.py</a> et <a href="bridge/demarrer-passerelle.bat?v=1.2.49" download="demarrer-passerelle.bat">demarrer-passerelle.bat</a> dans un même dossier.</li>
               <li>Double-cliquez sur <code>demarrer-passerelle.bat</code> et laissez la fenêtre ouverte. Si le navigateur demande l'accès au « réseau local », acceptez.</li>
               <li>Collez le code d'appairage affiché dans cette fenêtre :</li>
             </ol>
@@ -814,21 +824,21 @@
     <br>Forexia <span id="appVersion">1.2</span>
   </footer>
 
-  <script src="js/cloud.js?v=1.2.48"></script>
-  <script src="js/indicators.js?v=1.2.48"></script>
-  <script src="js/expr.js?v=1.2.48"></script>
-  <script src="js/trade.js?v=1.2.48"></script>
-  <script src="js/advisor.js?v=1.2.48"></script>
-  <script src="js/events.js?v=1.2.48"></script>
-  <script src="js/backtest.js?v=1.2.48"></script>
-  <script src="js/data.js?v=1.2.48"></script>
-  <script src="js/presets.js?v=1.2.48"></script>
-  <script src="js/french.js?v=1.2.48"></script>
-  <script src="js/enhancer.js?v=1.2.48"></script>
-  <script src="js/analyzer.js?v=1.2.48"></script>
-  <script src="js/mql5.js?v=1.2.48"></script>
-  <script src="js/broker.js?v=1.2.48"></script>
-  <script src="js/chart.js?v=1.2.48"></script>
-  <script src="js/app.js?v=1.2.48"></script>
+  <script src="js/cloud.js?v=1.2.49"></script>
+  <script src="js/indicators.js?v=1.2.49"></script>
+  <script src="js/expr.js?v=1.2.49"></script>
+  <script src="js/trade.js?v=1.2.49"></script>
+  <script src="js/advisor.js?v=1.2.49"></script>
+  <script src="js/events.js?v=1.2.49"></script>
+  <script src="js/backtest.js?v=1.2.49"></script>
+  <script src="js/data.js?v=1.2.49"></script>
+  <script src="js/presets.js?v=1.2.49"></script>
+  <script src="js/french.js?v=1.2.49"></script>
+  <script src="js/enhancer.js?v=1.2.49"></script>
+  <script src="js/analyzer.js?v=1.2.49"></script>
+  <script src="js/mql5.js?v=1.2.49"></script>
+  <script src="js/broker.js?v=1.2.49"></script>
+  <script src="js/chart.js?v=1.2.49"></script>
+  <script src="js/app.js?v=1.2.49"></script>
 </body>
 </html>
