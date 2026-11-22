@@ -241,6 +241,21 @@ def main():
     st, js, _ = call("POST", "/db/simulations/clear", {})
     st, js, _ = call("POST", "/db/info", {})
     check("suppression et effacement", js["counts"]["strategies"] == 0 and js["counts"]["simulations"] == 0, js["counts"])
+    # autres données (FX, batchs…) : une ligne par clé
+    fx = [{"id": "fx1", "name": "Plan Sérénité", "capital": 10000}]
+    st, js, _ = call("POST", "/db/kv/put", {"key": "forexia.fx", "data": fx, "updatedAt": "2026-11-22T10:00:00Z"})
+    call("POST", "/db/kv/put", {"key": "forexia.batches", "data": [{"id": "b1", "entries": []}], "updatedAt": "2026-11-22T10:00:00Z"})
+    call("POST", "/db/kv/put", {"key": "forexia.fx", "data": fx + [{"id": "fx2", "name": "Plan 2"}], "updatedAt": "2026-11-22T11:00:00Z"})
+    st, js, _ = call("POST", "/db/kv/list", {})
+    items = {x["key"]: x for x in js.get("items", [])}
+    check("données FX et batchs enregistrées", js.get("ok") and len(items["forexia.fx"]["data"]) == 2 and items["forexia.fx"]["updatedAt"].startswith("2026-11-22T11") and "forexia.batches" in items, items)
+    st, js, _ = call("POST", "/db/info", {})
+    check("compteur des autres données", js["counts"].get("kv") == 2, js["counts"])
+    st, js, _ = call("POST", "/db/export", {})
+    check("export avec les autres données", js.get("data", {}).get("forexia.fx", [{}])[0].get("name") == "Plan Sérénité", js.get("data"))
+    call("POST", "/db/kv/delete", {"key": "forexia.batches"})
+    st, js, _ = call("POST", "/db/kv/list", {})
+    check("suppression d'une donnée", [x["key"] for x in js["items"]] == ["forexia.fx"], js["items"])
 
     proc.terminate()
     print("\n%d échec(s)" % failed)

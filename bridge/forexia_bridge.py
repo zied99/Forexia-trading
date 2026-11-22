@@ -28,7 +28,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "1.5"
+VERSION = "1.6"
 DEFAULT_PORT = 8787
 PAGE_ORIGIN = "https://zied99.github.io"
 FILE_RE = re.compile(r"^Forexia_[A-Za-z0-9_]{1,60}\.mq5$")
@@ -536,6 +536,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS strategies (name TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS simulations (key TEXT PRIMARY KEY, at TEXT NOT NULL, name TEXT, pair TEXT, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, type TEXT NOT NULL, summary TEXT, data TEXT);
+CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, data TEXT, updated_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS simulations_at ON simulations (at);
 CREATE INDEX IF NOT EXISTS events_at ON events (at);
 """
@@ -584,7 +585,7 @@ def db_action(args, path, body):
         try:
             with conn:
                 if path == "info":
-                    counts = {t: conn.execute("SELECT COUNT(*) FROM " + t).fetchone()[0] for t in ("strategies", "simulations", "events")}
+                    counts = {t: conn.execute("SELECT COUNT(*) FROM " + t).fetchone()[0] for t in ("strategies", "simulations", "events", "kv")}
                     return {"ok": True, "path": db_path(args), "size": os.path.getsize(db_path(args)), "counts": counts}
                 if path == "strategies/list":
                     rows = conn.execute("SELECT name, data, updated_at FROM strategies ORDER BY name").fetchall()
@@ -618,6 +619,22 @@ def db_action(args, path, body):
                 if path == "simulations/clear":
                     n = conn.execute("DELETE FROM simulations").rowcount
                     return {"ok": True, "deleted": n}
+                # Autres données de Forexia (FX, batchs, époques, événements de marché, mécaniques de retrait, dessins…) :
+                # une ligne par clé, la plus récente l'emporte.
+                if path == "kv/list":
+                    rows = conn.execute("SELECT key, data, updated_at FROM kv ORDER BY key").fetchall()
+                    return {"ok": True, "items": [dict(key=r["key"], data=json.loads(r["data"]) if r["data"] is not None else None, updatedAt=r["updated_at"]) for r in rows]}
+                if path == "kv/put":
+                    key = str(body.get("key", "")).strip()
+                    if not key or len(key) > 120:
+                        raise ValueError("Clé invalide.")
+                    data = body.get("data")
+                    conn.execute("INSERT INTO kv (key, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at",
+                                 (key, _text(data, 6000000) if data is not None else None, str(body.get("updatedAt") or now_iso())[:40]))
+                    return {"ok": True}
+                if path == "kv/delete":
+                    conn.execute("DELETE FROM kv WHERE key = ?", (str(body.get("key", "")),))
+                    return {"ok": True}
                 if path == "events/put":
                     kind = str(body.get("type", "")).strip()
                     if not kind:
@@ -634,6 +651,7 @@ def db_action(args, path, body):
                     out = {"exportedAt": now_iso(), "path": db_path(args)}
                     out["strategies"] = [dict(name=r["name"], data=json.loads(r["data"]), updatedAt=r["updated_at"]) for r in conn.execute("SELECT * FROM strategies")]
                     out["simulations"] = [json.loads(r["data"]) for r in conn.execute("SELECT data FROM simulations ORDER BY at")]
+                    out["data"] = {r["key"]: json.loads(r["data"]) if r["data"] is not None else None for r in conn.execute("SELECT key, data FROM kv")}
                     out["events"] = [dict(at=r["at"], type=r["type"], summary=r["summary"], data=json.loads(r["data"]) if r["data"] else None)
                                      for r in conn.execute("SELECT * FROM events ORDER BY id")]
                     return dict(out, ok=True)

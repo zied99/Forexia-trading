@@ -67,11 +67,16 @@ navigateur ; elles sont versées dans le compte à la première connexion. La d�
 Mise en place (une fois) : dans Supabase, *SQL Editor* → coller `supabase/schema.sql` → *Run* ; dans *Authentication →
 Sign In / Providers*, désactiver « Confirm email ». L'adresse du projet et la clé publique sont dans `js/cloud.js`.
 
-**Base de données** (bouton en haut de page) : avec la passerelle (1.4+), tout est enregistré dans une base SQLite
+**Base de données** (bouton en haut de page) : avec la passerelle (1.6+), tout est enregistré dans une base SQLite
 sur votre PC (`%APPDATA%\Forexia\forexia.db`) : stratégies, simulations (avec la liste de leurs trades) et un
 journal de toutes les actions (enregistrements, imports, améliorations, stratégies aléatoires, EA téléchargés,
 compilations, tests MT5 et comparaisons Forexia / MT5). Le navigateur garde une copie ; à chaque connexion, les deux
 sont fusionnés. La fenêtre affiche le journal (filtrable) et permet d'exporter toute la base en JSON.
+Depuis la passerelle 1.6, **toutes les autres données** sont aussi enregistrées dans la base (table `kv`, une ligne par
+type de donnée) et dans le compte en ligne : FX, batchs, époques, événements de marché ajoutés ou détectés, mécaniques
+de retrait et leurs résultats, tracés sur les graphiques, dernière simulation. Chaque changement est envoyé dans la
+seconde ; à la connexion, la version la plus récente l'emporte (et, sur un appareil jamais synchronisé, les listes
+sont réunies).
 
 **Retrait fictif des gains** (section Marché et capital) : quand le compte atteint « capital × (1 + seuil %) », une part
 du gain (100 % par défaut) est retirée et mise à l'abri, soit **dès que le seuil est atteint** (la position est clôturée à ce

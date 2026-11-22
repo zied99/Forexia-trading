@@ -16,6 +16,98 @@
   const num2 = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const signed = (v, f) => (v > 0 ? '+' : v < 0 ? '−' : '') + f.format(Math.abs(v));
   const cls = (v) => (v > 0 ? 'pos' : v < 0 ? 'neg' : '');
+  // ---------- Toutes les données dans la base : passerelle (base SQLite sur votre PC) et compte en ligne ----------
+  // Chaque donnée gardée dans le navigateur est aussi enregistrée dans la base dès qu'elle change, et récupérée
+  // à la connexion (la version la plus récente l'emporte ; à la première connexion d'un appareil, les listes sont réunies).
+  const SYNC_KEYS = ['forexia.fx', 'forexia.batches', 'forexia.eras', 'forexia.events', 'forexia.wdPresets', 'forexia.wdResults', 'forexia.drawings', 'forexia.lastRun'];
+  const SYNC_META = 'forexia.syncMeta';
+  const syncMeta = () => { try { return JSON.parse(localStorage.getItem(SYNC_META)) || {}; } catch (e) { return {}; } };
+  let syncMuted = false, syncTimer = null, kvOldBridge = false;
+  const syncDirty = new Set();
+  (function watchStorage() {
+    const P = Storage.prototype, set = P.setItem, rem = P.removeItem;
+    P.setItem = function (k, v) { set.call(this, k, v); if (!syncMuted && SYNC_KEYS.includes(k) && this === window.localStorage) kvDirty(k); };
+    P.removeItem = function (k) { rem.call(this, k); if (!syncMuted && SYNC_KEYS.includes(k) && this === window.localStorage) kvDirty(k); };
+  })();
+  function kvDirty(k) {
+    const m = syncMeta(); m[k] = new Date().toISOString();
+    try { localStorage.setItem(SYNC_META, JSON.stringify(m)); } catch (e) { /* ignoré */ }
+    syncDirty.add(k);
+    clearTimeout(syncTimer); syncTimer = setTimeout(kvFlush, 1200);
+  }
+  const kvRead = (k) => { try { const v = localStorage.getItem(k); return v == null ? null : JSON.parse(v); } catch (e) { return null; } };
+  function kvWrite(k, data, at) {
+    syncMuted = true;
+    try {
+      if (data == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(data));
+      const m = syncMeta(); m[k] = at; localStorage.setItem(SYNC_META, JSON.stringify(m));
+    } catch (e) { /* ignoré */ } finally { syncMuted = false; }
+  }
+  async function kvToBridge(items) {
+    if (!dbOn || kvOldBridge) return;
+    for (const it of items) {
+      try { await dbCall('kv/put', it); }
+      catch (e) { if (/Inconnu/.test(e.message)) { kvOldBridge = true; toast('Mettez à jour la passerelle MT5 (version 1.6) pour enregistrer aussi les FX, batchs, époques… dans la base.', false); } return; }
+    }
+  }
+  async function kvToCloud(items) {
+    if (!cloudOn()) return;
+    const st = await C.getSettings();
+    st.kv = st.kv || {};
+    for (const it of items) st.kv[it.key] = { data: it.data, updatedAt: it.updatedAt };
+    await C.putSettings(st);
+  }
+  async function kvFlush() {
+    const keys = [...syncDirty]; syncDirty.clear();
+    if (!keys.length) return;
+    const m = syncMeta(), items = keys.map((k) => ({ key: k, data: kvRead(k), updatedAt: m[k] || new Date().toISOString() }));
+    await kvToBridge(items);
+    if (cloudOn()) cloudPush(() => kvToCloud(items));
+  }
+  window.addEventListener('beforeunload', () => { if (syncDirty.size) kvFlush(); });
+  // listes d'objets identifiés (FX, batchs, époques, mécaniques…) : réunion des deux côtés
+  function kvUnion(local, remote) {
+    if (!Array.isArray(local) || !Array.isArray(remote)) return remote;
+    const id = (x) => (x && (x.id || x.key || x.name)) || JSON.stringify(x), map = new Map();
+    remote.forEach((x) => map.set(id(x), x)); local.forEach((x) => map.set(id(x), x));
+    return [...map.values()];
+  }
+  /** Fusion avec une base : remote = [{key, data, updatedAt}] ; push(items) enregistre côté base. */
+  async function kvSync(remote, push) {
+    const m = syncMeta(), out = [];
+    let changed = false;
+    for (const k of SYNC_KEYS) {
+      const r = remote.find((x) => x.key === k), l = kvRead(k), lAt = m[k];
+      if (!r) { if (l != null) out.push({ key: k, data: l, updatedAt: lAt || new Date().toISOString() }); continue; }
+      if (!lAt) {
+        // jamais synchronisée sur cet appareil : on réunit
+        const d = l == null ? r.data : kvUnion(l, r.data);
+        kvWrite(k, d, r.updatedAt || new Date().toISOString()); changed = true;
+        if (JSON.stringify(d) !== JSON.stringify(r.data)) { const at = new Date().toISOString(); kvWrite(k, d, at); out.push({ key: k, data: d, updatedAt: at }); }
+      } else if ((r.updatedAt || '') > lAt) { kvWrite(k, r.data, r.updatedAt); changed = true; }
+      else if (lAt > (r.updatedAt || '')) out.push({ key: k, data: l, updatedAt: lAt });
+    }
+    if (out.length) await push(out);
+    if (changed) kvRefreshUi();
+  }
+  function kvRefreshUi() {
+    try { updateFxCount(); refreshWdPresetPick(); updateBatchCount(); } catch (e) { /* ignoré */ }
+    if (!$('fxModal').hidden) openFx();
+    if (!$('evalModal').hidden) renderEvaluation();
+  }
+  async function kvSyncBridge() {
+    if (!dbOn) return;
+    let r;
+    try { r = await dbCall('kv/list'); } catch (e) { if (/Inconnu/.test(e.message)) kvOldBridge = true; return; }
+    kvOldBridge = false;
+    await kvSync(r.items || [], kvToBridge);
+  }
+  async function kvSyncCloud() {
+    if (!cloudOn()) return;
+    const st = await C.getSettings(), kv = st.kv || {};
+    await kvSync(Object.keys(kv).map((k) => ({ key: k, data: kv[k].data, updatedAt: kv[k].updatedAt })), kvToCloud);
+  }
+
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const frDate = (d) => { const m = /^(\d{4})-(\d{2})-(\d{2})(.*)$/.exec(d); return m ? m[3] + '/' + m[2] + '/' + m[1] + m[4] : d; };
   const shortDate = (d) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d); return m ? ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'][+m[2] - 1] + ' ' + m[1].slice(2) : d; };
@@ -27,7 +119,7 @@
 
   let lastFocusedRule = $('longEntry');
   const BRIDGE_URL = 'http://127.0.0.1:8787';
-  const BRIDGE_MIN = '1.5'; // version minimale de la passerelle attendue par cette page
+  const BRIDGE_MIN = '1.6'; // version minimale de la passerelle attendue par cette page
   let bridgeToken = '';
   try { bridgeToken = localStorage.getItem('forexia.bridgeToken') || ''; } catch (e) { /* ignoré */ }
   let csvBars = null, csvName = '';
@@ -1158,7 +1250,7 @@
       // Filet de sécurité : la dernière stratégie simulée est gardée, même non enregistrée.
       const lastRunRec = { at: new Date().toISOString(), strategy: strat, config: config };
       try { localStorage.setItem('forexia.lastRun', JSON.stringify(lastRunRec)); } catch (e) { /* ignoré */ }
-      cloudPush(() => C.putSettings({ lastRun: lastRunRec }));
+      cloudPush(async () => { const st = await C.getSettings(); await C.putSettings(Object.assign({}, st, { lastRun: lastRunRec })); }); // garde les autres données du compte
       refreshPresetSelect($('preset').value);
       return true;
     } catch (err) {
@@ -2492,6 +2584,7 @@
     } else if (localLast && (!st.lastRun || localLast.at > st.lastRun.at)) {
       await C.putSettings(Object.assign({}, st, { lastRun: localLast }));
     }
+    await kvSyncCloud(); // FX, batchs, époques, événements, mécaniques de retrait, dessins…
     setSync('ok');
   }
   // Tables absentes dans Supabase : bandeau avec le script à copier et le lien vers l'éditeur SQL du projet.
@@ -2647,6 +2740,7 @@
     const all = new Map(rs.map((e) => [e.key, e]));
     for (const e of ls) all.set(e.key, e);
     evalSave([...all.values()].map((e) => { const c = Object.assign({}, e); delete c.tradeList; return c; }).sort((a, b) => (a.at < b.at ? -1 : 1)));
+    await kvSyncBridge(); // FX, batchs, époques, événements, mécaniques de retrait, dessins…
     if (cloudOn()) cloudSync().catch(cloudFail);
   }
   const EVENT_LABEL = {
@@ -2664,8 +2758,8 @@
     if (cloudOn()) return renderCloudDatabase();
     if (!dbOn) await dbConnect();
     if (!dbOn) {
-      $('dbStatus').innerHTML = '<p><b>Base non connectée.</b> Vos stratégies et simulations sont pour l\'instant seulement dans ce navigateur.</p>' +
-        '<p class="hint">Lancez la passerelle (version 1.4 ou plus, fichiers dans <i>Déployer → Envoi direct</i>) et connectez-la : tout sera enregistré dans une base SQLite sur votre PC ' +
+      $('dbStatus').innerHTML = '<p><b>Base non connectée.</b> Vos stratégies, simulations, FX, batchs, époques, événements et mécaniques de retrait sont pour l\'instant seulement dans ce navigateur.</p>' +
+        '<p class="hint">Lancez la passerelle (version 1.6 ou plus, fichiers dans <i>Déployer → Envoi direct</i>) et connectez-la : tout sera enregistré dans une base SQLite sur votre PC ' +
         '(<code>%APPDATA%\\Forexia\\forexia.db</code>), y compris ce qui est déjà dans ce navigateur.</p>';
       $('dbBody').innerHTML = ''; $('dbExport').disabled = true;
       return;
@@ -2673,9 +2767,17 @@
     try { dbInfo = await dbCall('info'); } catch (e) { /* on garde les derniers chiffres */ }
     const c = dbInfo.counts;
     $('dbStatus').innerHTML = '<p><b>Base connectée</b> : <code>' + esc(dbInfo.path) + '</code> (' + num1.format(dbInfo.size / 1024) + ' Ko)</p>' +
-      '<div class="db-counts"><span><b>' + c.strategies + '</b> stratégies</span><span><b>' + c.simulations + '</b> simulations</span><span><b>' + c.events + '</b> actions au journal</span></div>';
+      '<div class="db-counts"><span><b>' + c.strategies + '</b> stratégies</span><span><b>' + c.simulations + '</b> simulations</span><span><b>' + c.events + '</b> actions au journal</span></div>' + kvCountsHtml(!kvOldBridge);
     $('dbExport').disabled = false;
     renderJournal((await dbCall('events/list', { limit: 1000 })).items);
+  }
+  /** Les autres données (FX, batchs…) aussi enregistrées dans la base. */
+  function kvCountsHtml(ok) {
+    const n = (k) => { const v = kvRead(k); return Array.isArray(v) ? v.length : v ? 1 : 0; };
+    const ev = kvRead('forexia.events') || {}, evN = (ev.items || []).filter((e) => !e.hidden).length;
+    const parts = [[n('forexia.fx'), 'FX'], [n('forexia.batches'), 'batchs'], [n('forexia.eras'), 'époques'], [n('forexia.wdPresets'), 'mécaniques de retrait'], [evN, 'événements de marché ajoutés ou détectés'],
+      [Object.keys(kvRead('forexia.wdResults') || {}).length, 'résultats de retrait calculés'], [Object.keys(kvRead('forexia.drawings') || {}).length, 'paires avec des tracés']];
+    return '<p class="hint db-kv">' + (ok ? 'Aussi enregistrés dans la base : ' : '<b>Passerelle à mettre à jour (version 1.6)</b> pour enregistrer aussi : ') + parts.map(([v, l]) => '<b>' + v + '</b> ' + l).join(' · ') + ', et la dernière simulation.</p>';
   }
   async function renderCloudDatabase() {
     const u = C.user;
@@ -2683,7 +2785,7 @@
     try {
       const c = await C.counts();
       $('dbStatus').innerHTML = '<p><b>Compte en ligne « ' + esc(u.name) + ' »</b> : vos données sont enregistrées en ligne et retrouvées sur tous vos appareils.</p>' +
-        '<div class="db-counts"><span><b>' + c.strategies + '</b> stratégies</span><span><b>' + c.simulations + '</b> simulations</span><span><b>' + c.events + '</b> actions au journal</span></div>' +
+        '<div class="db-counts"><span><b>' + c.strategies + '</b> stratégies</span><span><b>' + c.simulations + '</b> simulations</span><span><b>' + c.events + '</b> actions au journal</span></div>' + kvCountsHtml(true) +
         (dbOn && dbInfo ? '<p class="hint">Copie également tenue à jour dans la base du PC (passerelle) : <code>' + esc(dbInfo.path) + '</code></p>' : '');
       $('dbExport').disabled = false;
       events = await C.listEvents(1000);
@@ -2716,7 +2818,7 @@
   $('dbExport').addEventListener('click', async () => {
     try {
       const data = cloudOn()
-        ? { exportedAt: new Date().toISOString(), account: C.user.name, strategies: await C.listStrategies(), simulations: await C.listSimulations(), events: await C.listEvents(10000) }
+        ? { exportedAt: new Date().toISOString(), account: C.user.name, strategies: await C.listStrategies(), simulations: await C.listSimulations(), events: await C.listEvents(10000), data: ((await C.getSettings()).kv || {}) }
         : await dbCall('export');
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const a = document.createElement('a');
