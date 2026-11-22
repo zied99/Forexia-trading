@@ -201,8 +201,8 @@ ou régulier : chaque mois / tous les X jours, % du compte, somme fixe ou % de l
 - un verdict (effet sur les intérêts composés, rythme de retrait trop élevé…).
 **Appliquer à** : tout le batch (les simulations affichées), les simulations sélectionnées, ou une seule ; le bouton
 « 💸 Resimuler avec un retrait » du panneau d'une barre ouvre la fenêtre sur cette simulation. Les résultats sont gardés
-par mécanique et par simulation : rechoisir une mécanique enregistrée réaffiche directement ses graphiques (et ne calcule
-que les simulations manquantes).
+par mécanique et par simulation : rechoisir une mécanique enregistrée réaffiche directement ses graphiques, sans rien relancer ;
+« Resimuler » ne calcule que les simulations qui n'ont pas encore de résultat.
 Les simulations du tableau ne sont pas modifiées. **💾 Enregistrer cette mécanique** la garde sous un nom : elle est
 ensuite proposée dans la fenêtre et dans « Retrait fictif des gains » du formulaire (« Mécanique enregistrée »).
 

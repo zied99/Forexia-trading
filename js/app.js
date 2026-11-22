@@ -3086,7 +3086,9 @@
   function wdShowCached(autoRun) {
     const st = wdState, T = wdTargets(), cache = wdResStore.get(), k = wdKey(st.w);
     const rows = T.map((e) => cache[k + '#' + e.key]).filter(Boolean);
-    if (rows.length === T.length && rows.length) { st.rows = rows.map((r) => Object.assign({}, r, { idx: evalList().findIndex((x) => x.key === r.key) + 1 })); st.status = 'done'; st.ran = Object.assign({}, st.w); st.cached = true; renderWdModal(); return; }
+    // résultats déjà calculés (tous ou une partie) : affichés sans relancer ; le reste se calcule avec « Resimuler »
+    st.missing = T.length - rows.length;
+    if (rows.length) { st.rows = rows.map((r) => Object.assign({}, r, { idx: evalList().findIndex((x) => x.key === r.key) + 1 })); st.status = 'done'; st.ran = Object.assign({}, st.w); st.cached = true; renderWdModal(); return; }
     st.rows = null; st.status = 'idle'; st.cached = false;
     renderWdModal();
     if (autoRun) runWd();
@@ -3125,7 +3127,8 @@
       'Le résultat « avec retrait » compte le compte final <b>plus</b> les sommes retirées. Les simulations du tableau ne sont pas modifiées.</div>' + wdFormHtml(st.w);
     if (st.status === 'run') h += '<div class="modal-loading"><span class="spinner"></span>' + esc(st.msg || '') + ' <button type="button" class="secondary small" id="wdStop">Arrêter</button></div>';
     if (st.status === 'err') h += '<p class="val ko">' + esc(st.msg) + '</p>';
-    if (st.status === 'idle' && !st.rows) h += '<p class="hint wd-idle">Choisissez la mécanique puis « Resimuler ». Les résultats d\'une mécanique déjà calculée s\'affichent directement quand vous la rechoisissez.</p>';
+    if (st.status === 'idle' && !st.rows) h += '<p class="hint wd-idle">' + (st.presetId ? 'Cette mécanique n\'a pas encore de résultats sur ' + (n > 1 ? 'ces simulations' : 'cette simulation') + ' : cliquez sur « Resimuler ».' : 'Choisissez la mécanique puis « Resimuler ».') + ' Les résultats calculés sont gardés : en rechoisissant la mécanique, ils s\'affichent sans relancer.</p>';
+    if (st.status === 'done' && st.cached && st.missing > 0) h += '<p class="banner info wd-partial">Résultats déjà calculés pour ' + st.rows.length + ' simulation' + (st.rows.length > 1 ? 's' : '') + ' sur ' + n + '. « Resimuler » calcule seulement les ' + st.missing + ' autre' + (st.missing > 1 ? 's' : '') + '.</p>';
     if (st.rows && st.rows.length) h += wdResultHtml(st);
     $('wdBody').innerHTML = h;
     if (st.rows && st.rows.length && st.status !== 'run') mountWdCharts(st);
@@ -3263,7 +3266,7 @@
     const id = ev.target.id;
     if (checkRunning === 'wd') return;
     // mécanique enregistrée rechoisie : ses résultats s'affichent (calculés au besoin)
-    if (id === 'wdPreset') { const p = wdPresets().find((x) => x.id === ev.target.value); wdState.presetId = ev.target.value; if (p) { wdState.w = Object.assign({}, p.w); return wdShowCached(true); } return renderWdModal(); }
+    if (id === 'wdPreset') { const p = wdPresets().find((x) => x.id === ev.target.value); wdState.presetId = ev.target.value; if (p) { wdState.w = Object.assign({}, p.w); return wdShowCached(false); } return renderWdModal(); }
     if (id === 'wdScope') { wdState.scope = ev.target.value; return wdShowCached(); }
     if (['wdMode', 'wdEvery', 'wdType'].includes(id)) { wdReadForm(); wdState.presetId = ''; return wdShowCached(); }
     if (id && id.startsWith('wd')) { wdReadForm(); wdState.presetId = ''; return wdShowCached(); }
