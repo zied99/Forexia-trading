@@ -188,6 +188,22 @@ Un **batch** est un lot de simulations enregistré ensemble, par exemple un lot 
   recommandations) ; « Mettre à jour le batch » y enregistre leur état après prolongation ou amélioration.
 - Renommer ✏️ et supprimer 🗑. Les batchs sont gardés dans ce navigateur.
 
+## Événements de marché
+
+Forexia connaît les grands événements du marché des changes depuis 1971 (Bretton Woods, accords du Plaza, mercredi
+noir, lancement de l'euro, Lehman Brothers, crise de la dette, fin du plancher EUR/CHF, Brexit, Covid, hausses de taux
+de 2022…), avec les devises concernées et leur effet. Ils apparaissent :
+- sur le graphique des cours (losanges violets ◆, bouton « ◆ Événements » pour les masquer) ;
+- dans le panneau « 📰 Événements pendant la période » des résultats ;
+- sur la frise de l'analyse temporelle (numéros violets), dans « Ce qui s'est passé dans chaque époque » et dans
+  l'analyseur d'époque.
+
+**Détection automatique** : à chaque simulation sur des cours réels (MT5, BCE, CSV), Forexia cherche les mouvements
+exceptionnels (une bougie quotidienne au moins 6 fois plus forte que d'habitude) et les ajoute aux événements
+(« détecté »), rapprochés de l'événement connu le plus proche s'il y en a un. Les nouveaux sont signalés (🆕).
+**« Tous les événements »** : filtrer par paire et par origine, renommer et expliquer un mouvement détecté, modifier ou
+masquer un événement, ajouter les vôtres ; avec la passerelle MT5, les prochaines annonces à fort impact (14 jours).
+
 ## Analyse temporelle
 
 Dans « Évaluation › Graphiques » (et pour chaque batch rechargé), la section **📅 Analyse temporelle** montre si la

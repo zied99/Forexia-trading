@@ -1,7 +1,7 @@
 /* Tests du moteur : node tests/run-tests.js */
 'use strict';
 const path = require('path');
-for (const f of ['indicators', 'expr', 'trade', 'backtest', 'data', 'presets', 'french', 'enhancer', 'mql5', 'broker', 'advisor', 'analyzer']) require(path.join(__dirname, '..', 'js', f + '.js'));
+for (const f of ['indicators', 'expr', 'trade', 'backtest', 'data', 'presets', 'french', 'enhancer', 'mql5', 'broker', 'advisor', 'analyzer', 'events']) require(path.join(__dirname, '..', 'js', f + '.js'));
 const { indicators: I, rules: R, backtest: B, data: D, presets: P, french: FR, enhancer: E, mql5: MQ, broker: BK } = globalThis.Forexia;
 
 let failed = 0, passed = 0;
@@ -789,6 +789,28 @@ test('Époques modifiables et analyseur d\'époque', () => {
   if (!c.causes.some((k) => /en tendance/.test(k.text))) throw new Error('force de tendance non expliquée');
   eq(c.rows.length, 8);
   if (!An.eraCandidates(st, c).some((k) => k.id === 'ema200')) throw new Error('correction EMA 200 attendue');
+});
+test('Événements de marché : base, filtre par paire, détection et apprentissage', () => {
+  const Ev = globalThis.Forexia.events;
+  if (Ev.BUILTIN.length < 40) throw new Error('base trop petite');
+  for (const e of Ev.BUILTIN) if (!/^\d{4}-\d{2}-\d{2}$/.test(e.date) || !e.title || !e.cur) throw new Error('événement mal formé : ' + e.title);
+  const gbp = Ev.list(null, 'GBP/USD').map((e) => e.title);
+  if (!gbp.includes('Référendum du Brexit')) throw new Error('Brexit absent pour GBP/USD');
+  if (Ev.list(null, 'USD/JPY').some((e) => e.title === 'Référendum du Brexit')) throw new Error('Brexit ne concerne pas USD/JPY');
+  const bars = D.generateSynthetic('EUR/CHF', new Date('2013-01-01'), new Date('2016-12-31'));
+  eq(Ev.detect(bars).length, 0); // marche aléatoire : aucun choc
+  const i0 = bars.findIndex((b) => b.date.slice(0, 10) >= '2015-01-15');
+  for (let k = i0; k < bars.length; k++) for (const f of ['open', 'high', 'low', 'close']) bars[k][f] *= 0.8;
+  const r = Ev.learn({ items: [], edits: {} }, bars, 'EUR/CHF');
+  eq(r.added.length, 1); eq(r.added[0].date, bars[i0].date.slice(0, 10));
+  if (!/Fin du plancher EUR\/CHF/.test(r.added[0].text)) throw new Error('rapprochement avec l\'événement connu manquant');
+  eq(Ev.learn(r.stored, bars, 'EUR/CHF').added.length, 0); // déjà connu : pas de doublon
+  // modification et masquage d'un événement de la base
+  const id = Ev.BUILTIN.find((e) => e.title === 'Référendum du Brexit').id;
+  const st = { items: [], edits: { [id]: { title: 'Brexit (vote)', hidden: false } } };
+  if (!Ev.list(st, 'GBP/USD').some((e) => e.title === 'Brexit (vote)')) throw new Error('modification ignorée');
+  st.edits[id].hidden = true;
+  if (Ev.list(st, 'GBP/USD').some((e) => e.id === id)) throw new Error('masquage ignoré');
 });
 test('Pas de requête avant 1999 (début des cours BCE)', async () => {
     calls.length = 0;

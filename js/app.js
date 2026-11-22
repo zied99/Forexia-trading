@@ -289,6 +289,135 @@
   $('pair').addEventListener('change', updateNewsUI);
   updateNewsUI();
 
+  // ---------- Événements de marché : base intégrée + mouvements détectés automatiquement + les vôtres ----------
+  const EV_KEY = 'forexia.events';
+  const evEmpty = () => ({ items: [], edits: {}, scanned: {} });
+  const evStore = {
+    get() { try { return Object.assign(evEmpty(), JSON.parse(localStorage.getItem(EV_KEY)) || {}); } catch (e) { return evMem || evEmpty(); } },
+    set(s) { evMem = s; try { localStorage.setItem(EV_KEY, JSON.stringify(s)); } catch (e) { /* ignoré */ } },
+  };
+  let evMem = null, newEvents = []; // newEvents : détectés lors de la dernière simulation
+  function eventsFor(pair, o) { return F.events.list(evStore.get(), pair, o); }
+  /** Cherche les mouvements exceptionnels dans les cours chargés et ajoute les nouveaux aux événements. */
+  function learnEvents(bars, pair, timeframe) {
+    if (!bars || bars.length < 60 || !pair) return [];
+    const sec = F.data.TF_SECONDS[timeframe] || 86400;
+    const daily = sec < 86400 ? F.data.resample(bars, 'D1') : bars;
+    if (daily.length < 60) return [];
+    const st = evStore.get(), a = String(daily[0].date).slice(0, 10), b = String(daily[daily.length - 1].date).slice(0, 10), sc = st.scanned[pair];
+    if (sc && sc.from <= a && sc.to >= b) return []; // déjà analysés
+    const r = F.events.learn(st, daily, pair);
+    r.stored.scanned = Object.assign({}, st.scanned, { [pair]: { from: sc && sc.from < a ? sc.from : a, to: sc && sc.to > b ? sc.to : b } });
+    evStore.set(r.stored);
+    if (r.added.length) logEvent('events.detected', r.added.length + ' mouvement(s) exceptionnel(s) détecté(s) sur ' + pair, { dates: r.added.map((e) => e.date) });
+    return r.added;
+  }
+  const evBadge = (e) => '<span class="ev-badge ' + e.source + '">' + (e.source === 'auto' ? 'détecté' : e.source === 'user' ? 'ajouté par vous' : esc(e.kind || 'événement')) + '</span>';
+  function evLine(e, num) {
+    return '<li class="ev-item imp' + (e.imp || 1) + '">' + (num ? '<span class="ev-num">' + num + '</span>' : '') + '<span class="ev-date">' + frDate(e.date) + '</span> <b>' + esc(e.title) + '</b> ' + evBadge(e) +
+      '<div class="hint">' + esc(e.text || '') + '</div></li>';
+  }
+  /** Panneau des résultats : événements pendant la période testée. */
+  function eventsPanelHtml(pair, from, to) {
+    const L = eventsFor(pair, { from: from, to: to }).filter((e) => (e.imp || 1) >= 2 || e.source !== 'base');
+    const fresh = newEvents.filter((e) => e.pair === pair);
+    return '<details class="panel card ev-panel"' + (fresh.length ? ' open' : '') + '><summary><b>📰 Événements pendant la période</b> <span class="hint">(' + L.length + ' · ' + esc(pair) + ')</span></summary>' +
+      (fresh.length ? '<div class="banner info"><b>🆕 ' + fresh.length + ' mouvement' + (fresh.length > 1 ? 's exceptionnels détectés' : ' exceptionnel détecté') + '</b> dans les cours de ' + esc(pair) + ' et ajouté' + (fresh.length > 1 ? 's' : '') +
+        ' aux événements (dorénavant affichés sur les graphiques). Vous pouvez leur donner un nom et une explication dans « Tous les événements ».</div>' : '') +
+      (L.length ? '<ul class="ev-list">' + L.map((e) => evLine(e)).join('') + '</ul>' : '<p class="hint">Aucun événement marquant connu pendant cette période.</p>') +
+      '<div class="row buttons"><button type="button" class="secondary small" data-ev-open="' + esc(pair) + '">Tous les événements…</button></div>' +
+      '<p class="hint">Sur le graphique des cours, chaque événement est un losange violet ◆ (survolez-le). Forexia connaît les grands événements depuis 1971 et ajoute tout seul les nouveaux mouvements exceptionnels qu\'il détecte dans les cours.</p></details>';
+  }
+  // ----- Fenêtre « Événements de marché » -----
+  let evOpt = { pair: '', src: '', q: '', edit: '' };
+  function openEvents(pair) {
+    evOpt = { pair: pair || $('pair').value, src: '', q: '', edit: '' };
+    $('evModal').hidden = false; document.body.style.overflow = 'hidden';
+    renderEvents();
+    loadUpcoming();
+  }
+  function closeEvents() { $('evModal').hidden = true; if ($('evalModal').hidden && $('eraModal').hidden) document.body.style.overflow = ''; }
+  function renderEvents() {
+    const st = evStore.get();
+    let L = F.events.list(st, evOpt.pair || null);
+    if (evOpt.src) L = L.filter((e) => e.source === evOpt.src);
+    if (evOpt.q) { const q = evOpt.q.toLowerCase(); L = L.filter((e) => (e.title + ' ' + (e.text || '') + ' ' + e.date).toLowerCase().includes(q)); }
+    L = L.slice().reverse();
+    const pairs = [...new Set([$('pair').value].concat([...$('pair').options].map((o) => o.value)))];
+    const nAuto = st.items.filter((e) => e.source === 'auto' && !e.hidden).length, nUser = st.items.filter((e) => e.source === 'user' && !e.hidden).length;
+    let h = '<div class="ev-filters"><label class="field">Paire<select id="evPair"><option value="">Toutes les devises</option>' + pairs.map((p) => '<option' + (p === evOpt.pair ? ' selected' : '') + '>' + esc(p) + '</option>').join('') + '</select></label>' +
+      '<label class="field">Origine<select id="evSrc">' + [['', 'Toutes'], ['base', 'Base Forexia (' + F.events.BUILTIN.length + ')'], ['auto', 'Détectés dans les cours (' + nAuto + ')'], ['user', 'Ajoutés par vous (' + nUser + ')']].map(([v, l]) => '<option value="' + v + '"' + (v === evOpt.src ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></label>' +
+      '<label class="field">Recherche<input id="evQ" type="search" value="' + esc(evOpt.q) + '" placeholder="ex. Fed, Brexit, 2015"></label></div>';
+    h += '<details class="ev-add"><summary><b>＋ Ajouter un événement</b></summary><div class="ev-form"><label class="field">Date<input id="evNDate" type="date"></label><label class="field">Titre<input id="evNTitle" type="text" maxlength="120" placeholder="ex. Décision surprise de la BCE"></label>' +
+      '<label class="field">Devises<input id="evNCur" type="text" value="' + esc((F.events.currencies(evOpt.pair || $('pair').value).slice(0, 2)).join(', ')) + '" placeholder="EUR, USD (vide = toutes)"></label>' +
+      '<label class="field">Importance<select id="evNImp"><option value="3">Majeure</option><option value="2" selected>Importante</option><option value="1">Mineure</option></select></label>' +
+      '<label class="field ev-wide">Explication<textarea id="evNText" rows="2" placeholder="Ce qui s\'est passé et l\'effet sur les cours"></textarea></label>' +
+      '<button type="button" class="primary small" id="evNAdd">Ajouter</button></div></details>';
+    h += '<div id="evUpcoming"></div>';
+    h += '<p class="hint">' + L.length + ' événement' + (L.length > 1 ? 's' : '') + (evOpt.pair ? ' concernant ' + esc(evOpt.pair) : '') + ', du plus récent au plus ancien. Les mouvements « détectés » sont trouvés automatiquement dans les cours à chaque simulation (variation d\'une bougie au moins 6 fois plus forte que d\'habitude).</p>';
+    h += '<ul class="ev-list ev-all">' + L.map((e) => {
+      if (evOpt.edit === e.id) return '<li class="ev-item editing"><span class="ev-date">' + frDate(e.date) + '</span><input id="evETitle" type="text" value="' + esc(e.title) + '"><textarea id="evEText" rows="3">' + esc(e.text || '') + '</textarea>' +
+        '<div class="row buttons"><button type="button" class="primary small" data-ev-save="' + esc(e.id) + '">Enregistrer</button><button type="button" class="secondary small" data-ev-cancel>Annuler</button></div></li>';
+      return '<li class="ev-item imp' + (e.imp || 1) + '"><span class="ev-date">' + frDate(e.date) + '</span> <b>' + esc(e.title) + '</b> ' + evBadge(e) + ' <span class="ev-cur">' + esc((e.cur || []).filter((c) => c !== '*' && !['DEM', 'FRF'].includes(c)).join(' · ') || 'toutes devises') + '</span>' +
+        '<span class="ev-acts"><button type="button" class="ghost small" data-ev-edit="' + esc(e.id) + '" title="Modifier le titre et l\'explication">✏️</button><button type="button" class="ghost small" data-ev-del="' + esc(e.id) + '" title="' + (e.source === 'base' ? 'Masquer' : 'Supprimer') + '">🗑</button></span>' +
+        '<div class="hint">' + esc(e.text || '') + '</div></li>';
+    }).join('') + '</ul>';
+    $('evBody').innerHTML = h;
+  }
+  /** Prochaines annonces importantes du calendrier économique MT5 (si la passerelle est connectée). */
+  async function loadUpcoming() {
+    const box = $('evUpcoming');
+    if (!box) return;
+    if (!bridgeToken) { box.innerHTML = '<p class="hint">📅 Prochaines annonces : connectez la passerelle MT5 pour afficher les annonces économiques importantes à venir (calendrier de MetaTrader 5).</p>'; return; }
+    const now = Math.floor(Date.now() / 1000), ev = await loadCalendar(now, now + 14 * 86400);
+    if (!$('evUpcoming')) return;
+    if (!ev) { $('evUpcoming').innerHTML = '<p class="hint">📅 Calendrier MT5 indisponible : exportez-le (section « Éviter les annonces économiques »).</p>'; return; }
+    const cs = evOpt.pair ? F.events.currencies(evOpt.pair) : null;
+    const up = ev.filter((e) => e.importance >= 3 && (!cs || cs.includes(e.currency))).slice(0, 40);
+    $('evUpcoming').innerHTML = '<details class="ev-add" open><summary><b>📅 Prochaines annonces importantes (14 jours, MT5)</b> (' + up.length + ')</summary>' +
+      (up.length ? '<ul class="ev-list">' + up.map((e) => '<li class="ev-item"><span class="ev-date">' + new Date(e.t * 1000).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) + '</span> <b>' + esc(e.currency) + '</b> · annonce à fort impact</li>').join('') + '</ul>' : '<p class="hint">Aucune annonce à fort impact dans les 14 jours.</p>') + '</details>';
+  }
+  $('evModal').addEventListener('click', (ev) => {
+    const t = ev.target;
+    if (t.closest('[data-close]')) return closeEvents();
+    const st = evStore.get();
+    const ed = t.closest('[data-ev-edit]'); if (ed) { evOpt.edit = ed.dataset.evEdit; return renderEvents(); }
+    if (t.closest('[data-ev-cancel]')) { evOpt.edit = ''; return renderEvents(); }
+    const sv = t.closest('[data-ev-save]');
+    if (sv) {
+      const id = sv.dataset.evSave, title = $('evETitle').value.trim().slice(0, 140), text = $('evEText').value.trim().slice(0, 1000);
+      if (!title) return;
+      const it = st.items.find((e) => e.id === id);
+      if (it) { it.title = title; it.text = text; if (it.source === 'auto') it.named = true; } else st.edits[id] = Object.assign({}, st.edits[id], { title: title, text: text });
+      evStore.set(st); evOpt.edit = ''; return renderEvents();
+    }
+    const dl = t.closest('[data-ev-del]');
+    if (dl) {
+      const id = dl.dataset.evDel, it = st.items.find((e) => e.id === id);
+      // un mouvement détecté supprimé reste masqué (pour ne pas être redétecté) ; un événement de la base est masqué
+      if (it) { if (it.source === 'auto') it.hidden = true; else st.items = st.items.filter((e) => e.id !== id); } else st.edits[id] = Object.assign({}, st.edits[id], { hidden: true });
+      evStore.set(st); return renderEvents();
+    }
+    if (t.id === 'evNAdd') {
+      const date = $('evNDate').value, title = $('evNTitle').value.trim().slice(0, 140);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !title) return toast('Indiquez une date et un titre.', false);
+      const cur = ($('evNCur').value.toUpperCase().match(/[A-Z]{3}/g) || ['*']);
+      st.items.push({ id: 'u' + Date.now().toString(36), source: 'user', date: date, title: title, text: $('evNText').value.trim().slice(0, 1000), cur: cur, imp: +$('evNImp').value, kind: 'Ajouté' });
+      evStore.set(st); logEvent('events.added', 'Événement ajouté : ' + date + ' ' + title);
+      toast('Événement ajouté : il apparaîtra sur les graphiques.', false);
+      return renderEvents();
+    }
+  });
+  $('evModal').addEventListener('change', (ev) => {
+    if (ev.target.id === 'evPair') { evOpt.pair = ev.target.value; renderEvents(); loadUpcoming(); }
+    if (ev.target.id === 'evSrc') { evOpt.src = ev.target.value; renderEvents(); loadUpcoming(); }
+  });
+  $('evModal').addEventListener('input', (ev) => {
+    if (ev.target.id === 'evQ') { evOpt.q = ev.target.value; const pos = ev.target.selectionStart; renderEvents(); loadUpcoming(); const q = $('evQ'); q.focus(); q.setSelectionRange(pos, pos); }
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('evModal').hidden) closeEvents(); });
+  document.addEventListener('click', (ev) => { const b = ev.target.closest('[data-ev-open]'); if (b) openEvents(b.dataset.evOpen); });
+
   // ---------- Calendrier économique (MT5, via la passerelle) ----------
   const calendarCache = new Map();
   /** Annonces [{t, currency, importance}] entre deux dates (secondes), ou null si la passerelle ne répond pas. */
@@ -1012,6 +1141,9 @@
       if (result.ruined) warnings.push('<b>Compte liquidé</b> : le capital a été entièrement perdu. Réduisez le levier ou l\'exposition.');
       const config = currentConfig();
       lastRunCtx = { bars, strat, settings, config, timeframe: loaded.timeframe || 'D1', lastTrades: result.trades, diag: result.diag, result };
+      // nouveaux mouvements exceptionnels dans les cours réels : ajoutés aux événements
+      newEvents = [];
+      if (sourceValue() !== 'synthetic') { try { newEvents = learnEvents(bars, settings.pair, loaded.timeframe || 'D1'); } catch (e) { console.warn('Détection des événements :', e); } }
       lastRun = { key: runKey(strat, config), stats: result.stats };
       render({ bars, strat, settings, result, loaded, periodKey, warnings, config });
       syncFormState();
@@ -1065,6 +1197,7 @@
     html += '<div class="summary-head"><h2>' + esc(strat.name) + ' · ' + esc(settings.pair) + '</h2>' +
       '<span class="meta">' + PERIOD_LABEL[periodKey] + ' · du ' + frDate(dates[0]) + ' au ' + frDate(dates[dates.length - 1]) +
       ' · levier 1:' + settings.leverage + ' · ' + esc(loaded.source) + ' · ' + view.length + ' bougies</span></div>';
+    html += eventsPanelHtml(settings.pair, String(dates[0]).slice(0, 10), String(dates[dates.length - 1]).slice(0, 10));
 
     const kpi = (label, value, sub, c) => '<div class="panel kpi"><div class="label">' + label + '</div><div class="value ' + (c || '') + '">' + value + '</div><div class="sub">' + (sub || '&nbsp;') + '</div></div>';
     // Rentabilité mensuelle (indicateur + fenêtre de détail)
@@ -1249,6 +1382,18 @@
         tipAt.set(xi, '<b class="' + cls(t.pnl) + '">● Sortie : ' + signed(t.pnl, money) + '</b>');
       }
     }
+    // événements de marché : losange violet en haut du graphique, trait vertical, détail au survol
+    if (chartState.events !== false) {
+      for (const ev of eventsFor(settings.pair)) {
+        if ((ev.imp || 1) < 2 && ev.source === 'base') continue;
+        const t = Date.parse(ev.date + 'T00:00:00Z') / 1000;
+        if (!inView(t)) continue;
+        const i = idxOf(t);
+        if (i < 0) continue;
+        markers.push({ i: i, value: closes[i], shape: 'event', title: frDate(ev.date) + ' · ' + ev.title + (ev.text ? ' — ' + ev.text : '') });
+        tipAt.set(i, (tipAt.has(i) ? tipAt.get(i) + '<br>' : '') + '<b style="color:var(--event)">◆ ' + esc(ev.title) + '</b>');
+      }
+    }
     const drawSeries = drawingsFor(settings.pair).map((d, k) => ({
       name: drawingName(d, k), values: visT.map((t) => drawingValue(d, t)), color: DRAW_COLORS[k % DRAW_COLORS.length],
       dash: d.type === 'h' ? '6 4' : '', noScale: true, label: String(k + 1), width: 2.2,
@@ -1290,7 +1435,9 @@
     $('priceLegend').innerHTML = '<span><i style="background:var(--price)"></i>' + esc(settings.pair) + ' ' + got.tf + '</span>' +
       overlays.map((o) => '<span><i style="background:' + o.color + '"></i>' + esc(o.name) + '</span>').join('') +
       ruleSeries.map((o) => '<span title="Repère utilisé par les règles de la stratégie"><i style="background:#9333ea"></i>' + esc(o.name) + '</span>').join('') +
-      '<span><i class="tri-up"></i>Achat</span><span><i class="tri-dn"></i>Vente</span><span><i class="dot" style="background:var(--muted)"></i>Sortie</span>';
+      '<span><i class="tri-up"></i>Achat</span><span><i class="tri-dn"></i>Vente</span><span><i class="dot" style="background:var(--muted)"></i>Sortie</span>' +
+      '<button type="button" class="chip ev-toggle" id="evToggle" aria-pressed="' + (chartState.events !== false) + '" title="Afficher ou masquer les événements de marché">◆ Événements</button>';
+    $('evToggle').addEventListener('click', () => { chartState.events = chartState.events === false; drawPrice(); });
     renderIndChips();
     renderDrawList();
     };
@@ -2648,10 +2795,14 @@
   function eraEditorHtml(T) {
     const isDef = JSON.stringify(eraCuts()) === JSON.stringify(F.advisor.DEFAULT_CUTS);
     return '<div class="era-edit"><b>Époques</b><p class="hint">Une simulation compte dans l\'époque qui contient le <b>milieu</b> de sa période. ' +
-      (isDef ? 'Coupures par défaut, aux grands changements du marché des changes : <b>2000</b> (arrivée de l\'euro), <b>2008</b> (crise financière), <b>2013</b> (taux zéro et rachats d\'actifs des banques centrales), <b>2020</b> (Covid, inflation puis hausse des taux).' : 'Coupures personnalisées.') +
+      (isDef ? 'Coupures par défaut, aux grands changements du marché des changes : ' + F.advisor.DEFAULT_CUTS.map((y, k) => { const e = F.events.cutEvents()[k]; return '<b>' + y + '</b> : ' + (e ? esc(e.title) + ' (' + frDate(e.date) + ')' : ''); }).join(' ; ') + '.' : 'Coupures personnalisées.') +
       ' Modifiez les années de coupure (séparées par des virgules) :</p><div class="row buttons era-row"><input id="eraCutsIn" type="text" value="' + esc(eraCuts().join(', ')) + '" aria-label="Années de coupure des époques" placeholder="ex. 2005, 2015, 2020">' +
       '<button type="button" class="secondary small" id="eraApply">Appliquer</button>' + (isDef ? '' : '<button type="button" class="ghost small" id="eraDefault">Par défaut</button>') +
-      (T.split ? '<button type="button" class="ghost small" id="eraSplit" title="Deux époques : avant et depuis la rupture détectée">Couper à la rupture (' + T.split.year + ')</button>' : '') + '</div></div>';
+      (T.split ? '<button type="button" class="ghost small" id="eraSplit" title="Deux époques : avant et depuis la rupture détectée">Couper à la rupture (' + T.split.year + ')</button>' : '') + '</div>' +
+      '<div class="era-ctx"><b>Ce qui s\'est passé dans chaque époque</b>' + T.byEra.map((g) => {
+        const L = eventsFor(T.pair, { from: (g.era.from === -Infinity ? T.minYear : g.era.from) + '-01-01', to: (g.era.to === Infinity ? T.maxYear : g.era.to) + '-12-31', minImp: 3 }).filter((e) => e.source !== 'auto' || e.named);
+        return '<div class="era-ctx-row"><span class="era-ctx-name">' + esc(g.label) + '</span>' + (L.length ? L.map((e) => '<span class="ev-chip" title="' + esc(frDate(e.date) + ' · ' + (e.text || '')) + '">' + e.date.slice(0, 4) + ' · ' + esc(e.title) + '</span>').join('') : '<span class="hint">aucun événement majeur connu</span>') + '</div>';
+      }).join('') + '</div></div>';
   }
   let eraState = null; // { list, T, a, b, max, status, res }
   function eraOptions(T) {
@@ -2744,6 +2895,12 @@
       '<div class="era-card good"><b>' + esc(cap(r.lb)) + '</b>' + B.n + ' simulations · ' + Math.round(B.win) + ' % gagnantes · médiane ' + pc(B.ret) + '</div></div>';
     h += '<section class="ana-sec warn"><h3>Ce qui a fait la différence</h3>' + (c.causes.length ? '<ol>' + c.causes.slice(0, 6).map((x) => '<li>' + x.text + '</li>').join('') + '</ol>' : '<p>Pas de différence marquée du marché entre les deux époques : l\'écart vient peut-être du hasard. Rechargez plus de simulations par époque.</p>') +
       '<p class="hint">Stratégie ' + ({ trend: 'de suivi de tendance', reversion: 'de retour à la moyenne', mixed: 'mixte' })[c.kind] + '. Les différences sont classées par importance.</p></section>';
+    const eraEv = (v) => { const r0 = eraRange(v), yrs = r.ctxA.concat(r.ctxB).map((x) => x.e); const y0 = Math.min(...yrs.map((e) => +e.from.slice(0, 4))), y1 = Math.max(...yrs.map((e) => +e.to.slice(0, 4)));
+      return eventsFor(yrs[0].pair, { from: Math.max(r0.from, y0) + '-01-01', to: Math.min(r0.to, y1) + '-12-31', minImp: 2 }).filter((e) => e.source !== 'auto' || e.named || e.imp >= 3).slice(-10); };
+    const evA = eraEv(st.a), evB = eraEv(st.b);
+    h += '<details class="ana-sec" open><summary><b>📰 Ce qui s\'est passé pendant chaque époque</b> (événements de marché)</summary><div class="era-sum ev-cols"><div><b>' + esc(cap(r.la)) + '</b><ul class="ev-list">' + (evA.map((e) => evLine(e)).join('') || '<li class="hint">Aucun événement connu.</li>') + '</ul></div>' +
+      '<div><b>' + esc(cap(r.lb)) + '</b><ul class="ev-list">' + (evB.map((e) => evLine(e)).join('') || '<li class="hint">Aucun événement connu.</li>') + '</ul></div></div>' +
+      '<p class="hint">Rapprochez ces événements des différences de marché ci-dessus (direction, tendance, volatilité). Ajoutez ou complétez des événements dans <button type="button" class="link" data-ev-open="' + esc(r.ctxA[0].e.pair) + '">Tous les événements</button>.</p></details>';
     h += '<details class="ana-sec" open><summary><b>Le marché dans chaque époque</b> (médiane des simulations)</summary><table class="ana-table"><thead><tr><th></th><th>' + esc(cap(r.la)) + '</th><th>' + esc(cap(r.lb)) + '</th></tr></thead><tbody>' +
       c.rows.map((x) => '<tr><td>' + esc(x.label) + '</td><td>' + (Number.isFinite(x.a) ? x.fmt(x.a) : '—') + '</td><td>' + (Number.isFinite(x.b) ? x.fmt(x.b) : '—') + '</td></tr>').join('') + '</tbody></table></details>';
     const tcell = (t) => (t.n ? t.n + ' · ' + Math.round(t.win) + ' % · <span class="' + cls(t.pips) + '">' + signed(t.pips, num1) + ' pips</span>' : '—');
@@ -2790,7 +2947,7 @@
   const tDate = (d) => Date.parse(String(d).slice(0, 10) + 'T00:00:00Z');
   /** Frise : chaque simulation est un trait de sa date de début à sa date de fin, à la hauteur de son résultat. */
   function timelineSvg(list, T, cap) {
-    const W = 800, H = 230, L = 46, R = 10, TOP = 10, B = 26;
+    const W = 800, H = 240, L = 46, R = 10, TOP = 22, B = 26;
     const x0 = Date.UTC(T.minYear, 0, 1), x1 = Date.UTC(T.maxYear + 1, 0, 1);
     const x = (t) => L + ((t - x0) / (x1 - x0)) * (W - L - R), y = (v) => TOP + ((cap - Math.max(-cap, Math.min(cap, v))) / (2 * cap)) * (H - TOP - B);
     let g = '';
@@ -2801,6 +2958,11 @@
     for (let yv = T.minYear; yv <= T.maxYear + 1; yv += step) g += '<line class="tl-grid" x1="' + x(Date.UTC(yv, 0, 1)).toFixed(1) + '" x2="' + x(Date.UTC(yv, 0, 1)).toFixed(1) + '" y1="' + TOP + '" y2="' + (H - B) + '"/>' + (yv <= T.maxYear ? '<text class="tl-tick" x="' + x(Date.UTC(yv, 6, 1)).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle">' + yv + '</text>' : '');
     for (const v of [cap, cap / 2, 0, -cap / 2, -cap]) g += '<text class="tl-tick" x="' + (L - 6) + '" y="' + (y(v) + 4).toFixed(1) + '" text-anchor="end">' + (v > 0 ? '+' : v < 0 ? '−' : '') + Math.round(Math.abs(v)) + '%</text>';
     g += '<line class="tl-zero" x1="' + L + '" x2="' + (W - R) + '" y1="' + y(0).toFixed(1) + '" y2="' + y(0).toFixed(1) + '"/>';
+    (T.events || []).forEach((ev, k) => {
+      const xe = x(tDate(ev.date)).toFixed(1);
+      g += '<g class="tl-ev"><line x1="' + xe + '" x2="' + xe + '" y1="' + (TOP - 2) + '" y2="' + (H - B) + '"/><circle cx="' + xe + '" cy="' + (TOP - 10) + '" r="8"/><text x="' + xe + '" y="' + (TOP - 6.5) + '" text-anchor="middle">' + (k + 1) + '</text>' +
+        '<title>' + frDate(ev.date) + ' · ' + esc(ev.title) + '</title></g>';
+    });
     const all = evalList();
     for (const e of list) {
       const xa = x(tDate(e.from)), xb = Math.max(xa + 3, x(tDate(e.to))), yy = y(e.returnPct).toFixed(1);
@@ -2828,6 +2990,9 @@
   function timeSectionHtml(list) {
     const T = F.advisor.timeline(list, eraCuts());
     if (T.n < 2) return '';
+    const mainPair = (() => { const c = {}; list.forEach((e) => { c[e.pair] = (c[e.pair] || 0) + 1; }); return Object.keys(c).sort((a, b) => c[b] - c[a])[0]; })();
+    T.pair = mainPair;
+    T.events = eventsFor(mainPair, { from: T.minYear + '-01-01', to: T.maxYear + '-12-31', minImp: 3 }).filter((e) => e.source !== 'auto' || e.named);
     const abs = list.map((e) => Math.abs(e.returnPct)).sort((a, b) => a - b);
     const cap = Math.max(20, Math.min(2 * (abs[Math.floor(abs.length * 0.9)] || 20), abs[abs.length - 1] || 20));
     const mt5 = list.some((e) => /^MT5/.test(e.data)), ecb = list.some((e) => /^BCE/.test(e.data));
@@ -2845,7 +3010,9 @@
       '<p class="hint">La stratégie marche-t-elle mieux à certaines époques ? Chaque simulation est placée selon ses dates.</p>' +
       '<div class="modal-note">' + T.verdict.map((v) => '<p>' + v + '</p>').join('') + '</div>' +
       (warn.length ? '<div class="banner warn">' + warn.map((w) => '<p>' + w + '</p>').join('') + '</div>' : '') +
-      '<h5>Résultat de chaque simulation selon sa période</h5><p class="hint">Un trait = une simulation (du début à la fin de sa période), en hauteur son résultat.' + (T.weak ? ' Fond rouge : époque faible ; vert : époque forte.' : '') + '</p>' + timelineSvg(list, T, cap) +
+      '<h5>Résultat de chaque simulation selon sa période</h5><p class="hint">Un trait = une simulation (du début à la fin de sa période), en hauteur son résultat.' + (T.weak ? ' Fond rouge : époque faible ; vert : époque forte.' : '') + ' Numéros violets : grands événements de marché (' + esc(mainPair) + ').</p>' + timelineSvg(list, T, cap) +
+      (T.events.length ? '<details class="ev-legend"><summary>Événements numérotés sur la frise (' + T.events.length + ')</summary><ul class="ev-list">' + T.events.map((e, k) => evLine(e, k + 1)).join('') + '</ul></details>' : '') +
+      '<div class="row buttons"><button type="button" class="secondary small" data-ev-open="' + esc(mainPair) + '">📰 Tous les événements de ' + esc(mainPair) + '</button></div>' +
       '<h5>Par année</h5><p class="hint">Résultat médian des simulations dont la période est centrée sur l\'année ; au-dessus, la part de gagnantes.</p>' + yearBarsSvg(T, cap) +
       '<div class="era-head"><h5>Par époque</h5><button type="button" class="primary small" id="eraAnalyze">🔬 Analyseur d\'époque</button></div>' +
       '<p class="hint">L\'analyseur d\'époque compare deux époques (marché, trades) pour expliquer ce qui a fait la différence, et teste des corrections.</p>' +

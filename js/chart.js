@@ -131,6 +131,13 @@
           if (mk.title) { const ti = el('title', {}, shape); ti.textContent = mk.title; }
           continue;
         }
+        if (mk.shape === 'event') {
+          el('line', { x1: cx, x2: cx, y1: t0, y2: t0 + h, class: 'ev-line' }, g);
+          shape = el('path', { d: 'M' + cx + ' ' + (t0 + 2) + 'l5 6l-5 6l-5 -6z' }, g);
+          shape.setAttribute('class', 'marker event');
+          if (mk.title) { const ti = el('title', {}, shape); ti.textContent = mk.title; }
+          continue;
+        }
         if (mk.shape === 'up') shape = el('path', { d: 'M' + cx + ' ' + (cy + 3) + 'l-5 9h10z' }, g);
         else if (mk.shape === 'down') shape = el('path', { d: 'M' + cx + ' ' + (cy - 3) + 'l-5 -9h10z' }, g);
         else shape = el('circle', { cx: cx, cy: cy, r: 3.5 }, g);
