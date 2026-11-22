@@ -638,3 +638,26 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 .time-lot input { width: 80px; }
 .batch-dots { width: 110px; height: 26px; display: block; }
 .batch-dots .tl-zero { stroke: var(--border); }
+
+/* Époques et analyseur d'époque */
+#eraModal { z-index: 60; }
+#eraModal .modal-box { width: min(860px, 100%); }
+.era-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 14px; }
+.era-head h5 { margin: 0; }
+.era-edit { margin-top: 10px; padding: 10px 12px; border: 1px dashed var(--border); border-radius: 10px; }
+.era-edit .hint { margin: 2px 0 6px; }
+.era-row { align-items: center; gap: 6px; flex-wrap: wrap; }
+.era-row input { width: 220px; }
+.era-pick { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+.era-pick .field { flex: 1 1 200px; }
+.era-pick #eraMax { width: 80px; }
+.era-sum { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
+.era-card { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); font-size: 13px; }
+.era-card b { display: block; font-size: 15px; margin-bottom: 2px; }
+.era-card.bad { border-color: var(--down); background: var(--down-soft); }
+.era-card.good { border-color: var(--up); background: var(--up-soft); }
+.ana-sec ol { margin: 0; padding-left: 20px; } .ana-sec ol li { margin: 5px 0; line-height: 1.45; }
+@media (max-width: 560px) { .era-sum { grid-template-columns: 1fr; } }
+.era-head > button, .era-row > button, .era-pick > button, .era-row > input { flex: none; width: auto; }
+.era-row > input { width: 220px; }
+.era-edit .row.buttons button, .time-actions .row.buttons button, .era-head button { flex: 0 0 auto; width: auto; margin: 0; }

@@ -183,5 +183,134 @@
     return { strat: s, settings: se };
   }
 
-  F.analyzer = { analyze, applyProposal, strategyKind };
+  // ---------- Analyseur d'époque : qu'est-ce qui a changé entre deux époques ? ----------
+  /** Caractéristiques du marché sur la partie testée d'une simulation (de startIndex à la fin). */
+  function marketFeatures(bars, startIndex) {
+    const R = F.rules, I = F.indicators, ctx = R.makeContext(bars), n = bars.length, s0 = Math.max(1, startIndex || 1);
+    const adx = R.evaluateSeries('ADX(14)', ctx), atr = I.atr(ctx.high, ctx.low, ctx.close, 14), ema = I.ema(ctx.close, 200);
+    const c0 = bars[s0].close, c1 = bars[n - 1].close;
+    const years = Math.max(1 / 12, (Date.parse(String(bars[n - 1].date).slice(0, 10)) - Date.parse(String(bars[s0].date).slice(0, 10))) / (365.25 * 864e5));
+    let path = 0, ups = 0, shocks = 0, above = 0, nAbove = 0, k = 0;
+    const rets = [], adxs = [], vols = [];
+    for (let i = s0; i < n; i++) {
+      const d = bars[i].close - bars[i - 1].close;
+      path += Math.abs(d); if (d > 0) ups++;
+      rets.push(d / bars[i - 1].close);
+      if (Number.isFinite(adx[i])) adxs.push(adx[i]);
+      if (Number.isFinite(atr[i - 1]) && atr[i - 1] > 0) { vols.push((atr[i] / bars[i].close) * 100); if (Math.abs(bars[i].close - bars[i].open) > 2.5 * atr[i - 1]) shocks++; }
+      if (Number.isFinite(ema[i])) { nAbove++; if (bars[i].close > ema[i]) above++; }
+      k++;
+    }
+    let num = 0, den = 0;
+    const mr = rets.reduce((a, b) => a + b, 0) / Math.max(1, rets.length);
+    for (let i = 1; i < rets.length; i++) { num += (rets[i] - mr) * (rets[i - 1] - mr); }
+    for (let i = 0; i < rets.length; i++) den += (rets[i] - mr) ** 2;
+    const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN);
+    return {
+      trendYear: ((Math.pow(c1 / c0, 1 / years) - 1) * 100), // variation du prix par an, en %
+      adx: avg(adxs), trendShare: adxs.length ? (adxs.filter((v) => v >= 25).length / adxs.length) * 100 : NaN,
+      vol: avg(vols), efficiency: path > 0 ? Math.abs(c1 - c0) / path : 0, autocorr: den > 0 ? num / den : 0,
+      shocks: k ? (shocks / k) * 100 : 0, upShare: k ? (ups / k) * 100 : 50, aboveEma: nAbove ? (above / nAbove) * 100 : NaN,
+    };
+  }
+  /** Trades d'une simulation résumés en pips (comparables d'une simulation à l'autre). */
+  function tradeFeatures(bars, result) {
+    const R = F.rules, ctx = R.makeContext(bars), adx = R.evaluateSeries('ADX(14)', ctx);
+    return (result.trades || []).map((t) => { const a = adx[Math.max(0, t.entryIndex - 1)]; return { dir: t.dir, pips: t.pips, win: t.pnl > 0, bars: t.bars, regime: !Number.isFinite(a) ? '' : a >= 25 ? 'trend' : a < 20 ? 'range' : 'mid', reason: t.reason }; });
+  }
+  /**
+   * Compare deux époques. A et B : listes de { features, trades, returnPct } (une par simulation rechargée).
+   * Renvoie { rows: [{label, a, b, fmt}], causes: [{score, text}], tradeRows, A:{...}, B:{...} }.
+   */
+  function compareEras(A, B, strat, labels) {
+    const med = (a) => { const v = a.filter(Number.isFinite).sort((x, y) => x - y); return v.length ? (v.length % 2 ? v[v.length >> 1] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2) : NaN; };
+    const f = (L, k) => med(L.map((x) => x.features[k]));
+    const keys = ['trendYear', 'aboveEma', 'adx', 'trendShare', 'efficiency', 'autocorr', 'vol', 'shocks'];
+    const agg = (L) => { const o = { n: L.length, ret: med(L.map((x) => x.returnPct)), win: (L.filter((x) => x.returnPct > 0).length / Math.max(1, L.length)) * 100 }; for (const k of keys) o[k] = f(L, k); const T = L.flatMap((x) => x.trades); o.trades = T; return o; };
+    const a = agg(A), b = agg(B), kind = strategyKind(strat), la = labels[0], lb = labels[1];
+    const tr = (T, filt) => { const l = T.filter(filt); return { n: l.length, win: l.length ? (l.filter((t) => t.win).length / l.length) * 100 : NaN, pips: l.length ? l.reduce((s, t) => s + t.pips, 0) / l.length : NaN }; };
+    const tradeRows = [
+      ['Tous les trades', () => true], ['Achats', (t) => t.dir > 0], ['Ventes', (t) => t.dir < 0],
+      ['Marché en tendance (ADX ≥ 25)', (t) => t.regime === 'trend'], ['Marché sans tendance (ADX < 20)', (t) => t.regime === 'range'],
+    ].map(([label, fn]) => ({ label: label, a: tr(a.trades, fn), b: tr(b.trades, fn) }));
+    const pc = (v, d) => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(d == null ? 1 : d).replace('.', ',');
+    const dirOf = (v) => (v > 3 ? 'haussier' : v < -3 ? 'baissier' : 'sans direction nette');
+    const rows = [
+      { label: 'Direction du prix (variation par an)', a: a.trendYear, b: b.trendYear, fmt: (v) => pc(v) + ' %/an (' + dirOf(v) + ')' },
+      { label: 'Temps passé au-dessus de l\'EMA 200', a: a.aboveEma, b: b.aboveEma, fmt: (v) => Math.round(v) + ' %' },
+      { label: 'Force de la tendance (ADX 14 moyen)', a: a.adx, b: b.adx, fmt: (v) => v.toFixed(0) },
+      { label: 'Temps en tendance (ADX ≥ 25)', a: a.trendShare, b: b.trendShare, fmt: (v) => Math.round(v) + ' %' },
+      { label: 'Netteté du mouvement (0 = va-et-vient, 1 = ligne droite)', a: a.efficiency, b: b.efficiency, fmt: (v) => v.toFixed(2).replace('.', ',') },
+      { label: 'Retour à la moyenne (autocorrélation, < 0 = le prix revient)', a: a.autocorr, b: b.autocorr, fmt: (v) => pc(v, 2) },
+      { label: 'Volatilité (ATR en % du prix)', a: a.vol, b: b.vol, fmt: (v) => v.toFixed(2).replace('.', ',') + ' %' },
+      { label: 'Chocs (bougies > 2,5 ATR, pour 100 bougies)', a: a.shocks, b: b.shocks, fmt: (v) => v.toFixed(1).replace('.', ',') },
+    ];
+    const causes = [], add = (score, text) => causes.push({ score: score, text: text });
+    const ok = (v) => Number.isFinite(v);
+    // direction
+    if (ok(a.trendYear) && ok(b.trendYear) && dirOf(a.trendYear) !== dirOf(b.trendYear)) {
+      const T = tradeRows;
+      let t = 'Le marché a changé de direction : <b>' + dirOf(a.trendYear) + '</b> ' + la + ' (' + pc(a.trendYear) + ' %/an), <b>' + dirOf(b.trendYear) + '</b> ' + lb + ' (' + pc(b.trendYear) + ' %/an).';
+      if (ok(T[1].a.pips) && ok(T[2].a.pips)) {
+        const dA = dirOf(a.trendYear), longWorse = T[1].a.pips < T[2].a.pips;
+        t += ' ' + la[0].toUpperCase() + la.slice(1) + ', les achats font ' + pc(T[1].a.pips, 0) + ' pips en moyenne et les ventes ' + pc(T[2].a.pips, 0) + ' pips' +
+          (longWorse && dA === 'baissier' ? ' : la stratégie achetait trop dans un marché qui baissait.' : !longWorse && dA === 'haussier' ? ' : la stratégie vendait trop dans un marché qui montait.' :
+            dA === 'sans direction nette' ? ' : sans direction nette, ni les achats ni les ventes ne profitent d\'un mouvement durable.' : '.');
+      }
+      add(2 + Math.min(3, Math.abs(a.trendYear - b.trendYear) / 5), t);
+    }
+    // force de la tendance
+    if (ok(a.trendShare) && ok(b.trendShare) && Math.abs(a.trendShare - b.trendShare) >= 8) {
+      const moreTrendB = b.trendShare > a.trendShare;
+      let t = 'Le marché était ' + (moreTrendB ? '<b>moins en tendance</b> ' + la : '<b>plus en tendance</b> ' + la) + ' : ' + Math.round(a.trendShare) + ' % du temps en tendance contre ' + Math.round(b.trendShare) + ' % ' + lb + '.';
+      if (kind === 'trend' && moreTrendB) t += ' Pour une stratégie de tendance, un marché qui oscille donne de faux signaux.';
+      if (kind === 'reversion' && !moreTrendB) t += ' Pour une stratégie de retour à la moyenne, une tendance forte fait perdre : le prix ne revient pas.';
+      add(1 + Math.abs(a.trendShare - b.trendShare) / 10 + ((kind === 'trend' && moreTrendB) || (kind === 'reversion' && !moreTrendB) ? 1.5 : 0), t);
+    }
+    // netteté / retour à la moyenne
+    if (ok(a.efficiency) && ok(b.efficiency) && Math.abs(a.efficiency - b.efficiency) >= 0.08) {
+      const choppyA = a.efficiency < b.efficiency;
+      add(1 + Math.abs(a.efficiency - b.efficiency) * 8, 'Les mouvements étaient ' + (choppyA ? '<b>plus heurtés</b> (va-et-vient) ' + la : '<b>plus nets</b> ' + la) + ' : netteté ' + a.efficiency.toFixed(2).replace('.', ',') + ' contre ' + b.efficiency.toFixed(2).replace('.', ',') + '.' +
+        (kind === 'trend' && choppyA ? ' Une stratégie de tendance entre puis se fait sortir à contre-temps.' : ''));
+    }
+    if (ok(a.autocorr) && ok(b.autocorr) && Math.abs(a.autocorr - b.autocorr) >= 0.05) {
+      add(0.8 + Math.abs(a.autocorr - b.autocorr) * 10, 'Le prix ' + (a.autocorr < b.autocorr ? '<b>revenait davantage en arrière</b>' : '<b>prolongeait davantage ses mouvements</b>') + ' ' + la + ' (autocorrélation ' + pc(a.autocorr, 2) + ' contre ' + pc(b.autocorr, 2) + ').');
+    }
+    // volatilité
+    if (ok(a.vol) && ok(b.vol) && a.vol > 0 && b.vol > 0 && Math.max(a.vol / b.vol, b.vol / a.vol) >= 1.25) {
+      const r = a.vol / b.vol;
+      add(1 + Math.abs(Math.log(r)) * 3, 'La volatilité était <b>' + (r > 1 ? r.toFixed(1).replace('.', ',') + ' fois plus forte' : (1 / r).toFixed(1).replace('.', ',') + ' fois plus faible') + '</b> ' + la + ' : ' + (r > 1 ? 'des stops et des réglages calibrés pour un marché calme sont touchés plus souvent.' : 'les mouvements sont trop petits pour couvrir le spread et atteindre les objectifs.'));
+    }
+    if (ok(a.shocks) && ok(b.shocks) && a.shocks - b.shocks >= 0.5) add(1 + (a.shocks - b.shocks), 'Plus de <b>chocs</b> ' + la + ' : ' + a.shocks.toFixed(1).replace('.', ',') + ' bougies exceptionnelles pour 100, contre ' + b.shocks.toFixed(1).replace('.', ',') + '.');
+    // trades
+    const ta = tradeRows[0].a, tb = tradeRows[0].b;
+    if (ok(ta.win) && ok(tb.win)) {
+      add(0.5 + Math.abs(ta.win - tb.win) / 15, 'Côté trades : ' + Math.round(ta.win) + ' % de trades gagnants ' + la + ' (' + pc(ta.pips, 0) + ' pips en moyenne) contre ' + Math.round(tb.win) + ' % ' + lb + ' (' + pc(tb.pips, 0) + ' pips).' +
+        (ta.n && tb.n && Math.abs(ta.n / A.length - tb.n / B.length) > 0.3 * (tb.n / B.length) ? ' Nombre de trades par simulation : ' + (ta.n / A.length).toFixed(1).replace('.', ',') + ' contre ' + (tb.n / B.length).toFixed(1).replace('.', ',') + '.' : ''));
+    }
+    const rr = tradeRows[4], rt = tradeRows[3];
+    if (ok(rr.a.pips) && rr.a.n >= 3 && rr.a.pips < 0 && (!ok(rt.a.pips) || rt.a.pips > rr.a.pips)) add(1.2, 'Les pertes ' + la + ' viennent surtout des trades pris en marché <b>sans tendance</b> (' + pc(rr.a.pips, 0) + ' pips en moyenne sur ' + rr.a.n + ' trades).');
+    if (ok(rt.a.pips) && rt.a.n >= 3 && rt.a.pips < 0 && (!ok(rr.a.pips) || rr.a.pips > rt.a.pips)) add(1.2, 'Les pertes ' + la + ' viennent surtout des trades pris en marché <b>en tendance</b> (' + pc(rt.a.pips, 0) + ' pips en moyenne sur ' + rt.a.n + ' trades).');
+    causes.sort((x, y) => y.score - x.score);
+    return { rows: rows, causes: causes, tradeRows: tradeRows, A: a, B: b, kind: kind };
+  }
+  /** Corrections à tester entre deux époques (mêmes formats que les propositions de l'analyseur). */
+  function eraCandidates(strat, cmp) {
+    const out = [], hasStop = strat.stopLossPips > 0 || strat.stopAtr > 0;
+    out.push({ id: 'adx25', title: 'N\'entrer que si l\'ADX 14 dépasse 25 (marché en tendance)', change: { entryAnd: 'ADX(14) > 25' } });
+    out.push({ id: 'adx20', title: 'N\'entrer que si l\'ADX 14 est sous 20 (marché sans tendance)', change: { entryAnd: 'ADX(14) < 20' } });
+    if (!/EMA\(200\)/.test((strat.longEntry || '') + (strat.shortEntry || ''))) out.push({ id: 'ema200', title: 'Suivre la tendance de fond : acheter au-dessus de l\'EMA 200, vendre en dessous', change: { longAnd: 'CLOSE > EMA(200)', shortAnd: 'CLOSE < EMA(200)' } });
+    if (strat.longEntry && strat.shortEntry) {
+      out.push({ id: 'long', title: 'Ne prendre que les achats', change: { onlyLong: true } });
+      out.push({ id: 'short', title: 'Ne prendre que les ventes', change: { onlyShort: true } });
+    }
+    out.push({ id: 'volhi', title: 'Ne pas entrer quand la volatilité dépasse 1,5 fois sa moyenne', change: { entryAnd: 'ATR(14) < 1.5 * SMA(ATR(14), 50)' } });
+    out.push({ id: 'vollo', title: 'Ne pas entrer quand le marché est trop calme (ATR sous 0,8 fois sa moyenne)', change: { entryAnd: 'ATR(14) > 0.8 * SMA(ATR(14), 100)' } });
+    out.push({ id: 'slope', title: 'Acheter seulement si l\'EMA 50 monte, vendre seulement si elle baisse', change: { longAnd: 'SLOPE(EMA(50), 10) > 0', shortAnd: 'SLOPE(EMA(50), 10) < 0' } });
+    if (!hasStop) out.push({ id: 'sl', title: 'Stop-loss à 2 ATR', change: { strat: { stopAtr: 2, atrPeriod: strat.atrPeriod || 14 } } });
+    if (!(strat.trailAtr > 0)) out.push({ id: 'trail', title: 'Stop suiveur à 2 ATR', change: { strat: { trailAtr: 2, atrPeriod: strat.atrPeriod || 14 } } });
+    return out;
+  }
+
+  F.analyzer = { analyze, applyProposal, strategyKind, marketFeatures, tradeFeatures, compareEras, eraCandidates };
 })(typeof window !== 'undefined' ? window : globalThis);

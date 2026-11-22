@@ -152,13 +152,20 @@
   // ---------- Analyse temporelle : la stratégie marche-t-elle mieux à certaines époques ? ----------
   /** Année du milieu de la période testée (une simulation de 2 ans compte pour l'année de son milieu). */
   function midYear(e) { return new Date((Date.parse(e.from) + Date.parse(e.to)) / 2).getUTCFullYear(); }
-  const ERAS = [
-    { from: -Infinity, to: 1999, label: 'Avant 2000' },
-    { from: 2000, to: 2007, label: '2000 – 2007' },
-    { from: 2008, to: 2012, label: '2008 – 2012 (crise financière)' },
-    { from: 2013, to: 2019, label: '2013 – 2019' },
-    { from: 2020, to: Infinity, label: 'Depuis 2020' },
-  ];
+  // Époques par défaut : 2000 (arrivée de l'euro), 2008 (crise financière), 2013 (taux zéro, rachats d'actifs), 2020 (Covid, inflation, hausse des taux).
+  const DEFAULT_CUTS = [2000, 2008, 2013, 2020];
+  const DEFAULT_NAMES = { 2008: ' (crise financière)' };
+  /** Époques à partir des années de coupure : [2000, 2008] → avant 2000, 2000 – 2007, depuis 2008. */
+  function erasFromCuts(cuts) {
+    const c = [...new Set((cuts || DEFAULT_CUTS).map(Number).filter((y) => y >= 1971 && y <= 2100))].sort((a, b) => a - b);
+    const def = JSON.stringify(c) === JSON.stringify(DEFAULT_CUTS), out = [];
+    if (!c.length) return [{ from: -Infinity, to: Infinity, label: 'Toute la période' }];
+    out.push({ from: -Infinity, to: c[0] - 1, label: 'Avant ' + c[0] });
+    for (let i = 0; i + 1 < c.length; i++) out.push({ from: c[i], to: c[i + 1] - 1, label: c[i] + (c[i + 1] - 1 > c[i] ? ' – ' + (c[i + 1] - 1) : '') + (def ? DEFAULT_NAMES[c[i]] || '' : '') });
+    out.push({ from: c[c.length - 1], to: Infinity, label: 'Depuis ' + c[c.length - 1] });
+    return out;
+  }
+  const ERAS = erasFromCuts(DEFAULT_CUTS);
   /** Corrélation de rang (Spearman) entre l'année et le résultat : > 0 = meilleur avec le temps. */
   function rankCorr(xs, ys) {
     const rank = (a) => { const idx = a.map((v, i) => [v, i]).sort((p, q) => p[0] - q[0]), r = new Array(a.length); for (let k = 0; k < idx.length;) { let j = k; while (j + 1 < idx.length && idx[j + 1][0] === idx[k][0]) j++; for (let t = k; t <= j; t++) r[idx[t][1]] = (k + j) / 2; k = j + 1; } return r; };
@@ -173,7 +180,8 @@
    *   split: {year, before, after} (rupture la plus nette, au moins 3 simulations de chaque côté) ou null,
    *   verdict: [phrases], weak: {from, to, label} | null, strong: idem, gaps: [{from, to}] }
    */
-  function timeline(list) {
+  function timeline(list, cuts) {
+    const eras = erasFromCuts(cuts);
     const L = list.filter((e) => e.from && e.to);
     const out = { n: L.length, byYear: [], byEra: [], corr: 0, split: null, verdict: [], weak: null, strong: null, gaps: [] };
     if (!L.length) return out;
@@ -182,7 +190,7 @@
     const yrs = new Map();
     for (const e of L) { const y = midYear(e); if (!yrs.has(y)) yrs.set(y, []); yrs.get(y).push(e); }
     out.byYear = [...yrs].sort((a, b) => a[0] - b[0]).map(([y, l]) => Object.assign(groupStats(String(y), String(y), l), { year: y }));
-    out.byEra = ERAS.map((er) => { const l = L.filter((e) => { const y = midYear(e); return y >= er.from && y <= er.to; }); return l.length ? Object.assign(groupStats(er.label, er.label, l), { era: er }) : null; }).filter(Boolean);
+    out.byEra = eras.map((er) => { const l = L.filter((e) => { const y = midYear(e); return y >= er.from && y <= er.to; }); return l.length ? Object.assign(groupStats(er.label, er.label, l), { era: er }) : null; }).filter(Boolean);
     if (L.length >= 4) out.corr = rankCorr(L.map(midYear), L.map((e) => e.returnPct));
     // rupture : l'année qui sépare le mieux les bons et les mauvais résultats
     const cands = [...new Set(L.map(midYear))].sort((a, b) => a - b).slice(1);
@@ -225,5 +233,5 @@
     return out;
   }
 
-  F.advisor = { timeline, midYear, ERAS, analyze, horizonOf, withdrawOf, groupBy, scoreOf, months, HORIZON_LABEL };
+  F.advisor = { timeline, midYear, ERAS, erasFromCuts, DEFAULT_CUTS, analyze, horizonOf, withdrawOf, groupBy, scoreOf, months, HORIZON_LABEL };
 })(typeof window !== 'undefined' ? window : globalThis);

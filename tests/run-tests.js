@@ -773,6 +773,23 @@ test('Analyse temporelle : rupture entre époques, trous, époques', () => {
   if (!(T.corr > 0.5)) throw new Error('corrélation positive attendue');
   eq(A.timeline([]).n, 0);
 });
+test('Époques modifiables et analyseur d\'époque', () => {
+  const Ad = globalThis.Forexia.advisor, An = globalThis.Forexia.analyzer;
+  eq(Ad.erasFromCuts([2010]).map((e) => e.label).join('|'), 'Avant 2010|Depuis 2010');
+  eq(Ad.erasFromCuts([2020, 2005]).map((e) => e.label).join('|'), 'Avant 2005|2005 – 2019|Depuis 2020');
+  eq(Ad.erasFromCuts(Ad.DEFAULT_CUTS)[2].label, '2008 – 2012 (crise financière)');
+  const to = new Date('2025-06-30'), rg = D.periodRange('1y', to), bars = D.generateSynthetic('EUR/USD', rg.fetchStart, rg.end);
+  const st = P.list.find((p) => p.id === 'rsi'), se = Object.assign({}, base, { spreadPips: 1, startIndex: D.indexFrom(bars, rg.start) });
+  const r = B.runBacktest(bars, st, se), x = { features: An.marketFeatures(bars, r.startIndex), trades: An.tradeFeatures(bars, r), returnPct: r.stats.returnPct };
+  for (const k of ['trendYear', 'adx', 'trendShare', 'vol', 'efficiency']) if (!Number.isFinite(x.features[k])) throw new Error('caractéristique ' + k);
+  const up = Object.assign({}, x, { features: Object.assign({}, x.features, { trendYear: 12, trendShare: x.features.trendShare + 30 }) });
+  const dn = Object.assign({}, x, { features: Object.assign({}, x.features, { trendYear: -12 }) });
+  const c = An.compareEras([dn, dn], [up, up], st, ['avant 2020', 'depuis 2020']);
+  if (!c.causes.some((k) => /changé de direction/.test(k.text))) throw new Error('changement de direction non expliqué');
+  if (!c.causes.some((k) => /en tendance/.test(k.text))) throw new Error('force de tendance non expliquée');
+  eq(c.rows.length, 8);
+  if (!An.eraCandidates(st, c).some((k) => k.id === 'ema200')) throw new Error('correction EMA 200 attendue');
+});
 test('Pas de requête avant 1999 (début des cours BCE)', async () => {
     calls.length = 0;
     const bars = await D.fetchFrankfurter('EUR/USD', new Date('1990-01-01'), new Date('1999-06-30'));

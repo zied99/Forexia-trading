@@ -1976,8 +1976,8 @@
     $('anaApplyBestAll').textContent = 'Appliquer à tout le batch (' + anaBatchKeys().length + ')';
   }
   /** Correction de l'analyseur appliquée à des simulations de l'évaluation (relancées sur place). */
-  async function applyAnaToSims(st, se, titles, all) {
-    const e = anaOrigin.e, keys = all ? anaBatchKeys() : [e.key];
+  async function applyAnaToSims(st, se, titles, all, keysOverride) {
+    const e = anaOrigin.e, keys = keysOverride || (all ? anaBatchKeys() : [e.key]);
     if (!keys.length || checkRunning) return;
     const base = e.strategy, before = keys.map((k) => ({ key: k, r: (evalList().find((x) => x.key === k) || {}).returnPct }));
     const lev = se.leverage !== anaCtx.settings.leverage ? se.leverage : 0;
@@ -2641,6 +2641,151 @@
   function evalSave(list) { evalMemory = list; evalStore.set(list); updateEvalCount(); }
   // Onglet « Stratégie en cours » (par défaut) ou « Historique complet ».
   let evalScope = 'current';
+  // ---------- Époques modifiables et « Analyseur d'époque » ----------
+  const ERA_KEY = 'forexia.eraCuts';
+  function eraCuts() { try { const c = JSON.parse(localStorage.getItem(ERA_KEY)); return Array.isArray(c) ? c : F.advisor.DEFAULT_CUTS; } catch (e) { return F.advisor.DEFAULT_CUTS; } }
+  function setEraCuts(c) { try { if (c) localStorage.setItem(ERA_KEY, JSON.stringify(c)); else localStorage.removeItem(ERA_KEY); } catch (e) { /* ignoré */ } renderEvaluation(); }
+  function eraEditorHtml(T) {
+    const isDef = JSON.stringify(eraCuts()) === JSON.stringify(F.advisor.DEFAULT_CUTS);
+    return '<div class="era-edit"><b>Époques</b><p class="hint">Une simulation compte dans l\'époque qui contient le <b>milieu</b> de sa période. ' +
+      (isDef ? 'Coupures par défaut, aux grands changements du marché des changes : <b>2000</b> (arrivée de l\'euro), <b>2008</b> (crise financière), <b>2013</b> (taux zéro et rachats d\'actifs des banques centrales), <b>2020</b> (Covid, inflation puis hausse des taux).' : 'Coupures personnalisées.') +
+      ' Modifiez les années de coupure (séparées par des virgules) :</p><div class="row buttons era-row"><input id="eraCutsIn" type="text" value="' + esc(eraCuts().join(', ')) + '" aria-label="Années de coupure des époques" placeholder="ex. 2005, 2015, 2020">' +
+      '<button type="button" class="secondary small" id="eraApply">Appliquer</button>' + (isDef ? '' : '<button type="button" class="ghost small" id="eraDefault">Par défaut</button>') +
+      (T.split ? '<button type="button" class="ghost small" id="eraSplit" title="Deux époques : avant et depuis la rupture détectée">Couper à la rupture (' + T.split.year + ')</button>' : '') + '</div></div>';
+  }
+  let eraState = null; // { list, T, a, b, max, status, res }
+  function eraOptions(T) {
+    const o = T.byEra.map((g) => ({ v: 'e:' + g.era.from + ':' + g.era.to, label: g.label + ' (' + g.n + ')' }));
+    if (T.split) o.unshift({ v: 'e:-Infinity:' + (T.split.year - 1), label: 'Avant ' + T.split.year + ' (' + T.split.before.n + ')' }, { v: 'e:' + T.split.year + ':Infinity', label: 'Depuis ' + T.split.year + ' (' + T.split.after.n + ')' });
+    return o;
+  }
+  const eraRange = (v) => { const [, f, t] = v.split(':'); return { from: Number(f), to: Number(t) }; };
+  const eraLabelOf = (v) => { const r = eraRange(v); return r.from === -Infinity ? 'avant ' + (r.to + 1) : r.to === Infinity ? 'depuis ' + r.from : 'de ' + r.from + ' à ' + r.to; };
+  function openEraAnalyzer(list) {
+    const T = F.advisor.timeline(list, eraCuts()), opts = eraOptions(T);
+    if (opts.length < 2) return toast('Il faut des simulations dans au moins deux époques.', false);
+    const sorted = T.byEra.slice().sort((x, y) => x.robust - y.robust);
+    const a = T.split ? opts[T.split.after.robust > T.split.before.robust ? 0 : 1].v : 'e:' + sorted[0].era.from + ':' + sorted[0].era.to;
+    const b = T.split ? opts[T.split.after.robust > T.split.before.robust ? 1 : 0].v : 'e:' + sorted[sorted.length - 1].era.from + ':' + sorted[sorted.length - 1].era.to;
+    eraState = { list: list, T: T, a: a, b: b, max: 10, status: 'idle' };
+    $('eraModal').hidden = false; document.body.style.overflow = 'hidden';
+    renderEraModal();
+  }
+  function renderEraModal() {
+    const st = eraState, opts = eraOptions(st.T);
+    const sel = (id, cur) => '<select id="' + id + '">' + opts.map((o) => '<option value="' + o.v + '"' + (o.v === cur ? ' selected' : '') + '>' + esc(o.label) + '</option>').join('') + '</select>';
+    let h = '<div class="era-pick"><label class="field">Époque à comprendre (qui marche moins bien)' + sel('eraA', st.a) + '</label><label class="field">Époque de comparaison (qui marche bien)' + sel('eraB', st.b) + '</label>' +
+      '<label class="field">Simulations rechargées par époque<input id="eraMax" type="number" min="2" max="30" value="' + st.max + '"></label>' +
+      '<button type="button" class="primary" id="eraRun"' + (st.status === 'run' ? ' disabled' : '') + '>🔬 Analyser</button></div>' +
+      '<p class="hint">Chaque simulation est rechargée (mêmes données, mêmes réglages) pour mesurer le marché de son époque : direction, force de la tendance, va-et-vient, volatilité, chocs ; et ses trades : achats, ventes, marché en tendance ou non. Puis des corrections sont testées sur les deux époques.</p>';
+    if (st.status === 'run') h += '<div class="modal-loading"><span class="spinner"></span>' + esc(st.msg || '') + '</div>';
+    if (st.status === 'err') h += '<p class="val ko">' + esc(st.msg) + '</p>';
+    if (st.status === 'done') h += eraResultHtml(st);
+    $('eraBody').innerHTML = h;
+  }
+  async function runEraAnalysis() {
+    const st = eraState;
+    if (checkRunning || st.status === 'run') return;
+    st.a = $('eraA').value; st.b = $('eraB').value; st.max = Math.max(2, Math.min(30, Math.round(+$('eraMax').value) || 10));
+    if (st.a === st.b) { st.status = 'err'; st.msg = 'Choisissez deux époques différentes.'; return renderEraModal(); }
+    const inR = (e, v) => { const r = eraRange(v), y = F.advisor.midYear(e); return y >= r.from && y <= r.to; };
+    const usable = st.list.filter((e) => e.strategy && e.config && !e.tag);
+    const names = {}; usable.forEach((e) => { names[e.name] = (names[e.name] || 0) + 1; });
+    const name = Object.keys(names).sort((x, y) => names[y] - names[x])[0];
+    const pick = (L) => { if (L.length <= st.max) return L; const out = []; for (let i = 0; i < st.max; i++) out.push(L[Math.floor((i * L.length) / st.max)]); return out; };
+    const LA = pick(usable.filter((e) => e.name === name && inR(e, st.a))), LB = pick(usable.filter((e) => e.name === name && inR(e, st.b)));
+    if (LA.length < 2 || LB.length < 2) { st.status = 'err'; st.msg = 'Il faut au moins 2 simulations de « ' + name + ' » dans chaque époque (' + LA.length + ' et ' + LB.length + ').'; return renderEraModal(); }
+    st.status = 'run'; renderEraModal();
+    const saved = captureForm(), ctxA = [], ctxB = [];
+    checkRunning = 'era'; checkStop = false;
+    try {
+      const all = LA.map((e) => [e, ctxA]).concat(LB.map((e) => [e, ctxB]));
+      for (let k = 0; k < all.length && !checkStop; k++) {
+        st.msg = 'Rechargement de la simulation ' + (k + 1) + ' / ' + all.length + '…'; renderEraModal(); setRunLabel('Époques ' + (k + 1) + ' / ' + all.length);
+        const c = await ctxOf(all[k][0]);
+        if (c && lastRunCtx && lastRunCtx.result) {
+          const r = lastRunCtx.result;
+          all[k][1].push({ e: all[k][0], ctx: { bars: c.bars, strat: c.strat, settings: c.settings }, features: F.analyzer.marketFeatures(c.bars, r.startIndex), trades: F.analyzer.tradeFeatures(c.bars, r), returnPct: r.stats.returnPct });
+        }
+      }
+    } finally {
+      checkRunning = ''; setRunLabel('');
+      restoring = true;
+      try { loadStrategy(saved.strat); applyConfig(saved.config); $('style').value = saved.style; $('preset').value = [...$('preset').options].some((o) => o.value === saved.preset) ? saved.preset : 'mine'; $('presetDesc').textContent = saved.desc; updateWithdrawUI(); syncFormState(); }
+      finally { restoring = false; }
+    }
+    if (ctxA.length < 2 || ctxB.length < 2) { st.status = 'err'; st.msg = 'Simulations impossibles à recharger : ' + ($('formError').textContent || 'données indisponibles'); return renderEraModal(); }
+    st.msg = 'Comparaison et test des corrections…'; renderEraModal();
+    await new Promise((r) => setTimeout(r, 20));
+    const la = eraLabelOf(st.a), lb = eraLabelOf(st.b), strat = ctxA[0].ctx.strat;
+    const cmp = F.analyzer.compareEras(ctxA, ctxB, strat, [la, lb]);
+    const med = (a) => { const v = a.filter(Number.isFinite).sort((x, y) => x - y); return v.length ? (v.length % 2 ? v[v.length >> 1] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2) : NaN; };
+    const win = (a) => (a.filter((v) => v > 0).length / Math.max(1, a.length)) * 100;
+    const fixes = F.analyzer.eraCandidates(strat, cmp).map((p) => {
+      let tr0 = 0, tr1 = 0;
+      const run = (L) => L.map((x) => { const y = F.analyzer.applyProposal(x.ctx.strat, x.ctx.settings, p), s2 = E.run(x.ctx.bars, y.strat, y.settings); tr0 += x.trades.length; tr1 += s2 ? s2.trades : 0; return s2 ? s2.returnPct : NaN; });
+      const ra = run(ctxA), rb = run(ctxB);
+      const a0 = med(ctxA.map((x) => x.returnPct)), b0 = med(ctxB.map((x) => x.returnPct));
+      const fix = { p: p, a: med(ra), b: med(rb), wa: win(ra), wb: win(rb), a0: a0, b0: b0, tradeRatio: tr0 ? tr1 / tr0 : 1 };
+      // une correction qui supprime presque tous les trades « améliore » en ne faisant plus rien : écartée
+      fix.few = fix.tradeRatio < 0.35;
+      fix.good = !fix.few && fix.a > a0 + 1 && fix.b >= b0 - Math.max(5, Math.abs(b0) * 0.25);
+      fix.score = (fix.a - a0) + 0.5 * Math.min(0, fix.b - b0) + 0.2 * (fix.wa - win(ctxA.map((x) => x.returnPct))) - (fix.few ? 1000 : 0);
+      return fix;
+    }).sort((x, y) => y.score - x.score);
+    st.res = { cmp: cmp, ctxA: ctxA, ctxB: ctxB, la: la, lb: lb, fixes: fixes, strat: strat };
+    st.status = 'done'; renderEraModal();
+  }
+  function eraResultHtml(st) {
+    const r = st.res, c = r.cmp, A = c.A, B = c.B;
+    const pc = (v) => (Number.isFinite(v) ? '<span class="' + cls(v) + '">' + signed(v, num1) + ' %</span>' : '—');
+    const cap = (s) => s[0].toUpperCase() + s.slice(1);
+    let h = '<div class="era-sum"><div class="era-card bad"><b>' + esc(cap(r.la)) + '</b>' + A.n + ' simulations · ' + Math.round(A.win) + ' % gagnantes · médiane ' + pc(A.ret) + '</div>' +
+      '<div class="era-card good"><b>' + esc(cap(r.lb)) + '</b>' + B.n + ' simulations · ' + Math.round(B.win) + ' % gagnantes · médiane ' + pc(B.ret) + '</div></div>';
+    h += '<section class="ana-sec warn"><h3>Ce qui a fait la différence</h3>' + (c.causes.length ? '<ol>' + c.causes.slice(0, 6).map((x) => '<li>' + x.text + '</li>').join('') + '</ol>' : '<p>Pas de différence marquée du marché entre les deux époques : l\'écart vient peut-être du hasard. Rechargez plus de simulations par époque.</p>') +
+      '<p class="hint">Stratégie ' + ({ trend: 'de suivi de tendance', reversion: 'de retour à la moyenne', mixed: 'mixte' })[c.kind] + '. Les différences sont classées par importance.</p></section>';
+    h += '<details class="ana-sec" open><summary><b>Le marché dans chaque époque</b> (médiane des simulations)</summary><table class="ana-table"><thead><tr><th></th><th>' + esc(cap(r.la)) + '</th><th>' + esc(cap(r.lb)) + '</th></tr></thead><tbody>' +
+      c.rows.map((x) => '<tr><td>' + esc(x.label) + '</td><td>' + (Number.isFinite(x.a) ? x.fmt(x.a) : '—') + '</td><td>' + (Number.isFinite(x.b) ? x.fmt(x.b) : '—') + '</td></tr>').join('') + '</tbody></table></details>';
+    const tcell = (t) => (t.n ? t.n + ' · ' + Math.round(t.win) + ' % · <span class="' + cls(t.pips) + '">' + signed(t.pips, num1) + ' pips</span>' : '—');
+    h += '<details class="ana-sec" open><summary><b>Les trades</b> (nombre · gagnants · gain moyen)</summary><table class="ana-table"><thead><tr><th></th><th>' + esc(cap(r.la)) + '</th><th>' + esc(cap(r.lb)) + '</th></tr></thead><tbody>' +
+      c.tradeRows.map((x) => '<tr><td>' + esc(x.label) + '</td><td>' + tcell(x.a) + '</td><td>' + tcell(x.b) + '</td></tr>').join('') + '</tbody></table></details>';
+    const keys = r.ctxA.concat(r.ctxB).map((x) => x.e.key);
+    h += '<section class="ana-sec"><h3>💡 Corrections testées sur les deux époques</h3><p class="hint">Résultat médian des simulations rechargées, avant → après. « Recommandée » : améliore ' + esc(r.la) + ' sans dégrader ' + esc(r.lb) + '.</p>' +
+      r.fixes.map((f, i) => '<div class="ana-prop ' + (f.good ? 'good' : 'bad') + '"><div><b>' + esc(f.p.title) + '</b>' + (f.good ? ' <span class="pos">✓ recommandée</span>' : '') +
+        (f.few ? ' <span class="hint">✗ supprime ' + Math.round((1 - f.tradeRatio) * 100) + ' % des trades : la stratégie ne trade presque plus</span>' : '') +
+        '<div class="ana-ba">' + esc(cap(r.la)) + ' : ' + pc(f.a0) + ' → ' + pc(f.a) + ' (' + Math.round(f.wa) + ' % gagnantes)<br>' + esc(cap(r.lb)) + ' : ' + pc(f.b0) + ' → ' + pc(f.b) + ' (' + Math.round(f.wb) + ' % gagnantes)</div></div>' +
+        '<button type="button" class="' + (f.good ? 'primary' : 'secondary') + ' small" data-era-fix="' + i + '">Appliquer aux ' + keys.length + ' simulations</button></div>').join('') + '</section>';
+    return h;
+  }
+  function applyEraFix(i) {
+    const r = eraState && eraState.res, f = r && r.fixes[i];
+    if (!f) return;
+    const first = r.ctxA[0], y = F.analyzer.applyProposal(first.ctx.strat, first.ctx.settings, f.p);
+    anaOrigin = { e: first.e }; anaCtx = first.ctx;
+    closeEraModal();
+    applyAnaToSims(y.strat, y.settings, [f.p.title], true, r.ctxA.concat(r.ctxB).map((x) => x.e.key));
+  }
+  function closeEraModal() { $('eraModal').hidden = true; if ($('evalModal').hidden) document.body.style.overflow = ''; }
+  $('eraModal').addEventListener('click', (ev) => {
+    if (ev.target.closest('[data-close]')) { if (checkRunning === 'era') checkStop = true; return closeEraModal(); }
+    if (ev.target.id === 'eraRun') return runEraAnalysis();
+    const fx = ev.target.closest('[data-era-fix]');
+    if (fx) applyEraFix(+fx.dataset.eraFix);
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('eraModal').hidden) closeEraModal(); });
+  $('evalBody').addEventListener('click', (ev) => {
+    const id = ev.target.id;
+    if (id === 'eraApply') {
+      const c = ($('eraCutsIn').value.match(/\d{4}/g) || []).map(Number).filter((y) => y >= 1971 && y <= 2100);
+      if (!c.length) return toast('Indiquez au moins une année de coupure (ex. 2020).', false);
+      return setEraCuts([...new Set(c)].sort((a, b) => a - b));
+    }
+    if (id === 'eraDefault') return setEraCuts(null);
+    if (id === 'eraSplit') { const T = F.advisor.timeline(evalFiltered(evalList()).map((x) => x.e), eraCuts()); if (T.split) setEraCuts([T.split.year]); return; }
+    if (id === 'eraAnalyze') return openEraAnalyzer(evalFiltered(evalList()).map((x) => x.e));
+  });
+  $('evalBody').addEventListener('keydown', (ev) => { if (ev.target.id === 'eraCutsIn' && ev.key === 'Enter') $('eraApply').click(); });
+
   // ---------- Analyse temporelle (graphiques de l'évaluation) ----------
   const tDate = (d) => Date.parse(String(d).slice(0, 10) + 'T00:00:00Z');
   /** Frise : chaque simulation est un trait de sa date de début à sa date de fin, à la hauteur de son résultat. */
@@ -2681,7 +2826,7 @@
   }
   let timeLotOpt = null; // {n, from, to} proposé dans la section
   function timeSectionHtml(list) {
-    const T = F.advisor.timeline(list);
+    const T = F.advisor.timeline(list, eraCuts());
     if (T.n < 2) return '';
     const abs = list.map((e) => Math.abs(e.returnPct)).sort((a, b) => a - b);
     const cap = Math.max(20, Math.min(2 * (abs[Math.floor(abs.length * 0.9)] || 20), abs[abs.length - 1] || 20));
@@ -2702,7 +2847,9 @@
       (warn.length ? '<div class="banner warn">' + warn.map((w) => '<p>' + w + '</p>').join('') + '</div>' : '') +
       '<h5>Résultat de chaque simulation selon sa période</h5><p class="hint">Un trait = une simulation (du début à la fin de sa période), en hauteur son résultat.' + (T.weak ? ' Fond rouge : époque faible ; vert : époque forte.' : '') + '</p>' + timelineSvg(list, T, cap) +
       '<h5>Par année</h5><p class="hint">Résultat médian des simulations dont la période est centrée sur l\'année ; au-dessus, la part de gagnantes.</p>' + yearBarsSvg(T, cap) +
-      '<div class="eval-charts-grid">' + hbars('Résultat médian par époque', T.byEra) + '</div>' +
+      '<div class="era-head"><h5>Par époque</h5><button type="button" class="primary small" id="eraAnalyze">🔬 Analyseur d\'époque</button></div>' +
+      '<p class="hint">L\'analyseur d\'époque compare deux époques (marché, trades) pour expliquer ce qui a fait la différence, et teste des corrections.</p>' +
+      '<div class="eval-charts-grid">' + hbars('Résultat médian par époque', T.byEra) + '</div>' + eraEditorHtml(T) +
       '<div class="time-actions"><b>Vérifier une époque</b><p class="hint">Lance un lot de tests aléatoires limité à ces années (un nouveau batch). Comparez ensuite les deux époques dans « Voir toutes les simulations ».</p>' +
       '<div class="row buttons">' + (T.weak ? lotBtn(T.weak, '10 tests ' + T.weak.label + ' (' + T.weak.from + '–' + T.weak.to + ')') + lotBtn(T.strong, '10 tests ' + T.strong.label + ' (' + T.strong.from + '–' + T.strong.to + ')') : '') +
       (worst ? '<button type="button" class="secondary small" data-time-ana="' + esc(worst.key) + '">🔍 Analyser la pire simulation ' + esc(T.weak.label) + ' (#' + (evalList().findIndex((z) => z.key === worst.key) + 1) + ')</button>' : '') + '</div>' +

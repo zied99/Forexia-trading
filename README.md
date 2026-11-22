@@ -200,6 +200,18 @@ stratégie marche mieux à certaines époques :
 - boutons pour **vérifier une époque** : lot de 10 tests sur l'époque faible ou forte, ou entre deux années au choix,
   et analyse de la pire simulation de l'époque faible.
 
+**Époques** : par défaut, coupures en 2000 (arrivée de l'euro), 2008 (crise financière), 2013 (taux zéro et rachats
+d'actifs) et 2020 (Covid, inflation, hausse des taux) ; une simulation compte dans l'époque du milieu de sa période.
+Les années de coupure se modifient sous le graphique « Par époque » (ou « Couper à la rupture »).
+
+**🔬 Analyseur d'époque** : compare deux époques (par défaut, avant et depuis la rupture détectée). Les simulations
+sont rechargées pour mesurer le marché de chaque époque (direction du prix par an, temps au-dessus de l'EMA 200, ADX,
+temps en tendance, netteté du mouvement, retour à la moyenne, volatilité, chocs) et les trades (achats, ventes, en
+tendance ou non, en pips). Il classe « ce qui a fait la différence » et teste des corrections sur les deux époques
+(filtres ADX, EMA 200, pente, volatilité, un seul sens, stops) : « recommandée » si elle améliore l'époque faible sans
+dégrader l'autre ; une correction qui supprime presque tous les trades est écartée. « Appliquer » relance les
+simulations, puis propose de l'ajouter à la stratégie.
+
 **Plage du lot** : à côté de « Lot de tests aléatoires », « Plage : de … à … » limite les périodes tirées à ces années
 (ex. 1997 à 2005). Vide : tout l'historique (MT5 : depuis 2015 par défaut ; BCE : depuis 1999). L'onglet Batchs montre
 aussi chaque batch « dans le temps » (un point par simulation, même échelle pour tous).
