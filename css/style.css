@@ -719,3 +719,21 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 .era-quick { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .era-quick input { width: 130px; }
 .era-edit .row.buttons, .time-actions .row.buttons, .time-sec > .row.buttons, .ev-panel .row.buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* Resimuler avec un retrait */
+#wdModal { z-index: 60; }
+#wdModal .modal-box { width: min(1000px, 100%); }
+.scope-tab.wd-tab { background: var(--warn-soft); border-color: var(--star-edge); color: var(--text); }
+.wd-form { margin: 12px 0; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel-2); }
+.wd-presets, .wd-fields { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.wd-fields { margin-top: 10px; }
+.wd-presets .field { flex: 1 1 220px; }
+.wd-fields .field { flex: 1 1 160px; }
+.wd-form button { width: auto; flex: 0 0 auto; margin: 0; }
+.wd-form .hint { margin: 8px 0 0; }
+.wd-h { margin: 16px 0 8px; font-size: 16px; }
+.wd-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.wd-table td, .wd-table th { white-space: nowrap; }
+.wd-charts { margin-top: 12px; }
+.wd-verdict p { margin: 3px 0; }
+.wd-preset-field select { max-width: 320px; }

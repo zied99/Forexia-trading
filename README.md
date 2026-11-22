@@ -188,6 +188,20 @@ Un **batch** est un lot de simulations enregistré ensemble, par exemple un lot 
   recommandations) ; « Mettre à jour le batch » y enregistre leur état après prolongation ou amélioration.
 - Renommer ✏️ et supprimer 🗑. Les batchs sont gardés dans ce navigateur.
 
+## Resimuler avec un retrait
+
+Dans la fenêtre Évaluation, à côté de « Recommandations », **💸 Resimuler avec un retrait** relance les simulations
+affichées (mêmes dates, mêmes réglages) une fois sans retrait et une fois avec un retrait fictif des gains (au seuil,
+ou régulier : chaque mois / tous les X jours, % du compte, somme fixe ou % de l'excédent). Elle montre :
+- les barres de chaque simulation (pleine : sans retrait ; pointillé : avec retrait, compte + sommes retirées) avec la
+  somme retirée au-dessus ;
+- les indicateurs (total retiré, retrait moyen par mois, simulations avec retrait, résultat et drawdown moyens avant /
+  après, capital de départ préservé) et un tableau par simulation ;
+- la somme retirée par simulation et l'évolution moyenne mois par mois (compte et retraits cumulés) ;
+- un verdict (effet sur les intérêts composés, rythme de retrait trop élevé…).
+Les simulations du tableau ne sont pas modifiées. **💾 Enregistrer cette mécanique** la garde sous un nom : elle est
+ensuite proposée dans la fenêtre et dans « Retrait fictif des gains » du formulaire (« Mécanique enregistrée »).
+
 ## Événements de marché
 
 Forexia connaît les grands événements du marché des changes depuis 1971 (Bretton Woods, accords du Plaza, mercredi
