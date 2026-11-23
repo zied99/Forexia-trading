@@ -3629,7 +3629,7 @@
   function fxSetQ(id, q) {
     const fx = fxList().find((x) => x.id === id), card = document.querySelector('.fx-card[data-fx="' + id + '"]');
     if (!fx || !card) return;
-    fxQ.set(id, q); FX_BASE = fx.capital;
+    fxQ.set(id, q); FX_BASE = fxInvest(fx);
     const pt = fxPoint(fx, q), rg = fxRange(fx), x = 12 + ((Math.max(rg.lo, Math.min(rg.hi, pt.b)) - rg.lo) / (rg.hi - rg.lo)) * 336;
     const h = card.querySelector('.sc-handle'); if (h) h.setAttribute('transform', 'translate(' + x.toFixed(1) + ' 0)');
     const pk = card.querySelector('.fx-pick'); if (pk) pk.innerHTML = fxPickHtml(fx, q);
@@ -3665,14 +3665,17 @@
     return h + '</div>';
   }
   const RISK_TXT = ['', 'très faible', 'faible', 'modéré', 'moyen', 'assez élevé', 'élevé', 'très élevé'];
+  // capital choisi pour la carte : au moins le capital du plan (montant minimum testé)
+  const fxInvest = (fx) => Math.max(fx.capital, Number(fx.invest) || fx.capital);
+  const fxStep = (c) => (c >= 20000 ? 1000 : c >= 2000 ? 100 : 10);
   function fxCardHtml(fx) {
     if (fx.v !== 2) return fxCardHtmlV1(fx);
-    FX_BASE = fx.capital; // tous les montants de la carte sont pour le capital du plan
+    FX_BASE = fxInvest(fx); // tous les montants de la carte sont pour le capital choisi (au moins le capital du plan)
     const sc = fx.scenarios, sol = fx.solidity, inc = fx.income, cd = fx.conditions;
     const kf = (k, v, sub, dk) => '<div class="fx-kf"><span>' + k + '</span><b' + (dk ? ' data-fx-d="' + dk + '"' : '') + '>' + v + '</b>' + (sub ? '<small' + (dk ? ' data-fx-d="' + dk + 's"' : '') + '>' + sub + '</small>' : '') + '</div>';
     const q0 = fxQ.has(fx.id) ? fxQ.get(fx.id) : 0.5, pt0 = fxPoint(fx, q0), y1v = (FX_BASE * pt0.y1) / 100;
     const incomeTxt = inc.w.mode === 'periodic' && inc.w.type === 'fixed' ? '≈ ' + fxMoney(inc.fixedPct) + ' / mois' : '≈ ' + fxMoney(inc.perMonthPct) + ' / mois en moyenne';
-    const incomeSub = (inc.w.mode === 'periodic' && inc.w.type === 'excess' ? 'part des gains au-dessus du capital : variable, parfois nul' : inc.w.mode === 'periodic' && inc.w.type === 'fixed' ? 'somme fixe : ' + num1.format(inc.fixedPct) + ' % du capital par mois' : inc.desc) +
+    const incomeSub = (inc.w.mode === 'periodic' && inc.w.type === 'excess' ? 'part des gains au-dessus du capital : variable, parfois nul' : inc.w.mode === 'periodic' && inc.w.type === 'fixed' ? 'somme fixe : ' + num1.format(inc.fixedPct) + ' % du capital par mois, soit ' + fxMoney(inc.fixedPct) + ' pour ' + money0.format(FX_BASE) : inc.desc) +
       ' · capital préservé ' + inc.kept + ' fois sur ' + fx.n;
     const solTxt = 'testé sur ' + fx.n + ' périodes de ' + fx.years[0] + ' à ' + fx.years[1] + ' · ' + sol.eraWin + ' époque' + (sol.eraWin > 1 ? 's' : '') + ' gagnante' + (sol.eraWin > 1 ? 's' : '') + ' sur ' + sol.eras;
     const tipSol = 'Solidité ' + sol.score + '/100 : simulations ' + Math.round(sol.parts.simulations) + '/30, années couvertes ' + Math.round(sol.parts.annees) + '/25, époques ' + Math.round(sol.parts.epoques) + '/20, régularité ' + Math.round(sol.parts.regularite) + '/15, données réelles ' + Math.round(sol.parts.donnees) + '/10.';
@@ -3680,7 +3683,7 @@
       '<header><textarea class="fx-name" rows="2" data-fx-name="' + esc(fx.id) + '" aria-label="Nom du FX" title="Cliquez pour modifier le nom" spellcheck="false">' + esc(fx.name) + '</textarea><span class="fx-badge">FX</span></header>' +
       (sol.synthetic ? '<p class="fx-warn">⚠ Construit sur des données simulées : à refaire avec les cours réels (MT5) avant de le présenter à un client.</p>' : '') +
       '<p class="fx-principle"><b>Le principe :</b> ' + esc(fx.principle) + ' <small>(' + esc(fx.strategy.name) + ' · ' + esc(fx.strategy.pair) + ')</small></p>' +
-      '<div class="fx-kfs">' + kf('Capital investi', money0.format(fx.capital)) + kf('Durée recommandée', durTxt2(fx.duration.reco), 'testé de ' + durTxt2(fx.duration.min) + ' à ' + durTxt2(fx.duration.max)) +
+      '<div class="fx-kfs">' + '<div class="fx-kf fx-invest"><span>Capital investi</span><label class="fx-inv"><input type="number" inputmode="numeric" data-fx-invest="' + esc(fx.id) + '" min="' + Math.ceil(fx.capital) + '" step="' + fxStep(fx.capital) + '" value="' + Math.round(FX_BASE) + '" aria-label="Capital investi (minimum ' + money0.format(fx.capital) + ')"><b>€</b></label><small>minimum ' + money0.format(fx.capital) + ' · modifiable</small></div>' + kf('Durée recommandée', durTxt2(fx.duration.reco), 'testé de ' + durTxt2(fx.duration.min) + ' à ' + durTxt2(fx.duration.max)) +
         kf('Gain au bout d\'un an', fxY1Html(pt0), fxY1Sub(pt0, q0), 'y1') +
         kf('Revenu régulier', fxSims(fx) ? '≈ ' + fxMoney(pt0.inc) + ' / mois' : incomeTxt, (fxSims(fx) ? 'scénario ' + fxScenarioName(q0) + ' · ' : '') + 'pour ' + money0.format(FX_BASE) + ' investis', 'inc') + '</div>' +
       '<section class="fx-sec"><h5>Chances de gain</h5><div class="fx-ten-row">' + fxTenSvg(fx.winRate) + '<span><b>' + Math.round(fx.winRate / 10) + ' fois sur 10</b> le plan finit gagnant<small>' + Math.round((fx.winRate * fx.n) / 100) + ' périodes gagnantes sur ' + fx.n + ' testées</small></span></div></section>' +
@@ -3688,7 +3691,7 @@
       '<section class="fx-sec"><h5>Évolution typique</h5>' + fxPathSvg(fx.path) + '</section>' +
       '<section class="fx-sec fx-two"><div><h5>Risque</h5>' + fxRiskScale(fx.riskNote) + '<small>' + RISK_TXT[fx.riskNote] + ' · pire moment en cours de route : en général <b>−' + num1.format(fx.drawdown.med) + ' %</b>, au pire −' + num1.format(fx.drawdown.max) + ' %</small></div>' +
         '<div title="' + esc(tipSol) + '"><h5>Solidité du résultat</h5><span class="fx-stars">' + stars(sol.score) + '</span> <b>' + sol.score + '/100</b><small>' + solTxt + (sol.synthetic ? ' · données simulées' : '') + '</small></div></section>' +
-      '<section class="fx-sec"><h5>Revenu régulier</h5><p class="fx-inc"><b>' + esc(inc.desc) + '</b> — ' + incomeSub + '. <small>Choisi par comparaison : meilleur que « ' + esc(inc.other) + ' ».</small></p></section>' +
+      '<section class="fx-sec"><h5>Revenu régulier</h5><p class="fx-inc"><b>' + (inc.w.mode === 'periodic' && inc.w.type === 'fixed' ? fxMoney(inc.fixedPct) + ' chaque mois' + (inc.w.every === 'days' ? '' : '') : esc(inc.desc)) + '</b> — ' + incomeSub + '. <small>Choisi par comparaison : meilleur que « ' + esc(inc.other) + ' ».</small></p></section>' +
       '<section class="fx-sec"><h5>Conditions</h5><p class="fx-cond">' + [cd.leverage ? 'Levier 1:' + cd.leverage : '', cd.spread != null ? 'spread ' + num1.format(cd.spread) + ' pip' + (cd.spread > 1 ? 's' : '') + ' par trade' : '', cd.commission ? 'commission ' + num1.format(cd.commission) + ' par lot' : 'sans commission', 'données : ' + (cd.source || '—'), 'sortie possible à tout moment (positions fermées au prix du marché)'].filter(Boolean).map(esc).join(' · ') + '</p></section>' +
       '<p class="fx-disclaimer">Résultats de simulations passées, sans garantie pour l\'avenir. Vous pouvez perdre tout ou partie du capital investi.</p>' +
       '<footer><span class="hint">créé le ' + new Date(fx.createdAt).toLocaleDateString('fr-FR') + '</span><span class="fx-acts">' + (fx.strategy.data ? '<button type="button" class="secondary small" data-fx-load="' + esc(fx.id) + '" title="Remettre la stratégie, son capital et ce retrait dans le formulaire">Charger</button>' : '') +
@@ -3742,6 +3745,24 @@
   $('fxModal').addEventListener('pointermove', (ev) => { if (fxDrag) fxDragAt(ev); });
   $('fxModal').addEventListener('pointerup', () => { fxDrag = null; });
   $('fxModal').addEventListener('pointercancel', () => { fxDrag = null; });
+  // capital investi modifiable sur la carte (jamais sous le minimum du plan)
+  $('fxModal').addEventListener('change', (ev) => {
+    const id = ev.target.dataset && ev.target.dataset.fxInvest;
+    if (!id || !ev.target.isConnected || fxInvBusy) return; // déjà traité (Entrée puis perte du focus)
+    const l = fxList(), fx = l.find((x) => x.id === id);
+    if (!fx) return;
+    fxInvBusy = true;
+    try { fxInvestApply(ev, l, fx, id); } finally { fxInvBusy = false; }
+  });
+  let fxInvBusy = false;
+  function fxInvestApply(ev, l, fx, id) {
+    let v = Math.round(Number(ev.target.value) || 0);
+    if (v < fx.capital) { v = Math.ceil(fx.capital); toast('Montant minimum pour ce plan : ' + money0.format(fx.capital) + '.', false); }
+    fx.invest = v; setFxList(l);
+    const card = document.querySelector('.fx-card[data-fx="' + id + '"]');
+    if (card) card.outerHTML = fxCardHtml(fx);
+  }
+  $('fxModal').addEventListener('keydown', (ev) => { if (ev.target.dataset && ev.target.dataset.fxInvest && ev.key === 'Enter') ev.target.dispatchEvent(new Event('change', { bubbles: true })); });
   // nom du FX modifiable directement sur la carte
   $('fxModal').addEventListener('change', (ev) => {
     const id = ev.target.dataset && ev.target.dataset.fxName;

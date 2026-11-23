@@ -907,3 +907,6 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 .fx-pick small { color: var(--muted, #64748b); }
 .fx-sc .sc-drag { font-size: 9.5px; fill: var(--text); font-weight: 700; opacity: .75; }
 .fx-y1-l { font-size: 12px; font-weight: 600; color: var(--muted, #64748b); } .fx-kf small b { font-size: inherit; }
+.fx-inv { display: flex; align-items: center; gap: 4px; }
+.fx-inv input { width: 100%; max-width: 140px; font-size: 16px; font-weight: 700; padding: 4px 8px; border: 1px solid var(--accent); border-radius: 8px; background: var(--panel); color: var(--text); }
+.fx-inv b { font-size: 16px; }

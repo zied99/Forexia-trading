@@ -231,7 +231,8 @@ ensuite proposée dans la fenêtre et dans « Retrait fictif des gains » du for
 Un **FX** est un plan d'investissement à présenter à un client qui ne connaît pas le trading. Il s'enregistre depuis la
 comparaison de deux mécaniques de retrait (« 💸 Resimuler avec un retrait » › « ⚖️ Comparer » › **💼 Enregistrer un FX**),
 avec la mécanique gagnante. Le bouton **💼 FX** en haut de la page affiche les FX en cartes (nom modifiable sur la carte,
-« Charger », 🗑). Montants calculés pour le **capital du plan**. Un **point blanc à glisser** sur la barre des scénarios
+« Charger », 🗑). Montants calculés pour le **capital investi**, modifiable sur la carte (jamais sous le capital du plan, montant
+minimum testé ; les montants sont proportionnels). Un **point blanc à glisser** sur la barre des scénarios
 choisit un scénario (du pire au meilleur cas testé) : le gain au bout d'un an et le revenu mensuel suivent.
 
 | Rubrique | Ce que ça représente | Calcul |
