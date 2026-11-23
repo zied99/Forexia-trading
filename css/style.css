@@ -910,3 +910,6 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 .fx-inv { display: flex; align-items: center; gap: 4px; }
 .fx-inv input { width: 100%; max-width: 140px; font-size: 16px; font-weight: 700; padding: 4px 8px; border: 1px solid var(--accent); border-radius: 8px; background: var(--panel); color: var(--text); }
 .fx-inv b { font-size: 16px; }
+/* cases Gain au bout d'un an et Revenu régulier : texte du dessous en couleur normale */
+.fx-kf small[data-fx-d="y1s"], .fx-kf small[data-fx-d="incs"] { color: var(--text); font-size: 12.5px; font-weight: 500; }
+.fx-kf small[data-fx-d="y1s"]:empty { display: none; }
