@@ -891,3 +891,7 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 .fx-sc-help { margin: 4px 0 0 !important; }
 .fx-ten-row small { display: block; font-size: 11px; color: var(--muted, #64748b); }
 .fx-ten-row small { display: block; font-size: 11px; color: var(--muted, #64748b); }
+.bridge-dl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 6px 0 10px; font-size: 12.5px; }
+.bridge-dl > span, .bridge-dl small { width: 100%; color: var(--muted, #64748b); }
+.bridge-dl .dl-link { display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; border: 1px solid var(--accent); border-radius: 8px; color: var(--accent); background: var(--accent-soft); text-decoration: none; font-weight: 600; }
+.bridge-dl .dl-link:hover { background: var(--accent); color: var(--accent-ink); }
