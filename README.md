@@ -231,14 +231,15 @@ ensuite proposée dans la fenêtre et dans « Retrait fictif des gains » du for
 Un **FX** est un plan d'investissement à présenter à un client qui ne connaît pas le trading. Il s'enregistre depuis la
 comparaison de deux mécaniques de retrait (« 💸 Resimuler avec un retrait » › « ⚖️ Comparer » › **💼 Enregistrer un FX**),
 avec la mécanique gagnante. Le bouton **💼 FX** en haut de la page affiche les FX en cartes (nom modifiable sur la carte,
-« Charger », 🗑). Montants rapportés à **10 000 investis** pour comparer les plans :
+« Charger », 🗑). Montants calculés pour le **capital du plan**. Un **point blanc à glisser** sur la barre des scénarios
+choisit un scénario (du pire au meilleur cas testé) : le gain au bout d'un an et le revenu mensuel suivent.
 
 | Rubrique | Ce que ça représente | Calcul |
 |---|---|---|
 | Le principe | ce que fait la stratégie, en une phrase | type de stratégie (tendance, rebonds, mixte) et paire |
 | Capital minimum | la somme à investir | capital des simulations |
 | Durée recommandée | combien de temps rester investi | durée testée qui réussit le mieux (et plage testée) |
-| Rendement typique | ce que le plan rapporte par an | médiane des résultats annualisés, revenus compris |
+| Gain au bout d'un an | ce que le client gagne (ou perd) après 12 mois, en argent et en % | compte + revenus touchés à la fin du 12e mois ; « estimé » (annualisé) si les périodes testées durent moins d'un an |
 | Revenu régulier | ce que le client touche par mois | mécanique de retrait gagnante de la comparaison |
 | Chances de gain | sur 10 cas, combien finissent gagnants | part des simulations gagnantes (pictogramme) |
 | Scénarios | pire cas testé, défavorable (1 cas sur 10 fait pire), médian, favorable (1 cas sur 10 fait mieux) | compte final + retraits |
