@@ -3487,10 +3487,7 @@
       outcomes: back.slice().sort((x, y) => x - y),
       // chaque simulation, rangée du pire au meilleur résultat : ce qu'on récupère (b), revenu moyen par mois (inc)
       // et gain au bout d'un an (y1), en % du capital ; est = moins d'un an testé, gain d'un an estimé
-      sims: R.map((r, i) => {
-        const L = r.curve.length, p = r.curve[Math.min(11, L - 1)], full = L >= 12;
-        return { b: back[i], inc: (r.w.wd / r.capital) * 100 / Math.max(1, L), y1: full ? p.acc + p.wd - 100 : annual[i], est: !full };
-      }).sort((x, y) => x.b - y.b),
+      sims: fxSimsFromRows(R),
       drawdown: { med: ddMed, max: Math.max(...dds) },
       riskNote: fxRiskNote(Math.max(0, 100 - p10), ddMed, Math.max(0, 100 - worst)),
       income: { name: mech.name, w: w, desc: wdDesc(w), perMonthPct: (agg.perMonth / capital) * 100, fixedPct: fixedPct, yearly: agg.yearly, kept: agg.kept, other: other.name },
@@ -3549,16 +3546,30 @@
     return '<svg class="fx-ten" viewBox="0 0 264 32" role="img" aria-label="' + w + ' cas gagnants sur 10">' + g + '</svg>';
   }
   /** Fourchette des scénarios : du pire cas au scénario favorable, avec le capital investi. */
-  /** Simulations d'un FX rangées du pire au meilleur ; pour un FX enregistré sans ce détail, reconstituées à partir
-   *  de ses résultats (revenu moyen du plan, gain d'un an estimé sur la durée recommandée). */
+  /** Détail par simulation d'un FX, rangé du pire au meilleur, en % du capital : b = récupéré (compte + revenus),
+   *  inc = revenu moyen par mois, tot = revenus touchés au total, acc = reste sur le compte, y1 = gain au bout d'un an. */
+  function fxSimsFromRows(R) {
+    return R.map((r) => {
+      const L = Math.max(1, r.curve.length), p = r.curve[Math.min(11, L - 1)], full = L >= 12, b = 100 + r.w.ret;
+      const m = Math.max(1, Math.round(durationDays(r.from, r.to) / 30.4375)), tot = (r.w.wd / r.capital) * 100;
+      return { b: b, inc: tot / L, tot: tot, acc: (r.w.final / r.capital) * 100, y1: full ? p.acc + p.wd - 100 : (Math.pow(Math.max(0.0001, b / 100), 12 / m) - 1) * 100, est: !full };
+    }).sort((x, y) => x.b - y.b);
+  }
+  /** Simulations d'un FX. FX enregistré sans ce détail : retrouvées dans les résultats de retrait gardés (même
+   *  mécanique, même stratégie, même capital) ; à défaut, reconstituées à partir de ses résultats. */
   function fxSims(fx) {
     if (fx.sims && fx.sims.length) return fx.sims;
-    if (!fx.outcomes || !fx.outcomes.length) return null;
-    if (!fx._sims) {
-      const m = Math.max(1, (fx.duration && fx.duration.reco) || 12), inc = fx.income.fixedPct != null ? fx.income.fixedPct : fx.income.perMonthPct;
-      fx._sims = fx.outcomes.map((b) => ({ b: b, inc: inc, y1: (Math.pow(Math.max(0.0001, b / 100), 12 / m) - 1) * 100, est: true }));
+    if (fx._sims) return fx._sims;
+    const w = fx.income ? fx.income.w : fx.withdraw && fx.withdraw.w;
+    if (w) {
+      const cache = wdResStore.get(), pre = wdKey(w) + '#', all = evalList();
+      const R = Object.keys(cache).filter((k) => k.startsWith(pre)).map((k) => cache[k])
+        .filter((r) => { const e = all.find((x) => x.key === r.key); return e && e.name === fx.strategy.name && Math.abs(r.capital - fx.capital) <= fx.capital * 0.01; });
+      if (R.length >= 2) return (fx._sims = fxSimsFromRows(R));
     }
-    return fx._sims;
+    if (!fx.outcomes || !fx.outcomes.length) return null;
+    const m = Math.max(1, (fx.duration && fx.duration.reco) || 12), inc = fx.income.fixedPct != null ? fx.income.fixedPct : fx.income.perMonthPct;
+    return (fx._sims = fx.outcomes.map((b) => ({ b: b, inc: inc, tot: inc * m, acc: b - inc * m, y1: (Math.pow(Math.max(0.0001, b / 100), 12 / m) - 1) * 100, est: true, approx: true })));
   }
   /** Scénario au rang q (0 = pire cas, 1 = meilleur cas), interpolé entre les simulations rangées. */
   function fxPoint(fx, q) {
@@ -3566,7 +3577,7 @@
     if (!S || !S.length) return { b: fx.scenarios.med, inc: fx.income.perMonthPct, y1: fx.annual, est: true };
     const t = Math.max(0, Math.min(1, q)) * (S.length - 1), i = Math.floor(t), f = t - i, a = S[i], b = S[Math.min(S.length - 1, i + 1)];
     const lerp = (k) => a[k] + (b[k] - a[k]) * f;
-    return { b: lerp('b'), inc: lerp('inc'), y1: lerp('y1'), est: a.est || b.est };
+    return { b: lerp('b'), inc: lerp('inc'), tot: a.tot != null ? lerp('tot') : null, acc: a.acc != null ? lerp('acc') : null, y1: lerp('y1'), est: a.est || b.est, approx: !!a.approx };
   }
   /** Rang q d'un résultat v (inverse de fxPoint). */
   function fxRank(fx, v) {
@@ -3603,7 +3614,8 @@
     const pt = fxPoint(fx, q), y1 = (FX_BASE * pt.y1) / 100;
     return '<span class="fx-pick-name">Scénario ' + fxScenarioName(q) + '</span>' +
       '<span>Au bout de la durée : <b class="' + (pt.b >= 100 ? 'pos' : 'neg') + '">' + fxMoney(pt.b) + '</b></span>' +
-      '<span>Revenu : <b>≈ ' + fxMoney(pt.inc) + ' / mois</b></span>' +
+      '<span>Revenu : <b>≈ ' + fxMoney(pt.inc) + ' / mois</b>' + (pt.approx ? ' <small>(moyenne du plan)</small>' : '') + '</span>' +
+      (pt.tot != null ? '<span>Revenus touchés au total : <b>' + fxMoney(pt.tot) + '</b></span><span>Reste sur le compte : <b class="' + (pt.acc >= 100 ? 'pos' : 'neg') + '">' + fxMoney(pt.acc) + '</b></span>' : '') +
       '<span>Au bout d\'un an : <b class="' + cls(y1) + '">' + signed(y1, money0) + '</b> (' + signed(pt.y1, num1) + ' %)' + (pt.est ? ' <small>estimé</small>' : '') + '</span>';
   }
   /** Met à jour la carte quand on déplace le point (sans tout redessiner). */
