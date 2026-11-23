@@ -1,7 +1,7 @@
 /* Tests du moteur : node tests/run-tests.js */
 'use strict';
 const path = require('path');
-for (const f of ['indicators', 'expr', 'trade', 'backtest', 'data', 'presets', 'french', 'enhancer', 'mql5', 'broker', 'advisor', 'analyzer', 'events']) require(path.join(__dirname, '..', 'js', f + '.js'));
+for (const f of ['indicators', 'expr', 'trade', 'backtest', 'data', 'presets', 'french', 'enhancer', 'mql5', 'broker', 'advisor', 'analyzer', 'events', 'confidence']) require(path.join(__dirname, '..', 'js', f + '.js'));
 const { indicators: I, rules: R, backtest: B, data: D, presets: P, french: FR, enhancer: E, mql5: MQ, broker: BK } = globalThis.Forexia;
 
 let failed = 0, passed = 0;
@@ -821,6 +821,24 @@ test('Époques définies par l\'utilisateur (plages de dates)', () => {
   eq(T.outside, 2); // 2018 et 2019 hors des époques
   eq(Ad.midDate({ from: '2020-01-01', to: '2020-12-31' }), '2020-07-01');
   eq(Ad.timeline(L).byEra.length > 0, true); // sans époques : celles par défaut
+});
+test('Score de confiance : lois statistiques, Sharpe probabiliste / dégonflé, score d\'un plan', () => {
+  const C = globalThis.Forexia.confidence;
+  near(C.normCdf(1.96), 0.975, 1e-3); near(C.normInv(0.975), 1.96, 1e-3); near(C.tCdf(2, 10), 0.9633, 1e-3); near(C.tCdf(0, 7), 0.5, 1e-9);
+  // PSR : un Sharpe de 0 donne 50 % ; le seuil de DSR augmente avec le nombre d'essais
+  near(C.psr(0, 60, 0, 3, 0), 0.5, 1e-9);
+  const sig = C.srStd(0.2, 60, 0, 3);
+  if (!(C.dsrThreshold(100, sig) > C.dsrThreshold(10, sig) && C.dsrThreshold(10, sig) > 0)) throw new Error('seuil DSR');
+  let s = 7; const r = () => { s = (s * 16807) % 2147483647; return s / 2147483647; }, g = () => { let u = 0; for (let i = 0; i < 12; i++) u += r(); return u - 6; };
+  const per = []; for (let y = 2010; y < 2020; y++) per.push({ from: y + '-01-01', to: y + '-12-31' });
+  const plan = (drift) => { const m = Array.from({ length: 120 }, () => drift + 0.03 * g()); return { monthly: m, periods: per, oneYear: per.map((p, i) => m.slice(i * 12, i * 12 + 12).reduce((a, b) => a * (1 + b), 1) * 100 - 100), eras: { win: drift > 0 ? 3 : 1, total: 4 }, trials: 10 }; };
+  const good = C.score(plan(0.01)), bad = C.score(plan(-0.003));
+  if (!(good.score >= 70 && bad.score <= 20)) throw new Error('scores ' + good.score + ' / ' + bad.score);
+  const synth = C.score(Object.assign(plan(0.01), { synthetic: true }));
+  if (!(synth.score <= 40)) throw new Error('données simulées : ' + synth.score);
+  // périodes qui se chevauchent : moins d'observations indépendantes
+  const ov = C.score({ monthly: [], periods: [{ from: '2020-01-01', to: '2020-12-31' }, { from: '2020-02-01', to: '2021-01-31' }], oneYear: [5, 6], eras: { win: 1, total: 1 } });
+  if (!(ov.details.overlap < 0.6 && ov.details.T === 13)) throw new Error('chevauchement ' + JSON.stringify(ov.details));
 });
 test('Pas de requête avant 1999 (début des cours BCE)', async () => {
     calls.length = 0;

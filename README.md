@@ -247,7 +247,7 @@ choisit un scénario (du pire au meilleur cas testé) : le gain au bout d'un an 
 | Évolution typique | trajectoire de 10 000 mois par mois | médiane, fourchette 1 cas sur 10 et revenus déjà touchés |
 | Risque (1 à 7) | niveau de risque en un chiffre | pertes du scénario défavorable et du pire cas, baisses en cours de route |
 | Pire moment en cours de route | baisse à supporter avant la fin | drawdown médian et maximal |
-| Solidité du résultat | fiabilité des chiffres | simulations (30), années (25), époques (20), régularité d'une époque à l'autre (15), données réelles (10) ; plafonnée à 40 sur données simulées |
+| Score de confiance | à quel point on peut se fier aux chiffres (explication au survol) | moyenne géométrique de trois probabilités : ratio de Sharpe « dégonflé » (Bailey et López de Prado) sur les rendements mensuels, test de Student sur le capital à un an (simulations indépendantes seulement), cohérence entre époques (Laplace) ; × 0,4 sur données simulées — voir `js/confidence.js` |
 | Conditions | levier, spread, commission, données, sortie | réglages des simulations |
 | Avertissement | mention de prudence | texte fixe |
 

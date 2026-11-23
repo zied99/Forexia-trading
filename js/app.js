@@ -3475,7 +3475,7 @@
     const p10 = pctile(back, 0.1), med = pctile(back, 0.5), p90 = pctile(back, 0.9), worst = Math.min(...back), ddMed = pctile(dds, 0.5);
     const w = mech.w, fixedPct = w.mode === 'periodic' && w.type === 'fixed' ? (Number(w.value) / capital) * 100 : null;
     return {
-      v: 2, id: 'fx' + Date.now().toString(36), createdAt: new Date().toISOString(),
+      v: 2, id: 'fx' + Date.now().toString(36), createdAt: new Date().toISOString(), 
       name: 'FX ' + (first.name || 'stratégie') + ' · ' + mech.name,
       strategy: { name: first.name || '', data: first.strategy || null, config: first.config || null, pair: first.pair || '', leverage: first.leverage || cfg.leverage || null, dataLabel: first.data || '' },
       principle: fxPrinciple(first.strategy, first.pair),
@@ -3554,14 +3554,16 @@
       const m = Math.max(1, Math.round(durationDays(r.from, r.to) / 30.4375)), tot = (r.w.wd / r.capital) * 100;
       const ann = (v) => (Math.pow(Math.max(0.0001, v / 100), 12 / m) - 1) * 100;
       // y1 : avec retrait (compte + revenus touchés) ; y1b : sans retrait (même simulation, aucun retrait)
-      return { b: b, inc: tot / L, tot: tot, acc: (r.w.final / r.capital) * 100, y1: full ? p.acc + p.wd - 100 : ann(b),
+      // rendements mensuels de la valeur totale (compte + revenus touchés)
+      const mr = r.curve.map((c, k) => { const v = c.acc + c.wd, pv = k ? r.curve[k - 1].acc + r.curve[k - 1].wd : 100; return pv > 0 ? Math.round((v / pv - 1) * 1e5) / 1e5 : 0; });
+      return { from: r.from, to: r.to, mr: mr, b: b, inc: tot / L, tot: tot, acc: (r.w.final / r.capital) * 100, y1: full ? p.acc + p.wd - 100 : ann(b),
         y1b: full && p.b != null ? p.b - 100 : ann(100 + r.b.ret), est: !full };
     }).sort((x, y) => x.b - y.b);
   }
   /** Simulations d'un FX. FX enregistré sans ce détail : retrouvées dans les résultats de retrait gardés (même
    *  mécanique, même stratégie, même capital) ; à défaut, reconstituées à partir de ses résultats. */
   function fxSims(fx) {
-    if (fx.sims && fx.sims.length) return fx.sims;
+    if (fx.sims && fx.sims.length && fx.sims[0].mr) return fx.sims;
     if (fx._sims) return fx._sims;
     const w = fx.income ? fx.income.w : fx.withdraw && fx.withdraw.w;
     if (w) {
@@ -3570,6 +3572,7 @@
         .filter((r) => { const e = all.find((x) => x.key === r.key); return e && e.name === fx.strategy.name && Math.abs(r.capital - fx.capital) <= fx.capital * 0.01; });
       if (R.length >= 2) return (fx._sims = fxSimsFromRows(R));
     }
+    if (fx.sims && fx.sims.length) return (fx._sims = fx.sims);
     if (!fx.outcomes || !fx.outcomes.length) return null;
     const m = Math.max(1, (fx.duration && fx.duration.reco) || 12), inc = fx.income.fixedPct != null ? fx.income.fixedPct : fx.income.perMonthPct;
     return (fx._sims = fx.outcomes.map((b) => ({ b: b, inc: inc, tot: inc * m, acc: b - inc * m, y1: (Math.pow(Math.max(0.0001, b / 100), 12 / m) - 1) * 100, est: true, approx: true })));
@@ -3699,7 +3702,8 @@
       '<section class="fx-sec"><h5>Ce que vous récupérez au bout de la durée</h5><p class="hint">Pour ' + money0.format(FX_BASE) + ' investis, compte + revenus déjà touchés.</p>' + fxScenarioSvg(sc, fx) + '</section>' +
       '<section class="fx-sec"><h5>Évolution typique</h5>' + fxPathSvg(fx.path) + '</section>' +
       '<section class="fx-sec fx-two"><div><h5>Risque</h5>' + fxRiskScale(fx.riskNote) + '<small>' + RISK_TXT[fx.riskNote] + ' · pire moment en cours de route : en général <b>−' + num1.format(fx.drawdown.med) + ' %</b>, au pire −' + num1.format(fx.drawdown.max) + ' %</small></div>' +
-        '<div title="' + esc(tipSol) + '"><h5>Solidité du résultat</h5><span class="fx-stars">' + stars(sol.score) + '</span> <b>' + sol.score + '/100</b><small>' + solTxt + (sol.synthetic ? ' · données simulées' : '') + '</small></div></section>' +
+        (() => { const cf = fxConfidence(fx); return '<div class="fx-conf" tabindex="0" aria-describedby="fxTip-' + esc(fx.id) + '"><h5>Score de confiance <span class="fx-info" aria-hidden="true">ⓘ</span></h5><span class="fx-stars">' + stars(cf.score) + '</span> <b>' + cf.score + '/100</b><small>' + solTxt + (sol.synthetic ? ' · données simulées' : '') + '</small>' +
+          '<div class="fx-tip" role="tooltip" id="fxTip-' + esc(fx.id) + '">' + fxConfidenceTip(fx, cf) + '</div></div>'; })() + '</section>' +
       '<section class="fx-sec"><h5>Revenu régulier</h5><p class="fx-inc"><b>' + (inc.w.mode === 'periodic' && inc.w.type === 'fixed' ? fxMoney(inc.fixedPct) + ' chaque mois' + (inc.w.every === 'days' ? '' : '') : esc(inc.desc)) + '</b> — ' + incomeSub + '. <small>Choisi par comparaison : meilleur que « ' + esc(inc.other) + ' ».</small></p></section>' +
       '<section class="fx-sec"><h5>Conditions</h5><p class="fx-cond">' + [cd.leverage ? 'Levier 1:' + cd.leverage : '', cd.spread != null ? 'spread ' + num1.format(cd.spread) + ' pip' + (cd.spread > 1 ? 's' : '') + ' par trade' : '', cd.commission ? 'commission ' + num1.format(cd.commission) + ' par lot' : 'sans commission', 'données : ' + (cd.source || '—'), 'sortie possible à tout moment (positions fermées au prix du marché)'].filter(Boolean).map(esc).join(' · ') + '</p></section>' +
       '<p class="fx-disclaimer">Résultats de simulations passées, sans garantie pour l\'avenir. Vous pouvez perdre tout ou partie du capital investi.</p>' +
@@ -3754,6 +3758,30 @@
   $('fxModal').addEventListener('pointermove', (ev) => { if (fxDrag) fxDragAt(ev); });
   $('fxModal').addEventListener('pointerup', () => { fxDrag = null; });
   $('fxModal').addEventListener('pointercancel', () => { fxDrag = null; });
+  /** Nombre d'essais (pour corriger la chance) : variantes de la stratégie testées × mécaniques de retrait comparées. */
+  function fxTrials(fx) {
+    const base = String(fx.strategy.name || '').replace(/ \(améliorée\)$/, '');
+    const variants = new Set(evalList().filter((e) => e.name === fx.strategy.name || String(e.name).startsWith(base)).map((e) => e.rules));
+    return Math.max(1, variants.size) * 2;
+  }
+  /** Score de confiance d'un FX (mesures statistiques de la littérature, voir js/confidence.js). */
+  function fxConfidence(fx) {
+    const S = fxSims(fx) || [], real = S.filter((x) => x.mr);
+    return F.confidence.score({
+      monthly: real.flatMap((x) => x.mr), periods: real.map((x) => ({ from: x.from, to: x.to })), oneYear: S.map((x) => x.y1),
+      eras: { win: fx.solidity.eraWin, total: fx.solidity.eras }, synthetic: fx.solidity.synthetic, trials: fx.trials || fxTrials(fx),
+    });
+  }
+  const pc0 = (p) => Math.round(p * 100) + ' %';
+  function fxConfidenceTip(fx, c) {
+    const d = c.details, lvl = c.score >= 80 ? 'élevée' : c.score >= 60 ? 'bonne' : c.score >= 40 ? 'moyenne' : 'faible';
+    let h = '<b>Score de confiance : ' + c.score + '/100 (' + lvl + ')</b><p>Il dit à quel point on peut se fier aux résultats du plan. Trois mesures statistiques reconnues, calculées sur ses ' + fx.n + ' simulations :</p><ol>';
+    if (c.parts.dsr != null) h += '<li><b>Ratio de Sharpe « dégonflé »</b> (Bailey et López de Prado) : <b>' + pc0(c.parts.dsr) + '</b>. Probabilité que le plan gagne vraiment plus qu\'il ne risque, mois après mois, une fois corrigé de la durée d\'historique (' + d.T + ' mois distincts), des mois extrêmes et des ' + d.trials + ' essais faits pour le trouver (le meilleur de nombreux essais peut être dû au hasard).</li>';
+    if (c.parts.student != null) h += '<li><b>Test de Student</b> sur le capital au bout d\'un an : <b>' + pc0(c.parts.student) + '</b>. Probabilité que le résultat moyen à un an soit positif (' + signed(d.y1Mean, num1) + ' % en moyenne, ' + num1.format(d.nEff) + ' simulations réellement indépendantes une fois les chevauchements retirés).</li>';
+    h += '<li><b>Cohérence entre époques</b> : <b>' + pc0(c.parts.eras) + '</b>. Le plan gagne dans ' + d.eras.win + ' époque' + (d.eras.win > 1 ? 's' : '') + ' de marché sur ' + d.eras.total + ' (lissé pour ne pas surestimer avec peu d\'époques).</li></ol>';
+    h += '<p>Score = moyenne géométrique des mesures (une seule mesure faible fait baisser le score)' + (c.data < 1 ? ' × 0,4 car le plan est construit sur des données simulées.' : '.') + '</p><p class="fx-tip-scale">Moins de 40 : faible · 40 à 60 : moyenne · 60 à 80 : bonne · plus de 80 : élevée.</p>';
+    return h;
+  }
   // capital investi modifiable sur la carte (jamais sous le minimum du plan)
   $('fxModal').addEventListener('change', (ev) => {
     const id = ev.target.dataset && ev.target.dataset.fxInvest;
@@ -3772,6 +3800,11 @@
     if (card) card.outerHTML = fxCardHtml(fx);
   }
   $('fxModal').addEventListener('keydown', (ev) => { if (ev.target.dataset && ev.target.dataset.fxInvest && ev.key === 'Enter') ev.target.dispatchEvent(new Event('change', { bubbles: true })); });
+  $('fxModal').addEventListener('click', (ev) => {
+    const c = ev.target.closest('.fx-conf');
+    document.querySelectorAll('.fx-conf.open').forEach((x) => { if (x !== c) x.classList.remove('open'); });
+    if (c) c.classList.toggle('open');
+  });
   // nom du FX modifiable directement sur la carte
   $('fxModal').addEventListener('change', (ev) => {
     const id = ev.target.dataset && ev.target.dataset.fxName;

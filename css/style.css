@@ -914,3 +914,12 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 .fx-kf small[data-fx-d="y1s"] { color: var(--text); font-size: 12.5px; font-weight: 500; }
 .fx-kf small[data-fx-d="incs"] { color: var(--muted, #64748b); font-size: 12px; }
 .fx-kf small[data-fx-d="y1s"]:empty { display: none; }
+/* Score de confiance et son explication au survol */
+.fx-conf { position: relative; cursor: help; border-radius: 8px; outline: none; }
+.fx-conf:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.fx-info { font-size: 12px; color: var(--accent); }
+.fx-tip { display: none; position: absolute; z-index: 5; right: 0; bottom: calc(100% + 8px); width: min(420px, 86vw); background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; box-shadow: 0 12px 32px rgba(15, 23, 42, .25); font-size: 12.5px; line-height: 1.45; cursor: default; }
+.fx-tip p { margin: 6px 0; } .fx-tip ol { margin: 6px 0; padding-left: 18px; } .fx-tip li { margin: 5px 0; }
+.fx-tip-scale { color: var(--muted, #64748b); font-size: 11.5px; }
+.fx-conf:hover .fx-tip, .fx-conf:focus .fx-tip, .fx-conf.open .fx-tip { display: block; }
+@media (max-width: 700px) { .fx-tip { position: static; width: auto; margin-top: 8px; box-shadow: none; } }
