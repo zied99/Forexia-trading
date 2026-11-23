@@ -3608,9 +3608,10 @@
       (fxSims(fx) ? '<rect class="sc-hit" data-fx-hit="' + esc(fx.id) + '" x="0" y="10" width="' + W + '" height="54"/>' +
         '<g class="sc-handle" data-fx-h="' + esc(fx.id) + '" transform="translate(' + x(pt.b).toFixed(1) + ' 0)"><line x1="0" x2="0" y1="16" y2="44"/><circle cx="0" cy="30" r="12"/><circle class="in" cx="0" cy="30" r="4.5"/>' +
           '<text class="sc-drag" x="0" y="58" text-anchor="middle">◀ glissez ▶</text></g>' : '') + '</svg>' +
-      '<div class="fx-sc-vals">' + [['worst', 'Pire cas testé', sc.worst], ['p10', 'Défavorable', sc.p10], ['med', 'Médian', sc.med], ['p90', 'Favorable', sc.p90]].map(([c, l, v]) =>
+      '<div class="fx-sc-vals">' + [['worst', 'Au pire', sc.worst], ['p10', 'Si ça se passe mal', sc.p10], ['med', 'Le plus souvent', sc.med], ['p90', 'Si ça se passe bien', sc.p90]].map(([c, l, v]) =>
         '<div><i class="' + c + '"></i><span>' + l + '</span><b class="' + (v >= 100 ? 'pos' : 'neg') + '">' + fxMoney(v) + '</b></div>').join('') + '</div>' +
-      '<p class="hint fx-sc-help">Défavorable : 1 cas sur 10 fait pire · favorable : 1 cas sur 10 fait mieux.' + (fxSims(fx) ? ' <b>Glissez le point blanc</b> pour voir un autre scénario : le revenu et le gain au bout d\'un an suivent.' : '') + '</p>' +
+      '<p class="hint fx-sc-help">Ce plan a été essayé ' + fx.n + ' fois sur des périodes passées. <b>Le plus souvent</b> : la moitié des essais ont fait mieux, la moitié moins bien. <b>Si ça se passe mal</b> : seulement 1 essai sur 10 a fait moins bien. <b>Si ça se passe bien</b> : seulement 1 essai sur 10 a fait mieux. <b>Au pire</b> : le plus mauvais essai.' +
+        (fxSims(fx) ? ' <b>Glissez le point blanc</b> pour voir ce que vous auriez dans un autre cas : le revenu et le capital au bout d\'un an suivent.' : '') + '</p>' +
       (fxSims(fx) ? '<div class="fx-pick" data-fx-pick="' + esc(fx.id) + '">' + fxPickHtml(fx, fxQ.has(fx.id) ? fxQ.get(fx.id) : 0.5) + '</div>' : '');
   }
   // gain au bout d'un an, en % : avec retrait (compte + revenus touchés) et sans retrait
@@ -3628,11 +3629,12 @@
   }
   function fxScenarioName(q) {
     const better = Math.round((1 - q) * 10);
-    return q <= 0.02 ? 'pire cas testé' : Math.abs(q - 0.5) < 0.03 ? 'médian' : q <= 0.12 ? 'défavorable' : q >= 0.98 ? 'meilleur cas testé' : q >= 0.88 ? 'favorable' : better + ' cas sur 10 font mieux';
+    return q <= 0.02 ? 'au pire' : Math.abs(q - 0.5) < 0.03 ? 'le plus souvent' : q <= 0.12 ? 'si ça se passe mal' : q >= 0.98 ? 'au mieux' : q >= 0.88 ? 'si ça se passe bien' : better + ' chance' + (better > 1 ? 's' : '') + ' sur 10 de faire mieux';
   }
   function fxPickHtml(fx, q) {
     const pt = fxPoint(fx, q), y1 = (FX_BASE * pt.y1) / 100;
-    return '<span class="fx-pick-name">Scénario ' + fxScenarioName(q) + '</span>' +
+    const nm = fxScenarioName(q);
+    return '<span class="fx-pick-name">' + nm.charAt(0).toUpperCase() + nm.slice(1) + '</span>' +
       '<span>Au bout de la durée : <b class="' + (pt.b >= 100 ? 'pos' : 'neg') + '">' + fxMoney(pt.b) + '</b></span>' +
       '<span>Revenu : <b>≈ ' + fxMoney(pt.inc) + ' / mois</b>' + (pt.approx ? ' <small>(moyenne du plan)</small>' : '') + '</span>' +
       (pt.tot != null ? '<span>Revenus touchés au total : <b>' + fxMoney(pt.tot) + '</b></span><span>Reste sur le compte : <b class="' + (pt.acc >= 100 ? 'pos' : 'neg') + '">' + fxMoney(pt.acc) + '</b></span>' : '') +
@@ -3669,7 +3671,7 @@
       '<path class="med" d="' + line((p) => p.med) + '"/>' + tick(100) + tick(0) + (hi > 130 ? tick(Math.round(hi / 10) * 10) : '') +
       '<circle class="med-end" cx="' + x(n - 1).toFixed(1) + '" cy="' + y(last.med).toFixed(1) + '" r="3.5"/>' +
       '<text x="' + L + '" y="' + (H - 6) + '" class="ax">mois 1</text><text x="' + (W - Rm) + '" y="' + (H - 6) + '" text-anchor="end" class="ax">mois ' + n + '</text></svg>' +
-      '<div class="fx-legend"><span><i class="l-med"></i>cas médian (compte + revenus)</span><span><i class="l-band"></i>1 cas sur 10 fait pire / mieux</span><span><i class="l-wd"></i>revenus déjà touchés</span></div>';
+      '<div class="fx-legend"><span><i class="l-med"></i>le plus souvent (compte + revenus)</span><span><i class="l-band"></i>zone où se trouvent 8 essais sur 10</span><span><i class="l-wd"></i>revenus déjà touchés</span></div>';
   }
   function fxRiskScale(note) {
     let h = '<div class="fx-scale" title="Note de risque de 1 (très faible) à 7 (très élevé)">';
@@ -3698,7 +3700,7 @@
       '<div class="fx-kfs">' + '<div class="fx-kf fx-invest"><span>Capital investi</span><label class="fx-inv"><input type="number" inputmode="numeric" data-fx-invest="' + esc(fx.id) + '" min="' + Math.ceil(fx.capital) + '" step="' + fxStep(fx.capital) + '" value="' + Math.round(FX_BASE) + '" aria-label="Capital investi (minimum ' + money0.format(fx.capital) + ')"><b>€</b></label><small>minimum ' + money0.format(fx.capital) + ' · modifiable</small></div>' + kf('Durée recommandée', durTxt2(fx.duration.reco), 'testé de ' + durTxt2(fx.duration.min) + ' à ' + durTxt2(fx.duration.max)) +
         kf('Capital au bout d\'un an, avec retrait', fxY1Html(pt0), fxY1Sub(pt0), 'y1') +
         kf('Revenu régulier', fxSims(fx) ? '≈ ' + fxMoney(pt0.inc) + ' / mois' : incomeTxt, esc(fxMethodLabel(inc.w)), 'inc') + '</div>' +
-      '<section class="fx-sec"><h5>Chances de gain</h5><div class="fx-ten-row">' + fxTenSvg(fx.winRate) + '<span><b>' + Math.round(fx.winRate / 10) + ' fois sur 10</b> le plan finit gagnant<small>' + Math.round((fx.winRate * fx.n) / 100) + ' périodes gagnantes sur ' + fx.n + ' testées</small></span></div></section>' +
+      '<section class="fx-sec"><h5>Chances de gain</h5><div class="fx-ten-row">' + fxTenSvg(fx.winRate) + '<span><b>' + Math.round(fx.winRate / 10) + ' fois sur 10</b> le plan finit gagnant<small>' + Math.round((fx.winRate * fx.n) / 100) + ' essais gagnants sur ' + fx.n + ' faits sur des périodes passées</small></span></div></section>' +
       '<section class="fx-sec"><h5>Ce que vous récupérez au bout de la durée</h5><p class="hint">Pour ' + money0.format(FX_BASE) + ' investis, compte + revenus déjà touchés.</p>' + fxScenarioSvg(sc, fx) + '</section>' +
       '<section class="fx-sec"><h5>Évolution typique</h5>' + fxPathSvg(fx.path) + '</section>' +
       '<section class="fx-sec fx-two"><div><h5>Risque</h5>' + fxRiskScale(fx.riskNote) + '<small>' + RISK_TXT[fx.riskNote] + ' · pire moment en cours de route : en général <b>−' + num1.format(fx.drawdown.med) + ' %</b>, au pire −' + num1.format(fx.drawdown.max) + ' %</small></div>' +
@@ -3775,9 +3777,9 @@
   const pc0 = (p) => Math.round(p * 100) + ' %';
   function fxConfidenceTip(fx, c) {
     const d = c.details, lvl = c.score >= 80 ? 'élevée' : c.score >= 60 ? 'bonne' : c.score >= 40 ? 'moyenne' : 'faible';
-    let h = '<b>Score de confiance : ' + c.score + '/100 (' + lvl + ')</b><p>Il dit à quel point on peut se fier aux résultats du plan. Trois mesures statistiques reconnues, calculées sur ses ' + fx.n + ' simulations :</p><ol>';
+    let h = '<b>Score de confiance : ' + c.score + '/100 (' + lvl + ')</b><p>Il dit à quel point on peut se fier aux résultats du plan. Trois mesures statistiques reconnues, calculées sur les ' + fx.n + ' essais du plan sur des périodes passées :</p><ol>';
     if (c.parts.dsr != null) h += '<li><b>Ratio de Sharpe « dégonflé »</b> (Bailey et López de Prado) : <b>' + pc0(c.parts.dsr) + '</b>. Probabilité que le plan gagne vraiment plus qu\'il ne risque, mois après mois, une fois corrigé de la durée d\'historique (' + d.T + ' mois distincts), des mois extrêmes et des ' + d.trials + ' essais faits pour le trouver (le meilleur de nombreux essais peut être dû au hasard).</li>';
-    if (c.parts.student != null) h += '<li><b>Test de Student</b> sur le capital au bout d\'un an : <b>' + pc0(c.parts.student) + '</b>. Probabilité que le résultat moyen à un an soit positif (' + signed(d.y1Mean, num1) + ' % en moyenne, ' + num1.format(d.nEff) + ' simulations réellement indépendantes une fois les chevauchements retirés).</li>';
+    if (c.parts.student != null) h += '<li><b>Test de Student</b> sur le capital au bout d\'un an : <b>' + pc0(c.parts.student) + '</b>. Probabilité que le résultat moyen à un an soit positif (' + signed(d.y1Mean, num1) + ' % en moyenne ; les essais dont les périodes se recouvrent comptent moins, soit l\'équivalent de ' + num1.format(d.nEff) + ' essais indépendants).</li>';
     h += '<li><b>Cohérence entre époques</b> : <b>' + pc0(c.parts.eras) + '</b>. Le plan gagne dans ' + d.eras.win + ' époque' + (d.eras.win > 1 ? 's' : '') + ' de marché sur ' + d.eras.total + ' (lissé pour ne pas surestimer avec peu d\'époques).</li></ol>';
     h += '<p>Score = moyenne géométrique des mesures (une seule mesure faible fait baisser le score)' + (c.data < 1 ? ' × 0,4 car le plan est construit sur des données simulées.' : '.') + '</p><p class="fx-tip-scale">Moins de 40 : faible · 40 à 60 : moyenne · 60 à 80 : bonne · plus de 80 : élevée.</p>';
     return h;

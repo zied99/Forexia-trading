@@ -243,7 +243,7 @@ choisit un scénario (du pire au meilleur cas testé) : le gain au bout d'un an 
 | Capital au bout d'un an | ce que le client a après 12 mois, en € et en %, avec retrait (compte + revenus touchés) et sans retrait | compte + revenus touchés à la fin du 12e mois ; « estimé » (annualisé) si les périodes testées durent moins d'un an |
 | Revenu régulier | ce que le client touche par mois | mécanique de retrait gagnante de la comparaison |
 | Chances de gain | sur 10 cas, combien finissent gagnants | part des simulations gagnantes (pictogramme) |
-| Scénarios | pire cas testé, défavorable (1 cas sur 10 fait pire), médian, favorable (1 cas sur 10 fait mieux) | compte final + retraits |
+| Scénarios | « Au pire » (plus mauvais essai), « Si ça se passe mal » (1 essai sur 10 a fait moins bien), « Le plus souvent » (la moitié a fait mieux), « Si ça se passe bien » (1 essai sur 10 a fait mieux) | compte final + retraits |
 | Évolution typique | trajectoire de 10 000 mois par mois | médiane, fourchette 1 cas sur 10 et revenus déjà touchés |
 | Risque (1 à 7) | niveau de risque en un chiffre | pertes du scénario défavorable et du pire cas, baisses en cours de route |
 | Pire moment en cours de route | baisse à supporter avant la fin | drawdown médian et maximal |
