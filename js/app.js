@@ -3534,7 +3534,8 @@
       '<button type="button" class="ghost small" data-fx-del="' + esc(fx.id) + '" title="Supprimer ce FX" aria-label="Supprimer">🗑</button></span></footer></article>';
   }
   let FX_BASE = 10000; // capital du FX en cours d'affichage (les montants sont calculés pour ce capital)
-  const money0 = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 });
+  const FX_CUR = 'EUR'; // devise affichée sur les FX (paramétrable plus tard)
+  const money0 = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: FX_CUR, minimumFractionDigits: 0, maximumFractionDigits: 0 });
   const fxMoney = (pct) => money0.format(Math.round((FX_BASE * pct) / 100));
   const durTxt2 = (m) => (m >= 12 && m % 12 === 0 ? m / 12 + ' an' + (m > 12 ? 's' : '') : m + ' mois');
   /** Sur 10 cas : pastilles vertes (gagnant) et rouges (perdant). */
@@ -3548,9 +3549,20 @@
     return '<svg class="fx-ten" viewBox="0 0 264 32" role="img" aria-label="' + w + ' cas gagnants sur 10">' + g + '</svg>';
   }
   /** Fourchette des scénarios : du pire cas au scénario favorable, avec le capital investi. */
+  /** Simulations d'un FX rangées du pire au meilleur ; pour un FX enregistré sans ce détail, reconstituées à partir
+   *  de ses résultats (revenu moyen du plan, gain d'un an estimé sur la durée recommandée). */
+  function fxSims(fx) {
+    if (fx.sims && fx.sims.length) return fx.sims;
+    if (!fx.outcomes || !fx.outcomes.length) return null;
+    if (!fx._sims) {
+      const m = Math.max(1, (fx.duration && fx.duration.reco) || 12), inc = fx.income.fixedPct != null ? fx.income.fixedPct : fx.income.perMonthPct;
+      fx._sims = fx.outcomes.map((b) => ({ b: b, inc: inc, y1: (Math.pow(Math.max(0.0001, b / 100), 12 / m) - 1) * 100, est: true }));
+    }
+    return fx._sims;
+  }
   /** Scénario au rang q (0 = pire cas, 1 = meilleur cas), interpolé entre les simulations rangées. */
   function fxPoint(fx, q) {
-    const S = fx.sims;
+    const S = fxSims(fx);
     if (!S || !S.length) return { b: fx.scenarios.med, inc: fx.income.perMonthPct, y1: fx.annual, est: true };
     const t = Math.max(0, Math.min(1, q)) * (S.length - 1), i = Math.floor(t), f = t - i, a = S[i], b = S[Math.min(S.length - 1, i + 1)];
     const lerp = (k) => a[k] + (b[k] - a[k]) * f;
@@ -3558,29 +3570,30 @@
   }
   /** Rang q d'un résultat v (inverse de fxPoint). */
   function fxRank(fx, v) {
-    const S = fx.sims;
+    const S = fxSims(fx);
     if (!S || S.length < 2) return 0.5;
     if (v <= S[0].b) return 0;
     for (let i = 0; i < S.length - 1; i++) if (v <= S[i + 1].b) return (i + (S[i + 1].b > S[i].b ? (v - S[i].b) / (S[i + 1].b - S[i].b) : 0)) / (S.length - 1);
     return 1;
   }
   const fxQ = new Map(); // rang choisi pour chaque carte (médian par défaut)
-  const fxRange = (fx) => { const sc = fx.scenarios, top = fx.sims ? fxPoint(fx, 0.95).b : sc.p90; return { lo: Math.min(sc.worst, 100) - 4, hi: Math.max(sc.p90, top, 100) + 4 }; };
+  const fxRange = (fx) => { const sc = fx.scenarios, top = fxSims(fx) ? fxPoint(fx, 0.95).b : sc.p90; return { lo: Math.min(sc.worst, 100) - 4, hi: Math.max(sc.p90, top, 100) + 4 }; };
   function fxScenarioSvg(sc, fx) {
     const W = 360, rg = fxRange(fx), lo = rg.lo, hi = rg.hi, x = (v) => 12 + ((Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo)) * (W - 24);
     const pt = fxPoint(fx, fxQ.has(fx.id) ? fxQ.get(fx.id) : 0.5);
     const dot = (v, cls) => '<circle class="sc ' + cls + '" cx="' + x(v).toFixed(1) + '" cy="30" r="' + (cls === 'med' ? 8 : 6) + '"/>';
-    return '<svg class="fx-sc" viewBox="0 0 ' + W + ' 46" role="img" aria-label="Scénarios pour 10 000 investis">' +
+    return '<svg class="fx-sc" viewBox="0 0 ' + W + ' ' + (fxSims(fx) ? 64 : 46) + '" role="img" aria-label="Scénarios pour ' + money0.format(FX_BASE) + ' investis">' +
       '<defs><linearGradient id="fxGrad" x1="0" x2="1"><stop offset="0" stop-color="var(--down)"/><stop offset=".5" stop-color="#f59e0b"/><stop offset="1" stop-color="var(--up)"/></linearGradient></defs>' +
       '<rect x="' + x(sc.worst).toFixed(1) + '" y="26" width="' + Math.max(2, x(sc.p90) - x(sc.worst)).toFixed(1) + '" height="8" rx="4" fill="url(#fxGrad)" opacity=".85"/>' +
       '<line class="sc-cap" x1="' + x(100).toFixed(1) + '" x2="' + x(100).toFixed(1) + '" y1="14" y2="44"/><text x="' + x(100).toFixed(1) + '" y="10" text-anchor="middle" class="sc-cap-l">investi ' + money0.format(FX_BASE) + '</text>' +
       dot(sc.worst, 'worst') + dot(sc.p10, 'p10') + dot(sc.p90, 'p90') + dot(sc.med, 'med') +
-      (fx.sims ? '<rect class="sc-hit" data-fx-hit="' + esc(fx.id) + '" x="0" y="14" width="' + W + '" height="32"/>' +
-        '<g class="sc-handle" data-fx-h="' + esc(fx.id) + '" transform="translate(' + x(pt.b).toFixed(1) + ' 0)"><line x1="0" x2="0" y1="16" y2="44"/><circle cx="0" cy="30" r="10"/><circle class="in" cx="0" cy="30" r="4"/></g>' : '') + '</svg>' +
+      (fxSims(fx) ? '<rect class="sc-hit" data-fx-hit="' + esc(fx.id) + '" x="0" y="10" width="' + W + '" height="54"/>' +
+        '<g class="sc-handle" data-fx-h="' + esc(fx.id) + '" transform="translate(' + x(pt.b).toFixed(1) + ' 0)"><line x1="0" x2="0" y1="16" y2="44"/><circle cx="0" cy="30" r="12"/><circle class="in" cx="0" cy="30" r="4.5"/>' +
+          '<text class="sc-drag" x="0" y="58" text-anchor="middle">◀ glissez ▶</text></g>' : '') + '</svg>' +
       '<div class="fx-sc-vals">' + [['worst', 'Pire cas testé', sc.worst], ['p10', 'Défavorable', sc.p10], ['med', 'Médian', sc.med], ['p90', 'Favorable', sc.p90]].map(([c, l, v]) =>
         '<div><i class="' + c + '"></i><span>' + l + '</span><b class="' + (v >= 100 ? 'pos' : 'neg') + '">' + fxMoney(v) + '</b></div>').join('') + '</div>' +
-      '<p class="hint fx-sc-help">Défavorable : 1 cas sur 10 fait pire · favorable : 1 cas sur 10 fait mieux.' + (fx.sims ? ' <b>Glissez le point blanc</b> pour voir un autre scénario : le revenu et le gain au bout d\'un an suivent.' : '') + '</p>' +
-      (fx.sims ? '<div class="fx-pick" data-fx-pick="' + esc(fx.id) + '">' + fxPickHtml(fx, fxQ.has(fx.id) ? fxQ.get(fx.id) : 0.5) + '</div>' : '');
+      '<p class="hint fx-sc-help">Défavorable : 1 cas sur 10 fait pire · favorable : 1 cas sur 10 fait mieux.' + (fxSims(fx) ? ' <b>Glissez le point blanc</b> pour voir un autre scénario : le revenu et le gain au bout d\'un an suivent.' : '') + '</p>' +
+      (fxSims(fx) ? '<div class="fx-pick" data-fx-pick="' + esc(fx.id) + '">' + fxPickHtml(fx, fxQ.has(fx.id) ? fxQ.get(fx.id) : 0.5) + '</div>' : '');
   }
   function fxScenarioName(q) {
     const better = Math.round((1 - q) * 10);
@@ -3650,7 +3663,7 @@
       '<p class="fx-principle"><b>Le principe :</b> ' + esc(fx.principle) + ' <small>(' + esc(fx.strategy.name) + ' · ' + esc(fx.strategy.pair) + ')</small></p>' +
       '<div class="fx-kfs">' + kf('Capital investi', money0.format(fx.capital)) + kf('Durée recommandée', durTxt2(fx.duration.reco), 'testé de ' + durTxt2(fx.duration.min) + ' à ' + durTxt2(fx.duration.max)) +
         kf('Gain au bout d\'un an', '<span class="' + cls(y1v) + '">' + signed(y1v, money0) + '</span>', signed(pt0.y1, num1) + ' % · scénario ' + fxScenarioName(q0) + (pt0.est ? ' (estimé)' : ''), 'y1') +
-        kf('Revenu régulier', fx.sims ? '≈ ' + fxMoney(pt0.inc) + ' / mois' : incomeTxt, (fx.sims ? 'scénario ' + fxScenarioName(q0) + ' · ' : '') + 'pour ' + money0.format(FX_BASE) + ' investis', 'inc') + '</div>' +
+        kf('Revenu régulier', fxSims(fx) ? '≈ ' + fxMoney(pt0.inc) + ' / mois' : incomeTxt, (fxSims(fx) ? 'scénario ' + fxScenarioName(q0) + ' · ' : '') + 'pour ' + money0.format(FX_BASE) + ' investis', 'inc') + '</div>' +
       '<section class="fx-sec"><h5>Chances de gain</h5><div class="fx-ten-row">' + fxTenSvg(fx.winRate) + '<span><b>' + Math.round(fx.winRate / 10) + ' fois sur 10</b> le plan finit gagnant<small>' + Math.round((fx.winRate * fx.n) / 100) + ' périodes gagnantes sur ' + fx.n + ' testées</small></span></div></section>' +
       '<section class="fx-sec"><h5>Ce que vous récupérez au bout de la durée</h5><p class="hint">Pour ' + money0.format(FX_BASE) + ' investis, compte + revenus déjà touchés.</p>' + fxScenarioSvg(sc, fx) + '</section>' +
       '<section class="fx-sec"><h5>Évolution typique</h5>' + fxPathSvg(fx.path) + '</section>' +

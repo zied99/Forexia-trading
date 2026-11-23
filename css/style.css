@@ -905,3 +905,4 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 .fx-pick { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: var(--panel-2); border: 1px dashed var(--border); font-size: 12.5px; }
 .fx-pick-name { width: 100%; font-weight: 700; }
 .fx-pick small { color: var(--muted, #64748b); }
+.fx-sc .sc-drag { font-size: 9.5px; fill: var(--text); font-weight: 700; opacity: .75; }
