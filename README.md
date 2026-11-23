@@ -230,20 +230,26 @@ ensuite proposée dans la fenêtre et dans « Retrait fictif des gains » du for
 
 Un **FX** est un plan d'investissement à présenter à un client qui ne connaît pas le trading. Il s'enregistre depuis la
 comparaison de deux mécaniques de retrait (« 💸 Resimuler avec un retrait » › « ⚖️ Comparer » › **💼 Enregistrer un FX**),
-avec la mécanique jugée meilleure. Le bouton **💼 FX** en haut de la page affiche les FX en cartes (nom modifiable
-directement sur la carte, « Charger » remet stratégie, capital et retrait dans le formulaire, 🗑 supprime) :
-- **Stratégie** : nom, paire, levier ;
-- **Capital à investir** : capital des simulations (médiane) ;
-- **Probabilité** : taux de réussite × gain moyen (compte + retraits), avec le gain moyen quand ça gagne et la perte
-  moyenne quand ça perd ;
-- **Taux de confiance** : note sur 100 et étoiles — nombre de simulations (20), taux de réussite (25), régularité des
-  résultats (15), drawdown (20), capital de départ préservé (10), diversité des années testées (10) ;
-- **Risque** : capital restitué au client dans un mauvais scénario — ce qu'il récupère (compte + retraits) dans les 10 %
-  de simulations les plus défavorables, la perte possible correspondante et le pire cas testé ; niveau faible (perte
-  ≤ 10 %), modéré (≤ 30 %) ou élevé ;
-- **Durée recommandée** : la durée testée qui réussit le mieux (et la plage testée) ;
-- **Retrait type** : la mécanique retenue par la comparaison, sa rente annuelle et son retrait mensuel moyen.
-Les FX sont gardés dans ce navigateur. Chiffres issus de backtests : ils ne garantissent pas les résultats futurs.
+avec la mécanique gagnante. Le bouton **💼 FX** en haut de la page affiche les FX en cartes (nom modifiable sur la carte,
+« Charger », 🗑). Montants rapportés à **10 000 investis** pour comparer les plans :
+
+| Rubrique | Ce que ça représente | Calcul |
+|---|---|---|
+| Le principe | ce que fait la stratégie, en une phrase | type de stratégie (tendance, rebonds, mixte) et paire |
+| Capital minimum | la somme à investir | capital des simulations |
+| Durée recommandée | combien de temps rester investi | durée testée qui réussit le mieux (et plage testée) |
+| Rendement typique | ce que le plan rapporte par an | médiane des résultats annualisés, revenus compris |
+| Revenu régulier | ce que le client touche par mois | mécanique de retrait gagnante de la comparaison |
+| Chances de gain | sur 10 cas, combien finissent gagnants | part des simulations gagnantes (pictogramme) |
+| Scénarios | pire cas testé, défavorable (1 cas sur 10 fait pire), médian, favorable (1 cas sur 10 fait mieux) | compte final + retraits |
+| Évolution typique | trajectoire de 10 000 mois par mois | médiane, fourchette 1 cas sur 10 et revenus déjà touchés |
+| Risque (1 à 7) | niveau de risque en un chiffre | pertes du scénario défavorable et du pire cas, baisses en cours de route |
+| Pire moment en cours de route | baisse à supporter avant la fin | drawdown médian et maximal |
+| Solidité du résultat | fiabilité des chiffres | simulations (30), années (25), époques (20), régularité d'une époque à l'autre (15), données réelles (10) ; plafonnée à 40 sur données simulées |
+| Conditions | levier, spread, commission, données, sortie | réglages des simulations |
+| Avertissement | mention de prudence | texte fixe |
+
+Un FX construit sur des données simulées est signalé (« à refaire avec les cours réels MT5 avant de le présenter »).
 
 ## Événements de marché
 
