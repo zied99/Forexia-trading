@@ -3534,7 +3534,7 @@
   const FX_CUR = 'EUR'; // devise affichée sur les FX (paramétrable plus tard)
   const money0 = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: FX_CUR, minimumFractionDigits: 0, maximumFractionDigits: 0 });
   const fxMoney = (pct) => money0.format(Math.round((FX_BASE * pct) / 100));
-  const durTxt2 = (m) => (m >= 12 && m % 12 === 0 ? m / 12 + ' an' + (m > 12 ? 's' : '') : m + ' mois');
+  const durTxt2 = (m) => { const y = Math.floor(m / 12), r = m % 12; return y ? y + ' an' + (y > 1 ? 's' : '') + (r ? ' et ' + r + ' mois' : '') : m + ' mois'; };
   /** Sur 10 cas : pastilles vertes (gagnant) et rouges (perdant). */
   function fxTenSvg(winRate) {
     const w = Math.round(winRate / 10);
@@ -3556,7 +3556,7 @@
       // y1 : avec retrait (compte + revenus touchés) ; y1b : sans retrait (même simulation, aucun retrait)
       // rendements mensuels de la valeur totale (compte + revenus touchés)
       const mr = r.curve.map((c, k) => { const v = c.acc + c.wd, pv = k ? r.curve[k - 1].acc + r.curve[k - 1].wd : 100; return pv > 0 ? Math.round((v / pv - 1) * 1e5) / 1e5 : 0; });
-      return { from: r.from, to: r.to, mr: mr, b: b, inc: tot / L, tot: tot, acc: (r.w.final / r.capital) * 100, y1: full ? p.acc + p.wd - 100 : ann(b),
+      return { from: r.from, to: r.to, m: m, mr: mr, b: b, inc: tot / L, tot: tot, acc: (r.w.final / r.capital) * 100, y1: full ? p.acc + p.wd - 100 : ann(b),
         y1b: full && p.b != null ? p.b - 100 : ann(100 + r.b.ret), est: !full };
     }).sort((x, y) => x.b - y.b);
   }
@@ -3575,7 +3575,7 @@
     if (fx.sims && fx.sims.length) return (fx._sims = fx.sims);
     if (!fx.outcomes || !fx.outcomes.length) return null;
     const m = Math.max(1, (fx.duration && fx.duration.reco) || 12), inc = fx.income.fixedPct != null ? fx.income.fixedPct : fx.income.perMonthPct;
-    return (fx._sims = fx.outcomes.map((b) => ({ b: b, inc: inc, tot: inc * m, acc: b - inc * m, y1: (Math.pow(Math.max(0.0001, b / 100), 12 / m) - 1) * 100, est: true, approx: true })));
+    return (fx._sims = fx.outcomes.map((b) => ({ m: m, b: b, inc: inc, tot: inc * m, acc: b - inc * m, y1: (Math.pow(Math.max(0.0001, b / 100), 12 / m) - 1) * 100, est: true, approx: true })));
   }
   /** Scénario au rang q (0 = pire cas, 1 = meilleur cas), interpolé entre les simulations rangées. */
   function fxPoint(fx, q) {
@@ -3584,7 +3584,7 @@
     const t = Math.max(0, Math.min(1, q)) * (S.length - 1), i = Math.floor(t), f = t - i, a = S[i], b = S[Math.min(S.length - 1, i + 1)];
     const lerp = (k) => a[k] + (b[k] - a[k]) * f;
     return { b: lerp('b'), inc: lerp('inc'), tot: a.tot != null ? lerp('tot') : null, acc: a.acc != null ? lerp('acc') : null, y1: lerp('y1'),
-      y1b: a.y1b != null && b.y1b != null ? lerp('y1b') : null, est: a.est || b.est, approx: !!a.approx };
+      y1b: a.y1b != null && b.y1b != null ? lerp('y1b') : null, m: a.m != null && b.m != null ? Math.round(lerp('m')) : null, est: a.est || b.est, approx: !!a.approx };
   }
   /** Rang q d'un résultat v (inverse de fxPoint). */
   function fxRank(fx, v) {
@@ -3610,8 +3610,6 @@
           '<text class="sc-drag" x="0" y="58" text-anchor="middle">◀ glissez ▶</text></g>' : '') + '</svg>' +
       '<div class="fx-sc-vals">' + [['worst', 'Au pire', sc.worst], ['p10', 'Si ça se passe mal', sc.p10], ['med', 'Le plus souvent', sc.med], ['p90', 'Si ça se passe bien', sc.p90]].map(([c, l, v]) =>
         '<div><i class="' + c + '"></i><span>' + l + '</span><b class="' + (v >= 100 ? 'pos' : 'neg') + '">' + fxMoney(v) + '</b></div>').join('') + '</div>' +
-      '<p class="hint fx-sc-help">Ce plan a été essayé ' + fx.n + ' fois sur des périodes passées. <b>Le plus souvent</b> : la moitié des essais ont fait mieux, la moitié moins bien. <b>Si ça se passe mal</b> : seulement 1 essai sur 10 a fait moins bien. <b>Si ça se passe bien</b> : seulement 1 essai sur 10 a fait mieux. <b>Au pire</b> : le plus mauvais essai.' +
-        (fxSims(fx) ? ' <b>Glissez le point blanc</b> pour voir ce que vous auriez dans un autre cas : le revenu et le capital au bout d\'un an suivent.' : '') + '</p>' +
       (fxSims(fx) ? '<div class="fx-pick" data-fx-pick="' + esc(fx.id) + '">' + fxPickHtml(fx, fxQ.has(fx.id) ? fxQ.get(fx.id) : 0.5) + '</div>' : '');
   }
   // gain au bout d'un an, en % : avec retrait (compte + revenus touchés) et sans retrait
@@ -3635,7 +3633,7 @@
     const pt = fxPoint(fx, q), y1 = (FX_BASE * pt.y1) / 100;
     const nm = fxScenarioName(q);
     return '<span class="fx-pick-name">' + nm.charAt(0).toUpperCase() + nm.slice(1) + '</span>' +
-      '<span>Au bout de la durée : <b class="' + (pt.b >= 100 ? 'pos' : 'neg') + '">' + fxMoney(pt.b) + '</b></span>' +
+      '<span>Au bout de la durée (' + durTxt2(pt.m || fx.duration.reco) + ') : <b class="' + (pt.b >= 100 ? 'pos' : 'neg') + '">' + fxMoney(pt.b) + '</b></span>' +
       '<span>Revenu : <b>≈ ' + fxMoney(pt.inc) + ' / mois</b>' + (pt.approx ? ' <small>(moyenne du plan)</small>' : '') + '</span>' +
       (pt.tot != null ? '<span>Revenus touchés au total : <b>' + fxMoney(pt.tot) + '</b></span><span>Reste sur le compte : <b class="' + (pt.acc >= 100 ? 'pos' : 'neg') + '">' + fxMoney(pt.acc) + '</b></span>' : '') +
       '<span>Au bout d\'un an : <b class="' + cls(pt.y1) + '">' + signed(pt.y1, num1) + ' %' + fxGainEur(pt.y1) + '</b> avec retrait' + (pt.y1b != null ? ' · <b class="' + cls(pt.y1b) + '">' + signed(pt.y1b, num1) + ' %' + fxGainEur(pt.y1b) + '</b> sans retrait' : '') + (pt.est ? ' <small>estimé</small>' : '') + '</span>';
@@ -3701,7 +3699,7 @@
         kf('Capital au bout d\'un an, avec retrait', fxY1Html(pt0), fxY1Sub(pt0), 'y1') +
         kf('Revenu régulier', fxSims(fx) ? '≈ ' + fxMoney(pt0.inc) + ' / mois' : incomeTxt, esc(fxMethodLabel(inc.w)), 'inc') + '</div>' +
       '<section class="fx-sec"><h5>Chances de gain</h5><div class="fx-ten-row">' + fxTenSvg(fx.winRate) + '<span><b>' + Math.round(fx.winRate / 10) + ' fois sur 10</b> le plan finit gagnant<small>' + Math.round((fx.winRate * fx.n) / 100) + ' essais gagnants sur ' + fx.n + ' faits sur des périodes passées</small></span></div></section>' +
-      '<section class="fx-sec"><h5>Ce que vous récupérez au bout de la durée</h5><p class="hint">Pour ' + money0.format(FX_BASE) + ' investis, compte + revenus déjà touchés.</p>' + fxScenarioSvg(sc, fx) + '</section>' +
+      '<section class="fx-sec"><h5>Ce que vous récupérez au bout de la durée (' + (fx.duration.min === fx.duration.max ? durTxt2(fx.duration.min) : durTxt2(fx.duration.min) + ' à ' + durTxt2(fx.duration.max)) + ')</h5><p class="hint">Pour ' + money0.format(FX_BASE) + ' investis, compte + revenus déjà touchés.</p>' + fxScenarioSvg(sc, fx) + '</section>' +
       '<section class="fx-sec"><h5>Évolution typique</h5>' + fxPathSvg(fx.path) + '</section>' +
       '<section class="fx-sec fx-two"><div><h5>Risque</h5>' + fxRiskScale(fx.riskNote) + '<small>' + RISK_TXT[fx.riskNote] + ' · pire moment en cours de route : en général <b>−' + num1.format(fx.drawdown.med) + ' %</b>, au pire −' + num1.format(fx.drawdown.max) + ' %</small></div>' +
         (() => { const cf = fxConfidence(fx); return '<div class="fx-conf" tabindex="0" aria-describedby="fxTip-' + esc(fx.id) + '"><h5>Score de confiance <span class="fx-info" aria-hidden="true">ⓘ</span></h5><span class="fx-stars">' + stars(cf.score) + '</span> <b>' + cf.score + '/100</b><small>' + solTxt + (sol.synthetic ? ' · données simulées' : '') + '</small>' +
