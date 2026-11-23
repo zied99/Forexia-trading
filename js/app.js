@@ -3552,7 +3552,10 @@
     return R.map((r) => {
       const L = Math.max(1, r.curve.length), p = r.curve[Math.min(11, L - 1)], full = L >= 12, b = 100 + r.w.ret;
       const m = Math.max(1, Math.round(durationDays(r.from, r.to) / 30.4375)), tot = (r.w.wd / r.capital) * 100;
-      return { b: b, inc: tot / L, tot: tot, acc: (r.w.final / r.capital) * 100, y1: full ? p.acc + p.wd - 100 : (Math.pow(Math.max(0.0001, b / 100), 12 / m) - 1) * 100, est: !full };
+      const ann = (v) => (Math.pow(Math.max(0.0001, v / 100), 12 / m) - 1) * 100;
+      // y1 : avec retrait (compte + revenus touchés) ; y1b : sans retrait (même simulation, aucun retrait)
+      return { b: b, inc: tot / L, tot: tot, acc: (r.w.final / r.capital) * 100, y1: full ? p.acc + p.wd - 100 : ann(b),
+        y1b: full && p.b != null ? p.b - 100 : ann(100 + r.b.ret), est: !full };
     }).sort((x, y) => x.b - y.b);
   }
   /** Simulations d'un FX. FX enregistré sans ce détail : retrouvées dans les résultats de retrait gardés (même
@@ -3577,7 +3580,8 @@
     if (!S || !S.length) return { b: fx.scenarios.med, inc: fx.income.perMonthPct, y1: fx.annual, est: true };
     const t = Math.max(0, Math.min(1, q)) * (S.length - 1), i = Math.floor(t), f = t - i, a = S[i], b = S[Math.min(S.length - 1, i + 1)];
     const lerp = (k) => a[k] + (b[k] - a[k]) * f;
-    return { b: lerp('b'), inc: lerp('inc'), tot: a.tot != null ? lerp('tot') : null, acc: a.acc != null ? lerp('acc') : null, y1: lerp('y1'), est: a.est || b.est, approx: !!a.approx };
+    return { b: lerp('b'), inc: lerp('inc'), tot: a.tot != null ? lerp('tot') : null, acc: a.acc != null ? lerp('acc') : null, y1: lerp('y1'),
+      y1b: a.y1b != null && b.y1b != null ? lerp('y1b') : null, est: a.est || b.est, approx: !!a.approx };
   }
   /** Rang q d'un résultat v (inverse de fxPoint). */
   function fxRank(fx, v) {
@@ -3606,6 +3610,9 @@
       '<p class="hint fx-sc-help">Défavorable : 1 cas sur 10 fait pire · favorable : 1 cas sur 10 fait mieux.' + (fxSims(fx) ? ' <b>Glissez le point blanc</b> pour voir un autre scénario : le revenu et le gain au bout d\'un an suivent.' : '') + '</p>' +
       (fxSims(fx) ? '<div class="fx-pick" data-fx-pick="' + esc(fx.id) + '">' + fxPickHtml(fx, fxQ.has(fx.id) ? fxQ.get(fx.id) : 0.5) + '</div>' : '');
   }
+  // gain au bout d'un an, en % : avec retrait (compte + revenus touchés) et sans retrait
+  const fxY1Html = (pt) => '<span class="' + cls(pt.y1) + '">' + signed(pt.y1, num1) + ' %</span> <span class="fx-y1-l">avec retrait</span>';
+  const fxY1Sub = (pt, q) => (pt.y1b != null ? 'sans retrait : <b class="' + cls(pt.y1b) + '">' + signed(pt.y1b, num1) + ' %</b> · ' : '') + 'scénario ' + fxScenarioName(q) + (pt.est ? ' (estimé)' : '');
   function fxScenarioName(q) {
     const better = Math.round((1 - q) * 10);
     return q <= 0.02 ? 'pire cas testé' : Math.abs(q - 0.5) < 0.03 ? 'médian' : q <= 0.12 ? 'défavorable' : q >= 0.98 ? 'meilleur cas testé' : q >= 0.88 ? 'favorable' : better + ' cas sur 10 font mieux';
@@ -3616,7 +3623,7 @@
       '<span>Au bout de la durée : <b class="' + (pt.b >= 100 ? 'pos' : 'neg') + '">' + fxMoney(pt.b) + '</b></span>' +
       '<span>Revenu : <b>≈ ' + fxMoney(pt.inc) + ' / mois</b>' + (pt.approx ? ' <small>(moyenne du plan)</small>' : '') + '</span>' +
       (pt.tot != null ? '<span>Revenus touchés au total : <b>' + fxMoney(pt.tot) + '</b></span><span>Reste sur le compte : <b class="' + (pt.acc >= 100 ? 'pos' : 'neg') + '">' + fxMoney(pt.acc) + '</b></span>' : '') +
-      '<span>Au bout d\'un an : <b class="' + cls(y1) + '">' + signed(y1, money0) + '</b> (' + signed(pt.y1, num1) + ' %)' + (pt.est ? ' <small>estimé</small>' : '') + '</span>';
+      '<span>Au bout d\'un an : <b class="' + cls(pt.y1) + '">' + signed(pt.y1, num1) + ' %</b> avec retrait' + (pt.y1b != null ? ' · <b class="' + cls(pt.y1b) + '">' + signed(pt.y1b, num1) + ' %</b> sans retrait' : '') + (pt.est ? ' <small>estimé</small>' : '') + '</span>';
   }
   /** Met à jour la carte quand on déplace le point (sans tout redessiner). */
   function fxSetQ(id, q) {
@@ -3628,8 +3635,8 @@
     const pk = card.querySelector('.fx-pick'); if (pk) pk.innerHTML = fxPickHtml(fx, q);
     const y1 = (FX_BASE * pt.y1) / 100;
     const d = (k) => card.querySelector('[data-fx-d="' + k + '"]');
-    if (d('y1')) d('y1').innerHTML = '<span class="' + cls(y1) + '">' + signed(y1, money0) + '</span>';
-    if (d('y1s')) d('y1s').textContent = signed(pt.y1, num1) + ' % · scénario ' + fxScenarioName(q) + (pt.est ? ' (estimé)' : '');
+    if (d('y1')) d('y1').innerHTML = fxY1Html(pt);
+    if (d('y1s')) d('y1s').innerHTML = fxY1Sub(pt, q);
     if (d('inc')) d('inc').textContent = '≈ ' + fxMoney(pt.inc) + ' / mois';
     if (d('incs')) d('incs').textContent = 'scénario ' + fxScenarioName(q) + ' · pour ' + money0.format(FX_BASE) + ' investis';
   }
@@ -3674,7 +3681,7 @@
       (sol.synthetic ? '<p class="fx-warn">⚠ Construit sur des données simulées : à refaire avec les cours réels (MT5) avant de le présenter à un client.</p>' : '') +
       '<p class="fx-principle"><b>Le principe :</b> ' + esc(fx.principle) + ' <small>(' + esc(fx.strategy.name) + ' · ' + esc(fx.strategy.pair) + ')</small></p>' +
       '<div class="fx-kfs">' + kf('Capital investi', money0.format(fx.capital)) + kf('Durée recommandée', durTxt2(fx.duration.reco), 'testé de ' + durTxt2(fx.duration.min) + ' à ' + durTxt2(fx.duration.max)) +
-        kf('Gain au bout d\'un an', '<span class="' + cls(y1v) + '">' + signed(y1v, money0) + '</span>', signed(pt0.y1, num1) + ' % · scénario ' + fxScenarioName(q0) + (pt0.est ? ' (estimé)' : ''), 'y1') +
+        kf('Gain au bout d\'un an', fxY1Html(pt0), fxY1Sub(pt0, q0), 'y1') +
         kf('Revenu régulier', fxSims(fx) ? '≈ ' + fxMoney(pt0.inc) + ' / mois' : incomeTxt, (fxSims(fx) ? 'scénario ' + fxScenarioName(q0) + ' · ' : '') + 'pour ' + money0.format(FX_BASE) + ' investis', 'inc') + '</div>' +
       '<section class="fx-sec"><h5>Chances de gain</h5><div class="fx-ten-row">' + fxTenSvg(fx.winRate) + '<span><b>' + Math.round(fx.winRate / 10) + ' fois sur 10</b> le plan finit gagnant<small>' + Math.round((fx.winRate * fx.n) / 100) + ' périodes gagnantes sur ' + fx.n + ' testées</small></span></div></section>' +
       '<section class="fx-sec"><h5>Ce que vous récupérez au bout de la durée</h5><p class="hint">Pour ' + money0.format(FX_BASE) + ' investis, compte + revenus déjà touchés.</p>' + fxScenarioSvg(sc, fx) + '</section>' +

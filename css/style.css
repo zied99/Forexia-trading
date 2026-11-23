@@ -906,3 +906,4 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 .fx-pick-name { width: 100%; font-weight: 700; }
 .fx-pick small { color: var(--muted, #64748b); }
 .fx-sc .sc-drag { font-size: 9.5px; fill: var(--text); font-weight: 700; opacity: .75; }
+.fx-y1-l { font-size: 12px; font-weight: 600; color: var(--muted, #64748b); } .fx-kf small b { font-size: inherit; }
