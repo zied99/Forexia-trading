@@ -3612,8 +3612,10 @@
   }
   // gain au bout d'un an, en % : avec retrait (compte + revenus touchés) et sans retrait
   const fxGainEur = (pct) => ' (' + signed((FX_BASE * pct) / 100, money0) + ')';
-  const fxY1Html = (pt) => '<span class="' + cls(pt.y1) + '">' + signed(pt.y1, num1) + ' %' + fxGainEur(pt.y1) + '</span>';
-  const fxY1Sub = (pt) => (pt.y1b != null ? 'sans retrait : <b class="' + cls(pt.y1b) + '">' + signed(pt.y1b, num1) + ' %' + fxGainEur(pt.y1b) + '</b>' : '');
+  // capital au bout d'un an (compte + revenus touchés), suivi de l'évolution en %
+  const fxCap1 = (pct) => money0.format(Math.round(FX_BASE * (1 + pct / 100))) + ' <span class="' + cls(pct) + '">(' + signed(pct, num1) + ' %)</span>';
+  const fxY1Html = (pt) => fxCap1(pt.y1);
+  const fxY1Sub = (pt) => (pt.y1b != null ? 'sans retrait : <b>' + fxCap1(pt.y1b) + '</b>' : '');
   /** Manière de retirer, en clair (ex. « Retrait de l'excédent (50 %) »). */
   function fxMethodLabel(w) {
     if (!w || !w.on) return 'Sans retrait';
@@ -3691,7 +3693,7 @@
       (sol.synthetic ? '<p class="fx-warn">⚠ Construit sur des données simulées : à refaire avec les cours réels (MT5) avant de le présenter à un client.</p>' : '') +
       '<p class="fx-principle"><b>Le principe :</b> ' + esc(fx.principle) + ' <small>(' + esc(fx.strategy.name) + ' · ' + esc(fx.strategy.pair) + ')</small></p>' +
       '<div class="fx-kfs">' + '<div class="fx-kf fx-invest"><span>Capital investi</span><label class="fx-inv"><input type="number" inputmode="numeric" data-fx-invest="' + esc(fx.id) + '" min="' + Math.ceil(fx.capital) + '" step="' + fxStep(fx.capital) + '" value="' + Math.round(FX_BASE) + '" aria-label="Capital investi (minimum ' + money0.format(fx.capital) + ')"><b>€</b></label><small>minimum ' + money0.format(fx.capital) + ' · modifiable</small></div>' + kf('Durée recommandée', durTxt2(fx.duration.reco), 'testé de ' + durTxt2(fx.duration.min) + ' à ' + durTxt2(fx.duration.max)) +
-        kf('Gain au bout d\'un an, avec retrait', fxY1Html(pt0), fxY1Sub(pt0), 'y1') +
+        kf('Capital au bout d\'un an, avec retrait', fxY1Html(pt0), fxY1Sub(pt0), 'y1') +
         kf('Revenu régulier', fxSims(fx) ? '≈ ' + fxMoney(pt0.inc) + ' / mois' : incomeTxt, esc(fxMethodLabel(inc.w)), 'inc') + '</div>' +
       '<section class="fx-sec"><h5>Chances de gain</h5><div class="fx-ten-row">' + fxTenSvg(fx.winRate) + '<span><b>' + Math.round(fx.winRate / 10) + ' fois sur 10</b> le plan finit gagnant<small>' + Math.round((fx.winRate * fx.n) / 100) + ' périodes gagnantes sur ' + fx.n + ' testées</small></span></div></section>' +
       '<section class="fx-sec"><h5>Ce que vous récupérez au bout de la durée</h5><p class="hint">Pour ' + money0.format(FX_BASE) + ' investis, compte + revenus déjà touchés.</p>' + fxScenarioSvg(sc, fx) + '</section>' +

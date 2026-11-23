@@ -240,7 +240,7 @@ choisit un scénario (du pire au meilleur cas testé) : le gain au bout d'un an 
 | Le principe | ce que fait la stratégie, en une phrase | type de stratégie (tendance, rebonds, mixte) et paire |
 | Capital minimum | la somme à investir | capital des simulations |
 | Durée recommandée | combien de temps rester investi | durée testée qui réussit le mieux (et plage testée) |
-| Gain au bout d'un an | ce que le client gagne (ou perd) après 12 mois, en %, avec retrait (compte + revenus touchés) et sans retrait | compte + revenus touchés à la fin du 12e mois ; « estimé » (annualisé) si les périodes testées durent moins d'un an |
+| Capital au bout d'un an | ce que le client a après 12 mois, en € et en %, avec retrait (compte + revenus touchés) et sans retrait | compte + revenus touchés à la fin du 12e mois ; « estimé » (annualisé) si les périodes testées durent moins d'un an |
 | Revenu régulier | ce que le client touche par mois | mécanique de retrait gagnante de la comparaison |
 | Chances de gain | sur 10 cas, combien finissent gagnants | part des simulations gagnantes (pictogramme) |
 | Scénarios | pire cas testé, défavorable (1 cas sur 10 fait pire), médian, favorable (1 cas sur 10 fait mieux) | compte final + retraits |
