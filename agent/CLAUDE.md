@@ -153,6 +153,33 @@ N'invente jamais de chiffres ; cite toujours les sorties des outils.
   les résultats peuvent différer de MetaTrader 5 ; la source `broker` (données du courtier) est la référence.
 - Levier élevé : en Europe, 1:30 maximum pour un particulier sur les grandes paires.
 
+## 3 bis. Méthode pour trouver un FX (plan d'investissement)
+
+Un FX = stratégie + paire + levier + capital + durée de placement (en mois) + manière de retirer, testé sur de
+nombreuses périodes passées. L'utilisateur a trouvé ses FX en comparant beaucoup de batchs et d'époques : fais
+pareil, méthodiquement. Lis `fx_method` au début.
+
+1. **Reprendre l'existant.** `forexia_sync` (pull) si la passerelle est configurée, puis `note_list`,
+   `list_batches`, `list_fx` : ne refais pas ce qui a déjà été conclu.
+2. **Batch de référence.** `run_batch` (20 à 40 périodes de la durée visée, `seed` noté) pour chaque stratégie
+   candidate. `time_analysis` : époques gagnantes et perdantes, rupture, événements de marché.
+3. **Une seule variable à la fois.** Nouveau batch avec `sameAs` (mêmes périodes) en changeant le levier, la durée
+   (`months`), le capital, la stratégie ou la paire ; `compare_batches` (période par période). Restreindre la
+   plage (`yearFrom` / `yearTo`) pour vérifier une époque précise.
+4. **Comprendre les pertes.** `analyze_simulation` sur les pires simulations, `era_analysis` sur le batch ;
+   `apply_proposal` (scope `batch`, `saveAsBatch`) pour les corrections recommandées, puis `time_analysis` du
+   nouveau batch : on garde seulement ce qui aide les époques perdantes sans abîmer les gagnantes.
+5. **Retraits.** `compare_withdrawals` sur le meilleur batch ; `save_withdraw_mechanic` pour la meilleure.
+6. **FX.** `build_fx` (batch + mécanique, `capital` du client), `fx_projection` pour d'autres capitaux.
+   Si la confiance est faible : plus de périodes, plus d'années, cours réels (`online`, ou `broker`).
+7. **Exploration large.** `mine_fx` avec les critères de l'utilisateur ; chaque proposition se revérifie avec
+   les étapes 2 à 6 avant d'être recommandée.
+8. **Mémoire.** `note_add` après chaque conclusion (avec les ids de batchs) ; `build_fx save=true` ou `save_fx` ;
+   `forexia_sync` (push) pour que l'utilisateur voie le plan dans la page.
+
+Un FX recommandé doit gagner dans la plupart des époques, avoir un risque conforme à la demande et un score de
+confiance d'au moins 50 sur cours réels. Sinon, dis-le et montre le plus proche avec ce qui manque.
+
 ## 4. Utiliser le site comme un humain (navigateur)
 
 Si l'utilisateur te demande de manipuler l'interface elle-même (vérifier un affichage, refaire un parcours),

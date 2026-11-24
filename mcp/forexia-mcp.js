@@ -23,12 +23,12 @@ const http = require('http');
 
 // ---------------------------------------------------------------- moteur Forexia (mêmes fichiers que le site)
 const ROOT = path.join(__dirname, '..');
-for (const f of ['indicators', 'expr', 'trade', 'backtest', 'data', 'presets', 'french', 'enhancer', 'mql5', 'broker', 'advisor']) {
+for (const f of ['indicators', 'expr', 'trade', 'backtest', 'data', 'presets', 'french', 'enhancer', 'mql5', 'broker', 'advisor', 'analyzer', 'events', 'confidence', 'fxcore']) {
   require(path.join(ROOT, 'js', f + '.js'));
 }
 const F = globalThis.Forexia;
 const D = F.data, B = F.backtest, E = F.enhancer, R = F.rules, FR = F.french;
-const VERSION = '1.2';
+const VERSION = '1.3';
 
 // ---------------------------------------------------------------- stockage local (stratégies, évaluations)
 const DATA_DIR = process.env.FOREXIA_MCP_DATA || path.join(os.homedir(), '.forexia-mcp');
@@ -346,6 +346,7 @@ const TOOLS = [
         '4. test_other_pairs pour vérifier que ce n\'est pas propre à une paire ; recommend pour la synthèse de l\'historique.',
         '5. Méfiance envers la sur-optimisation : préférer une stratégie gagnante sur la plupart des périodes à un seul gros résultat.',
         '6. save_strategy pour garder la meilleure ; generate_ea pour l\'EA MT5 (tester d\'abord en démo).',
+        '7. Pour construire un FX (plan d\'investissement) : outil fx_method.',
       ],
     }),
   },
@@ -708,9 +709,13 @@ const TOOLS = [
   },
 ];
 
+// ---------------------------------------------------------------- démarche FX (batchs, époques, retraits, FX, chercheur) : mcp/fx-tools.js
+TOOLS.push(...require('./fx-tools')({ F, D, E, readJson, writeJson, store, resolveStrategy, strategyView, statsView, settingsOf, fail, r2, iso, today, onlineHistory, csvHistory, bridge, bridgeTerminal, toBar, subBars, obj, strategySchema, marketSchema }));
+
 // ---------------------------------------------------------------- protocole MCP (JSON-RPC 2.0)
 const INSTRUCTIONS = 'Forexia : backtests de stratégies Forex. Commencez par forexia_help. Une stratégie se donne en règles techniques, en français (frenchText), ' +
-  'par un modèle (preset) ou par une stratégie enregistrée (saved). Utilisez random_batch pour juger la robustesse avant de conclure, et méfiez-vous de la sur-optimisation.';
+  'par un modèle (preset) ou par une stratégie enregistrée (saved). Utilisez random_batch pour juger la robustesse avant de conclure, et méfiez-vous de la sur-optimisation. ' +
+  'Pour chercher un FX (plan d\'investissement : stratégie, capital, durée, retrait), lisez fx_method : batchs sur les mêmes périodes (run_batch sameAs), compare_batches, time_analysis, era_analysis, compare_withdrawals, build_fx, mine_fx, note_add.';
 async function handle(msg) {
   const { id, method, params } = msg;
   const reply = (result) => ({ jsonrpc: '2.0', id: id, result: result });

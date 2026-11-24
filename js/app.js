@@ -3131,18 +3131,10 @@
   let wdPresetMem = null, wdResMem = {};
   function setWdPresets(l) { wdPresetMem = l; try { localStorage.setItem(WD_KEY, JSON.stringify(l)); } catch (e) { /* ignoré */ } refreshWdPresetPick(); }
   /** Réglages de simulation avec la mécanique de retrait w ({on, mode, pct, share, when, every, days, type, value}). */
-  function wdApply(se, w) {
-    const s = Object.assign({}, se);
-    for (const k of ['withdrawMode', 'withdrawEvery', 'withdrawDays', 'withdrawType', 'withdrawValue', 'withdrawPct', 'withdrawShare', 'withdrawWhen']) delete s[k];
-    if (w && w.on) {
-      if (w.mode === 'periodic') Object.assign(s, { withdrawMode: 'periodic', withdrawEvery: w.every, withdrawDays: Math.max(15, Number(w.days) || 30), withdrawType: w.type, withdrawValue: Number(w.value) || 0 });
-      else Object.assign(s, { withdrawPct: Number(w.pct) || 0, withdrawShare: Number(w.share) || 100, withdrawWhen: w.when || 'close' });
-    }
-    return s;
-  }
-  const wdDesc = (w) => (w && w.on ? withdrawLabel(wdApply({}, w)) + (w.mode !== 'periodic' && Number(w.share) < 100 ? ', ' + w.share + ' % du gain retiré' : '') : 'sans retrait');
+  function wdApply(se, w) { return F.fxcore.wdApply(se, w); }
+  const wdDesc = (w) => F.fxcore.wdDesc(w);
   // clé d'une mécanique (seuls les champs utiles) : sert à retrouver les résultats déjà calculés
-  const wdKey = (w) => (w.mode === 'periodic' ? ['p', w.every, w.every === 'days' ? Math.max(15, Number(w.days) || 30) : '', w.type, Number(w.value)] : ['t', Number(w.pct), Number(w.share), w.when]).join('|');
+  const wdKey = (w) => F.fxcore.wdKey(w);
   const wdFromForm = () => ({ on: true, mode: $('withdrawMode').value, pct: $('withdrawPct').value, share: $('withdrawShare').value, when: $('withdrawWhen').value, every: $('withdrawEvery').value, days: $('withdrawDays').value, type: $('withdrawType').value, value: $('withdrawValue').value });
   function wdToForm(w) {
     $('withdrawOn').checked = true; $('withdrawMode').value = w.mode || 'threshold'; $('withdrawPct').value = w.pct || 20; $('withdrawShare').value = w.share || 100; $('withdrawWhen').value = w.when || 'close';
@@ -3245,29 +3237,9 @@
     if (st.rows && st.rows.length && st.status !== 'run') mountWdCharts(st);
   }
   /** Résumé compact d'une simulation relancée (gardé en mémoire : assez pour tous les graphiques). */
-  function wdRow(e, capital, base, wd) {
-    const curve = [], dates = wd.dates || [], bDates = base.dates || [];
-    // fin de chaque mois : compte avec retrait, retraits cumulés, compte sans retrait (en % du capital de départ)
-    const bEnd = {};
-    for (let j = 0; j < base.equity.length; j++) bEnd[String(bDates[j] || '').slice(0, 7) || String(j)] = base.equity[j];
-    let key = null;
-    for (let j = 0; j < wd.equity.length; j++) {
-      const d = String(dates[j] || '').slice(0, 7) || String(j);
-      const pt = { m: d, acc: Math.round((wd.equity[j] / capital) * 1000) / 10, wd: Math.round(((wd.wealth[j] - wd.equity[j]) / capital) * 1000) / 10, b: bEnd[d] != null ? Math.round((bEnd[d] / capital) * 1000) / 10 : null };
-      if (d !== key) { curve.push(pt); key = d; } else curve[curve.length - 1] = pt;
-    }
-    const s = wd.stats;
-    return { key: e.key, from: e.from, to: e.to, capital: capital, t: Date.now(),
-      b: { ret: base.stats.returnPct, dd: base.stats.maxDrawdownPct },
-      w: { ret: s.returnPct, dd: s.maxDrawdownPct, wd: s.totalWithdrawn || 0, n: s.withdrawals || 0, months: Math.max(1, s.months || 1), final: s.finalAccount }, curve: curve };
-  }
+  function wdRow(e, capital, base, wd) { return F.fxcore.wdRow(e, capital, base, wd); }
   /** Chiffres dérivés d'une simulation relancée : retraits mois par mois, premier retrait, rente annuelle. */
-  function wdDerive(r) {
-    const monthly = r.curve.map((p, k) => Math.max(0, p.wd - (k ? r.curve[k - 1].wd : 0))); // % du capital retiré ce mois-là
-    const first = monthly.findIndex((v) => v > 0);
-    const years = Math.max(1 / 12, r.curve.length / 12);
-    return { monthly: monthly, first: first >= 0 ? first + 1 : null, withMonths: monthly.filter((v) => v > 0).length, yearly: (r.w.wd / r.capital) * 100 / years, finalPct: (r.w.final / r.capital) * 100 };
-  }
+  function wdDerive(r) { return F.fxcore.wdDerive(r); }
   /** Relance les simulations T avec la mécanique w (celles déjà calculées sont reprises). onStep(i, n) pour la progression. */
   async function wdCompute(w, T, onStep) {
     const saved = captureForm(), rows = [], cache = wdResStore.get(), k = wdKey(w);
@@ -3319,20 +3291,7 @@
     renderWdModal();
   }
   /** Indicateurs d'une mécanique sur un ensemble de simulations. */
-  function wdAgg(R) {
-    const D = R.map(wdDerive), n = R.length, med = (a) => { const v = a.filter(Number.isFinite).sort((x, y) => x - y); return v.length ? (v.length % 2 ? v[v.length >> 1] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2) : NaN; };
-    const year = R.map((r) => { const k = Math.min(11, r.curve.length - 1), p = r.curve[k]; return p.acc + p.wd - 100; });
-    const months = R.reduce((a, r) => a + r.w.months, 0), totM = D.reduce((a, d) => a + d.monthly.length, 0), withM = D.reduce((a, d) => a + d.withMonths, 0), firsts = D.map((d) => d.first).filter(Boolean);
-    const o = {
-      wd: R.reduce((a, r) => a + r.w.wd, 0), perMonth: R.reduce((a, r) => a + r.w.wd, 0) / Math.max(1, months), yearly: mean(D.map((d) => d.yearly)),
-      ret: mean(R.map((r) => r.w.ret)), year: mean(year), finalMed: med(D.map((d) => d.finalPct)), kept: R.filter((r) => r.w.final >= r.capital).length,
-      ruined: R.filter((r) => r.w.final < r.capital * 0.5).length, dd: mean(R.map((r) => r.w.dd)), withPct: (withM / Math.max(1, totM)) * 100,
-      first: firsts.length ? mean(firsts) : NaN, n: n,
-    };
-    // note d'équilibre : ce que la méthode rapporte au total (compte + retraits), moins le risque, plus la préservation du capital
-    o.score = o.ret - 0.5 * o.dd + 20 * (o.kept / Math.max(1, n)) - 25 * (o.ruined / Math.max(1, n));
-    return o;
-  }
+  function wdAgg(R) { return F.fxcore.wdAgg(R); }
   function wdCompareHtml(st) {
     const c = st.cmp, pres = wdPresets(), T = wdTargets();
     const sel = (id, cur) => '<select id="' + id + '">' + pres.map((p) => '<option value="' + esc(p.id) + '"' + (p.id === cur ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('') + '</select>';
@@ -3417,19 +3376,9 @@
   const pctile = (a, q) => { const v = a.filter(Number.isFinite).sort((x, y) => x - y); if (!v.length) return NaN; const k = (v.length - 1) * q, lo = Math.floor(k), hi = Math.ceil(k); return v[lo] + (v[hi] - v[lo]) * (k - lo); };
   // Nom des devises pour la phrase « Le principe »
   const CUR_NAME = { EUR: 'l\'euro', USD: 'le dollar', GBP: 'la livre sterling', JPY: 'le yen', CHF: 'le franc suisse', CAD: 'le dollar canadien', AUD: 'le dollar australien', NZD: 'le dollar néo-zélandais' };
-  function fxPrinciple(strat, pair) {
-    const [a, b] = String(pair || '').toUpperCase().split('/'), na = CUR_NAME[a] || a, nb = CUR_NAME[b] || b;
-    const vs = na && nb ? na + ' face ' + (nb.startsWith('le ') ? 'au ' + nb.slice(3) : 'à ' + nb) : pair;
-    const kind = strat ? F.analyzer.strategyKind(strat) : 'mixed';
-    return kind === 'trend' ? 'Suit les grandes tendances de ' + vs + ' : il achète quand le marché monte durablement, vend quand il baisse.'
-      : kind === 'reversion' ? 'Profite des rebonds de ' + vs + ' : il achète après une baisse excessive, vend après une hausse excessive.'
-        : 'Combine tendances et rebonds de ' + vs + ' pour entrer au bon moment.';
-  }
+  function fxPrinciple(strat, pair) { return F.fxcore.fxPrinciple(strat, pair); }
   /** Note de risque de 1 (très faible) à 7 (très élevé), d'après les pertes possibles et les baisses en cours de route. */
-  function fxRiskNote(loss10, ddMed, worstLoss) {
-    const m = Math.max(loss10, ddMed * 0.7, worstLoss * 0.5);
-    return m <= 2 ? 1 : m <= 5 ? 2 : m <= 10 ? 3 : m <= 20 ? 4 : m <= 35 ? 5 : m <= 60 ? 6 : 7;
-  }
+  function fxRiskNote(loss10, ddMed, worstLoss) { return F.fxcore.fxRiskNote(loss10, ddMed, worstLoss); }
   /**
    * FX (version 2) à partir de la comparaison : la mécanique de retrait gagnante et ses résultats sur les simulations
    * comparées. Les montants sont rapportés à 10 000 investis pour que les plans se comparent entre eux.
@@ -3443,66 +3392,7 @@
       synthetic: sims.some((e) => e && /simul/i.test(e.data || '')), mech: mech, other: other });
   }
   /** FX à partir des simulations relancées avec une mécanique de retrait (rows : voir wdRow). */
-  function fxFromRows(R, meta) {
-    const n = R.length, cfg = meta.config || {}, mech = meta.mech, other = meta.other || { name: '—' };
-    const first = { name: meta.name || '', strategy: meta.strategy || null, config: meta.config || null, pair: meta.pair || '', leverage: meta.leverage || cfg.leverage || null, data: meta.dataLabel || '' };
-    const capital = pctile(R.map((r) => r.capital), 0.5);
-    // ce que le client récupère à la fin (compte + retraits), en % du capital investi
-    const back = R.map((r) => 100 + r.w.ret);
-    const months = R.map((r) => Math.max(1, Math.round(durationDays(r.from, r.to) / 30.4375)));
-    const annual = R.map((r, i) => (Math.pow(Math.max(0.0001, back[i] / 100), 12 / months[i]) - 1) * 100);
-    const dds = R.map((r) => r.w.dd), agg = wdAgg(R);
-    // durée recommandée : la durée testée qui réussit le mieux
-    const groups = {};
-    R.forEach((r, i) => { const m = months[i], k = m <= 3 ? 3 : m <= 6 ? 6 : m <= 12 ? 12 : m <= 24 ? 24 : 36; (groups[k] = groups[k] || []).push(r.w.ret); });
-    const scored = Object.keys(groups).map((k) => ({ m: +k, n: groups[k].length, score: mean(groups[k]) * (groups[k].filter((v) => v > 0).length / groups[k].length) })).sort((x, y) => y.score - x.score);
-    const reco = scored.length > 1 && scored[0].n >= 2 ? Math.min(scored[0].m, Math.max(...months)) : Math.round(pctile(months, 0.5));
-    // évolution typique, mois par mois (valeur totale = compte + retraits ; retraits cumulés), en % du capital
-    const M = Math.max(...R.map((r) => r.curve.length)), path = [];
-    for (let k = 0; k < M; k++) {
-      const tot = R.filter((r) => r.curve.length > k).map((r) => r.curve[k].acc + r.curve[k].wd), wd = R.filter((r) => r.curve.length > k).map((r) => r.curve[k].wd);
-      if (tot.length < Math.max(2, n * 0.3)) break;
-      path.push({ p10: pctile(tot, 0.1), med: pctile(tot, 0.5), p90: pctile(tot, 0.9), wd: pctile(wd, 0.5) });
-    }
-    // solidité : nombre de simulations, années et époques couvertes, régularité d'une époque à l'autre, données réelles
-    const years = new Set(), eraRes = {};
-    const eras = F.advisor.erasFromCuts(F.advisor.DEFAULT_CUTS);
-    R.forEach((r) => { for (let y = +r.from.slice(0, 4); y <= +r.to.slice(0, 4); y++) years.add(y); const m = F.advisor.midDate(r), er = eras.find((x) => m >= x.fromD && m <= x.toD); if (er) (eraRes[er.label] = eraRes[er.label] || []).push(r.w.ret); });
-    const eraKeys = Object.keys(eraRes), eraWin = eraKeys.filter((k) => pctile(eraRes[k], 0.5) > 0).length;
-    const synthetic = !!meta.synthetic;
-    const parts = {
-      simulations: Math.min(1, n / 40) * 30,
-      annees: Math.min(1, years.size / 15) * 25,
-      epoques: Math.min(1, eraKeys.length / 4) * 20,
-      regularite: eraKeys.length ? (eraWin / eraKeys.length) * 15 : 0,
-      donnees: synthetic ? 0 : 10,
-    };
-    // données simulées : elles ne disent rien du marché réel, la solidité est plafonnée à 40
-    const solidity = Math.min(synthetic ? 40 : 100, Math.round(Object.values(parts).reduce((a, b) => a + b, 0)));
-    const p10 = pctile(back, 0.1), med = pctile(back, 0.5), p90 = pctile(back, 0.9), worst = Math.min(...back), ddMed = pctile(dds, 0.5);
-    const w = mech.w, fixedPct = w.mode === 'periodic' && w.type === 'fixed' ? (Number(w.value) / capital) * 100 : null;
-    return {
-      v: 2, id: 'fx' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), createdAt: new Date().toISOString(), trials: meta.trials || undefined,
-      name: 'FX ' + (first.name || 'stratégie') + ' · ' + mech.name,
-      strategy: { name: first.name || '', data: first.strategy || null, config: first.config || null, pair: first.pair || '', leverage: first.leverage || cfg.leverage || null, dataLabel: first.data || '' },
-      principle: fxPrinciple(first.strategy, first.pair),
-      capital: capital, n: n, years: [Math.min(...years), Math.max(...years)],
-      duration: { min: Math.min(...months), max: Math.max(...months), reco: reco },
-      winRate: (back.filter((v) => v > 100).length / n) * 100,
-      annual: pctile(annual, 0.5),
-      scenarios: { worst: worst, p10: p10, med: med, p90: p90 }, // en % du capital investi
-      outcomes: back.slice().sort((x, y) => x - y),
-      // chaque simulation, rangée du pire au meilleur résultat : ce qu'on récupère (b), revenu moyen par mois (inc)
-      // et gain au bout d'un an (y1), en % du capital ; est = moins d'un an testé, gain d'un an estimé
-      sims: fxSimsFromRows(R),
-      drawdown: { med: ddMed, max: Math.max(...dds) },
-      riskNote: fxRiskNote(Math.max(0, 100 - p10), ddMed, Math.max(0, 100 - worst)),
-      income: { name: mech.name, w: w, desc: wdDesc(w), perMonthPct: (agg.perMonth / capital) * 100, fixedPct: fixedPct, yearly: agg.yearly, kept: agg.kept, other: other.name },
-      path: path,
-      solidity: { score: solidity, parts: parts, synthetic: synthetic, eras: eraKeys.length, eraWin: eraWin },
-      conditions: { leverage: first.leverage || cfg.leverage || null, spread: cfg.spreadPips != null ? cfg.spreadPips : null, commission: cfg.commission || 0, source: first.data || '' },
-    };
-  }
+  function fxFromRows(R, meta) { return F.fxcore.fxFromRows(R, meta); }
   function saveFxFromCompare() {
     const c = wdState.cmp;
     if (!c || c.status !== 'done' || !wdState.cmpRows) return;
@@ -3555,18 +3445,7 @@
   /** Fourchette des scénarios : du pire cas au scénario favorable, avec le capital investi. */
   /** Détail par simulation d'un FX, rangé du pire au meilleur, en % du capital : b = récupéré (compte + revenus),
    *  inc = revenu moyen par mois, tot = revenus touchés au total, acc = reste sur le compte, y1 = gain au bout d'un an. */
-  function fxSimsFromRows(R) {
-    return R.map((r) => {
-      const L = Math.max(1, r.curve.length), p = r.curve[Math.min(11, L - 1)], full = L >= 12, b = 100 + r.w.ret;
-      const m = Math.max(1, Math.round(durationDays(r.from, r.to) / 30.4375)), tot = (r.w.wd / r.capital) * 100;
-      const ann = (v) => (Math.pow(Math.max(0.0001, v / 100), 12 / m) - 1) * 100;
-      // y1 : avec retrait (compte + revenus touchés) ; y1b : sans retrait (même simulation, aucun retrait)
-      // rendements mensuels de la valeur totale (compte + revenus touchés)
-      const mr = r.curve.map((c, k) => { const v = c.acc + c.wd, pv = k ? r.curve[k - 1].acc + r.curve[k - 1].wd : 100; return pv > 0 ? Math.round((v / pv - 1) * 1e5) / 1e5 : 0; });
-      return { from: r.from, to: r.to, m: m, mr: mr, b: b, inc: tot / L, tot: tot, acc: (r.w.final / r.capital) * 100, y1: full ? p.acc + p.wd - 100 : ann(b),
-        y1b: full && p.b != null ? p.b - 100 : ann(100 + r.b.ret), est: !full };
-    }).sort((x, y) => x.b - y.b);
-  }
+  function fxSimsFromRows(R) { return F.fxcore.fxSimsFromRows(R); }
   /** Simulations d'un FX. FX enregistré sans ce détail : retrouvées dans les résultats de retrait gardés (même
    *  mécanique, même stratégie, même capital) ; à défaut, reconstituées à partir de ses résultats. */
   function fxSims(fx) {
@@ -3749,7 +3628,7 @@
   // ---------- Chercheur de FX : essaie les combinaisons (stratégie × levier × retrait) et propose les plans proches des critères ----------
   let minerState = { open: false, status: 'idle', res: null };
   const fxFind = (id) => fxList().find((x) => x.id === id) || ((minerState.res && minerState.res.cands) || []).map((c) => c.fx).find((x) => x.id === id);
-  const MINER_LEV = [3, 5, 10, 20, 30, 50, 100, 200, 300, 500];
+  const MINER_LEV = F.fxcore.MINER_LEV;
   function minerDefaults() {
     return { budget: Math.max(100, Number($('capital').value) || 10000), maxRisk: 4, minConf: 50, months: 12, income: '', prefs: { excess: true, fixed: true, pct: false, none: false },
       saved: true, create: true, effort: 'normal', maxLev: 30, pair: $('pair').value };
@@ -3793,17 +3672,7 @@
     document.querySelectorAll('#fxMiner [data-mp]').forEach((x) => { o.prefs[x.dataset.mp] = x.checked; });
   }
   /** Manières de retirer à essayer, selon les préférences et le budget. */
-  function minerMechs(o) {
-    const out = [], inc = Number(o.income) || 0;
-    if (o.prefs.excess) for (const v of [25, 50, 75]) out.push({ name: 'Retrait de l\'excédent ' + v + ' %', w: { on: true, mode: 'periodic', every: 'month', days: 30, type: 'excess', value: v } });
-    if (o.prefs.fixed) {
-      const sums = inc > 0 ? [inc] : [0.005, 0.01, 0.02].map((f) => Math.max(5, Math.round((o.budget * f) / 5) * 5));
-      for (const v of [...new Set(sums)]) out.push({ name: 'Somme fixe ' + v + ' € / mois', w: { on: true, mode: 'periodic', every: 'month', days: 30, type: 'fixed', value: v } });
-    }
-    if (o.prefs.pct) for (const v of [0.5, 1, 2]) out.push({ name: v.toString().replace('.', ',') + ' % du compte / mois', w: { on: true, mode: 'periodic', every: 'month', days: 30, type: 'pct', value: v } });
-    if (o.prefs.none) out.push({ name: 'Sans retrait', w: null });
-    return out;
-  }
+  function minerMechs(o) { return F.fxcore.minerMechs(o); }
   /** Historique de cours pour la recherche (source choisie sur la page d'accueil). */
   async function minerBars(pair) {
     const src = sourceValue(), today = new Date(F.data.iso(new Date()) + 'T00:00:00Z');
@@ -3837,107 +3706,36 @@
     const found = [], skipped = [];
     let screened = 0, createdN = 0, done = 0, synthetic = false, allCombos = 0;
     try {
-     for (let pi = 0; pi < pairs.length && !checkStop; pi++) {
-      const pair = pairs[pi], tag = pairs.length > 1 ? ' (' + pair + ', paire ' + (pi + 1) + ' / ' + pairs.length + ')' : '';
-      let strats = baseStrats.slice();
-      minerState.msg = 'Chargement des cours de ' + pair + '…'; renderMinerProgress();
-      let data;
-      try { data = await minerBars(pair); } catch (e) { if (pairs.length === 1) throw e; skipped.push(pair + ' : ' + e.message); continue; }
-      synthetic = synthetic || data.synthetic;
-      const bars = data.bars, WARM = 300;
-      const dayOf = (b) => String(b.date).slice(0, 10);
-      // périodes d'essai : mêmes dates pour toutes les combinaisons
-      const lastIdx = bars.length - 1, starts = [];
-      const endOf = (i) => { const d = new Date(dayOf(bars[i]) + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + o.months); const iso = F.data.iso(d); let j = i; while (j < lastIdx && dayOf(bars[j + 1]) <= iso) j++; return dayOf(bars[j]) >= F.data.iso(new Date(d.getTime() - 5 * 864e5)) ? j : -1; };
-      const cand = []; for (let i = WARM; i <= lastIdx; i++) { const j = endOf(i); if (j > 0) cand.push([i, j]); else break; }
-      if (cand.length < 5) { if (pairs.length === 1) throw new Error('Historique trop court pour des placements de ' + o.months + ' mois.'); skipped.push(pair + ' : historique trop court'); continue; }
-      let seed = 12345; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
-      for (let k = 0; k < K; k++) starts.push(cand[Math.floor(((k + rnd()) / K) * cand.length) % cand.length]); // réparties sur tout l'historique
-      const base = {
-        capital: o.budget, exposurePct: Number($('exposure').value) || 100, spreadPips: Number($('spread').value) || 0, pair: pair, timeframe: data.tf || 'D1',
-        sizing: $('brokerSizing').value, fixedLots: Number($('brokerLots').value) || 0.01, riskPct: Number($('brokerRisk').value) || 1, commissionPerLot: Number($('commission').value) || 0,
-      };
-      if (data.broker) Object.assign(base, { broker: data.broker, symbol: data.symbol, spreadMode: $('spreadMode').value, maxLots: Number($('brokerMaxLots').value) || 1, maxSpreadPips: Number($('brokerMaxSpread').value) || 0 });
-      let lastYield = Date.now();
-      const run = (strat, se, s0, s1) => {
-        const from = Math.max(0, s0 - WARM), sl = bars.slice(from, s1 + 1), st = Object.assign({}, se, { startIndex: s0 - from });
-        try { return se.broker ? F.broker.runBrokerBacktest(sl, strat, st, se.broker) : F.backtest.runBacktest(sl, strat, st); } catch (e) { return null; }
-      };
-      // 🧪 le chercheur crée des stratégies : chaque modèle + un filtre ou une protection, testées sur les mêmes périodes ;
-      // seules celles qui font mieux que leur modèle d'origine entrent dans la recherche complète
-      let created = [];
-      if (o.create) {
-        const lev0 = levs.includes(10) ? 10 : levs[Math.floor(levs.length / 2)], se0 = Object.assign({}, base, { leverage: lev0 });
-        const quick = (st) => {
-          const rs = starts.map(([s0, s1]) => run(st, wdApply(se0, null), s0, s1)).filter((r) => r && r.stats);
-          if (rs.length < Math.max(5, starts.length * 0.6)) return -Infinity;
-          const back = rs.map((r) => 100 + r.stats.returnPct), dd = rs.map((r) => r.stats.maxDrawdownPct);
-          return pctile(back, 0.5) - 0.3 * pctile(dd, 0.5) + 0.1 * (back.filter((v) => v > 100).length / back.length) * 100;
+      for (let pi = 0; pi < pairs.length && !checkStop; pi++) {
+        const pair = pairs[pi], tag = pairs.length > 1 ? ' (' + pair + ', paire ' + (pi + 1) + ' / ' + pairs.length + ')' : '';
+        minerState.msg = 'Chargement des cours de ' + pair + '…'; renderMinerProgress();
+        let data;
+        try { data = await minerBars(pair); } catch (e) { if (pairs.length === 1) throw e; skipped.push(pair + ' : ' + e.message); continue; }
+        const base = {
+          capital: o.budget, exposurePct: Number($('exposure').value) || 100, spreadPips: Number($('spread').value) || 0, pair: pair, timeframe: data.tf || 'D1',
+          sizing: $('brokerSizing').value, fixedLots: Number($('brokerLots').value) || 0.01, riskPct: Number($('brokerRisk').value) || 1, commissionPerLot: Number($('commission').value) || 0,
         };
-        const SHORT = { adx25: 'filtre ADX > 25', adx20: 'filtre ADX < 20', ema200: 'filtre EMA 200', long: 'achats seulement', short: 'ventes seulement', volhi: 'sans forte volatilité', vollo: 'sans marché calme', slope: 'pente EMA 50', sl: 'stop 2 ATR', trail: 'stop suiveur 2 ATR' };
-        const pool = [];
-        for (const b of strats) {
-          if (checkStop) break;
-          const sb = quick(b);
-          for (const c of F.analyzer.eraCandidates(b, null)) {
-            const v = F.analyzer.applyProposal(b, se0, c).strat;
-            if (['longEntry', 'longExit', 'shortEntry', 'shortExit'].some((k) => v[k] && F.rules.validate(v[k]))) continue;
-            v.name = b.name + ' + ' + (SHORT[c.id] || c.title);
-            v.generated = { parent: b.name, change: c.title, at: new Date().toISOString() };
-            delete v.id; v.description = 'Créée par le chercheur de FX : « ' + b.name + ' » + ' + c.title.charAt(0).toLowerCase() + c.title.slice(1) + '.';
-            try { v.plots = F.french.derivePlots(v); v.frenchText = F.french.toFrench(v) || ''; } catch (e) { /* texte facultatif */ }
-            const sv = quick(v); screened++;
-            if (sv > sb + 1) pool.push({ v: v, sc: sv });
-            if (Date.now() - lastYield > 60) { minerState.msg = '🧪 Création de stratégies' + tag + ' : ' + screened + ' variantes testées, ' + pool.length + ' meilleures que leur modèle'; minerState.pct = 0; renderMinerProgress(); await new Promise((r) => setTimeout(r, 0)); lastYield = Date.now(); }
-          }
-        }
-        created = pool.sort((a, b) => b.sc - a.sc).slice(0, 8).map((x) => x.v);
-        strats = strats.concat(created);
-        createdN += created.length;
-      }
-      // nombre d'essais (correction de la chance) : toutes les stratégies testées, y compris les variantes écartées
-      const combos = strats.length * levs.length, trials = 0; // le nombre d'essais exact est appliqué à la fin
-      allCombos += combos * mechs.length;
-      for (const strat of strats) for (const lev of levs) {
-        if (checkStop) break;
-        const se = Object.assign({}, base, { leverage: lev });
-        // sans retrait : une fois par période
-        const bases = starts.map(([s0, s1]) => run(strat, wdApply(se, null), s0, s1));
-        for (const m of mechs) {
-          if (checkStop) break;
-          const R = [];
-          starts.forEach(([s0, s1], k) => {
-            const b = bases[k], w = m.w ? run(strat, wdApply(se, m.w), s0, s1) : b;
-            if (b && w && w.equity && w.equity.length) R.push(wdRow({ key: 'mn' + k, from: dayOf(bars[s0]), to: dayOf(bars[s1]) }, o.budget, b, w));
+        if (data.broker) Object.assign(base, { broker: data.broker, symbol: data.symbol, spreadMode: $('spreadMode').value, maxLots: Number($('brokerMaxLots').value) || 1, maxSpreadPips: Number($('brokerMaxSpread').value) || 0 });
+        let r;
+        try {
+          r = await F.fxcore.minePair({
+            bars: data.bars, base: base, pair: pair, strats: baseStrats, levs: levs, mechs: mechs, o: o, K: K, dataLabel: data.label, synthetic: data.synthetic,
+            config: currentConfig(), score: minerScore, stop: () => checkStop,
+            progress: async (p) => {
+              if (p.phase === 'create') { minerState.msg = '🧪 Création de stratégies' + tag + ' : ' + p.screened + ' variantes testées, ' + p.kept + ' meilleures que leur modèle'; minerState.pct = 0; }
+              else { minerState.pct = (pi + p.done / Math.max(1, p.combos)) / pairs.length; minerState.msg = 'Essai ' + (done + p.done) + ' combinaisons' + tag + ' · ' + p.strat + ' · levier 1:' + p.lev; }
+              renderMinerProgress(); await new Promise((res) => setTimeout(res, 0));
+            },
           });
-          done++;
-          if (R.length >= Math.max(5, K * 0.6)) {
-            const wn = m.w || { on: false };
-            const fx = fxFromRows(R, { name: strat.name, strategy: strat, config: Object.assign(currentConfig(), { leverage: lev, capital: o.budget }), pair: pair, leverage: lev, dataLabel: data.label,
-              synthetic: data.synthetic, mech: { name: m.name, w: m.w ? m.w : { on: false, mode: 'periodic', type: 'none', value: 0 } }, other: { name: mechs.length - 1 + ' autre' + (mechs.length > 2 ? 's' : '') + ' manière' + (mechs.length > 2 ? 's' : '') }, trials: trials });
-            fx.name = 'FX ' + strat.name + ' · ' + pair + ' · 1:' + lev + ' · ' + m.name;
-            fx._w = wn;
-            if (!m.w) { fx.income = Object.assign(fx.income, { desc: 'sans retrait', perMonthPct: 0, fixedPct: null }); }
-            found.push(minerScore(fx, o, wn));
-          }
-          if (Date.now() - lastYield > 60) {
-            minerState.pct = (pi + done / Math.max(1, allCombos)) / pairs.length; minerState.msg = 'Essai ' + done + ' combinaisons' + tag + ' · ' + strat.name + ' · levier 1:' + lev;
-            renderMinerProgress(); await new Promise((r) => setTimeout(r, 0)); lastYield = Date.now();
-          }
-        }
+        } catch (e) { if (pairs.length === 1) throw e; skipped.push(pair + ' : historique trop court'); continue; }
+        synthetic = synthetic || data.synthetic;
+        found.push(...r.found); screened += r.screened; createdN += r.created.length; done += r.done; allCombos += r.combos;
       }
-     }
+      if (!found.length) throw new Error('Aucune combinaison n\'a pu être testée.' + (skipped.length ? ' ' + skipped.join(' · ') : ''));
       // nombre d'essais (correction de la chance) : toutes les combinaisons et variantes testées, toutes paires confondues
       const trialsAll = Math.max(1, (allCombos || done) + screened * levs.length * mechs.length);
-      for (let i = 0; i < found.length; i++) { found[i].fx.trials = trialsAll; found[i] = minerScore(found[i].fx, o, found[i].fx._w); }
-      found.sort((a, b) => (b.ok - a.ok) || (b.ok ? b.rank - a.rank : a.dist - b.dist));
-      // propositions variées : d'abord la meilleure combinaison de chaque stratégie (et de chaque paire), puis les suivantes
-      const seen = new Set(), pick = [];
-      for (const c of found) { const k = c.fx.strategy.name + '|' + c.fx.strategy.pair; if (!seen.has(k)) { seen.add(k); pick.push(c); } }
-      for (const c of found) if (pick.length < 6 && !pick.includes(c)) pick.push(c);
-      pick.sort((a, b) => (b.ok - a.ok) || (b.ok ? b.rank - a.rank : a.dist - b.dist));
-      if (!found.length) throw new Error('Aucune combinaison n\'a pu être testée.' + (skipped.length ? ' ' + skipped.join(' · ') : ''));
-      minerState = { open: true, status: 'done', res: { cands: pick.slice(0, 6), total: found.length, ok: found.filter((x) => x.ok).length, trials: done, done: done, screened: screened, created: createdN, stopped: checkStop, K: K, opt: JSON.parse(JSON.stringify(o)), synthetic: synthetic, pairs: pairs, skipped: skipped } };
+      const sel = F.fxcore.minerPick(found, o, trialsAll, minerScore, 6);
+      minerState = { open: true, status: 'done', res: { cands: sel.pick, total: sel.found.length, ok: sel.found.filter((x) => x.ok).length, trials: done, done: done, screened: screened, created: createdN, stopped: checkStop, K: K, opt: JSON.parse(JSON.stringify(o)), synthetic: synthetic, pairs: pairs, skipped: skipped } };
       logEvent('fx.miner', 'Chercheur de FX : ' + done + ' combinaisons, ' + minerState.res.ok + ' conformes', { opt: o });
     } catch (e) {
       minerState = { open: true, status: 'err', msg: e.message, res: null };

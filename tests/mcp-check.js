@@ -125,6 +125,96 @@ const SYN = { pair: 'EUR/USD', source: 'synthetic', dateFrom: '2019-01-01', date
     const out = JSON.parse(execFileSync(process.execPath, [path.join(__dirname, '..', 'mcp', 'cli.js'), 'run_backtest', JSON.stringify({ strategy: { preset: 'rsi' }, market: SYN, record: false })], { env: Object.assign({}, process.env, { FOREXIA_MCP_DATA: dataDir }) }).toString());
     ok(out.stats.trades > 0);
   });
+  // ---------------- démarche FX (batchs, époques, analyseurs, retraits, FX, chercheur)
+  const MK = { pair: 'EUR/USD', source: 'synthetic', capital: 10000, leverage: 10 };
+  let B1, B2, B3, FXID;
+  await test('fx_method', async () => { const m = await call('fx_method', {}); ok(m.steps.length >= 8 && m.tools.includes('run_batch')); });
+  await test('run_batch : 16 périodes de 9 mois, plage 2005–2020, reproductible', async () => {
+    const r = await call('run_batch', { strategy: { preset: 'ma' }, market: MK, n: 16, months: 9, yearFrom: 2005, yearTo: 2020, seed: 7 });
+    B1 = r.batch.id;
+    ok(r.simulations.length === 16 && r.simulations.every((s) => s.months === 9 && s.from >= '2005' && s.to <= '2020-12-31'), JSON.stringify(r.simulations.slice(0, 2)));
+    ok(r.batch.stats.n === 16 && Number.isFinite(r.batch.stats.medianReturnPct));
+    const again = await call('run_batch', { strategy: { preset: 'ma' }, market: MK, n: 16, months: 9, yearFrom: 2005, yearTo: 2020, seed: 7, name: 'copie' });
+    ok(again.simulations.map((s) => s.from).join() === r.simulations.map((s) => s.from).join(), 'même graine, mêmes périodes');
+  });
+  await test('run_batch sameAs (levier 20) + compare_batches période par période', async () => {
+    const r = await call('run_batch', { strategy: { preset: 'ma' }, market: Object.assign({}, MK, { leverage: 20 }), sameAs: B1 });
+    B2 = r.batch.id;
+    ok(r.batch.periodsOf === B1 && r.simulations.length === 16);
+    const c = await call('compare_batches', { ids: [B1, B2] });
+    ok(c.batches.length === 2 && c.headToHead.length === 1 && c.headToHead[0].samePeriods === 16 && c.ranking.length === 2, JSON.stringify(c.headToHead));
+  });
+  await test('list_batches / get_batch / rename_batch', async () => {
+    const l = await call('list_batches', {}); ok(l.length === 3);
+    const g = await call('get_batch', { id: B1 }); ok(g.simulations.length === 16 && g.strategy.longEntry && g.market.source === 'synthetic');
+    const n = await call('rename_batch', { id: B1, name: 'MA levier 10', note: 'référence' }); ok(n.name === 'MA levier 10' && n.note === 'référence');
+  });
+  await test('time_analysis + set_eras / get_eras', async () => {
+    const t = await call('time_analysis', { id: B1 });
+    ok(t.byYear.length >= 5 && t.byEra.length >= 2 && t.verdict.length && !/<b>/.test(t.verdict.join(' ')), JSON.stringify(t).slice(0, 300));
+    ok(t.byEra.some((e) => e.events.length), 'événements par époque');
+    await call('set_eras', { eras: [{ name: 'Avant crise', from: '', to: '2008-08-31' }, { name: 'Crise et après', from: '2008-09-01', to: '2014-12-31' }, { name: 'Récent', from: '2015-01-01', to: '' }] });
+    const g = await call('get_eras', {}); ok(g.custom && g.eras.length === 3 && g.eras[0].name === 'Avant crise');
+    const t2 = await call('time_analysis', { ids: [B1, B2] }); ok(t2.n === 32 && t2.byEra.map((e) => e.era).join() === 'Avant crise,Crise et après,Récent', t2.byEra.map((e) => e.era).join());
+  });
+  await test('market_events (+ détection)', async () => {
+    const e = await call('market_events', { pair: 'EUR/USD', from: '2008-01-01', to: '2009-12-31', minImportance: 3 });
+    ok(e.events.some((x) => /Lehman/i.test(x.title)), JSON.stringify(e.events.map((x) => x.title)));
+    const d = await call('market_events', { pair: 'EUR/USD', source: 'synthetic', detect: true }); ok(Array.isArray(d.detected));
+  });
+  await test('analyze_simulation + apply_proposal sur tout le batch', async () => {
+    const g = await call('get_batch', { id: B1 }), worst = g.simulations.slice().sort((a, b) => a.returnPct - b.returnPct)[0].index;
+    const a = await call('analyze_simulation', { id: B1, index: worst });
+    ok(a.verdict && a.sections.length && Array.isArray(a.proposals), JSON.stringify(a).slice(0, 300));
+    const r = await call('apply_proposal', { id: B1, index: worst, proposal: 'ema200', scope: 'batch', saveAsBatch: true });
+    ok(r.simulations.length === 16 && r.summary.n === 16 && r.newBatch && r.newBatch.periodsOf === B1 && /EMA\(200\)/.test(r.strategyAfter.longEntry), JSON.stringify(r.summary));
+    B3 = r.newBatch.id;
+  });
+  await test('era_analysis', async () => {
+    const r = await call('era_analysis', { id: B1, maxPerEra: 4 });
+    ok(r.eras.length >= 2 && r.market.length >= 6 && r.fixes.length >= 5 && r.fixes[0].perEra.length === r.eras.length, JSON.stringify(r).slice(0, 300));
+  });
+  await test('simulate_withdrawal + compare_withdrawals + save_withdraw_mechanic', async () => {
+    const s = await call('simulate_withdrawal', { id: B1, mechanic: { mode: 'periodic', every: 'month', type: 'excess', value: 50 } });
+    ok(s.simulations.length === 16 && s.overall.withdrawnPerMonthEur >= 0 && s.desc.includes('excédent'), JSON.stringify(s.overall));
+    const c = await call('compare_withdrawals', { id: B1 });
+    ok(c.ranking.length >= 7 && c.best && c.ranking[0].score >= c.ranking[c.ranking.length - 1].score, JSON.stringify(c.ranking.map((x) => x.mechanic)));
+    const p = await call('save_withdraw_mechanic', { name: 'Excédent 50', mechanic: { mode: 'periodic', type: 'excess', value: 50 } });
+    ok(p.id && (await call('list_withdraw_mechanics', {})).length === 1);
+  });
+  await test('build_fx (mécanique enregistrée, capital 25 000) + fx_projection + list / get / rename / delete', async () => {
+    const f = await call('build_fx', { id: B1, mechanic: 'Excédent 50', capital: 25000, save: true });
+    FXID = f.id;
+    ok(f.saved && f.capital === 25000 && f.recommendedMonths >= 1 && f.confidence.score >= 0 && f.scenarios.length === 7 && f.income.method === 'Excédent 50', JSON.stringify(f).slice(0, 400));
+    ok(f.backAtEndEur.usual > 0 && f.backAtEndEur.worst <= f.backAtEndEur.good && /simul/.test(f.solidity));
+    const p = await call('fx_projection', { id: FXID, capital: 50000, q: 0.9 }); ok(p.capital === 50000 && p.q === 0.9 && Number.isFinite(p.backEur));
+    const low = await call('fx_projection', { id: FXID, capital: 100 }); ok(low.capital === 10000 && low.note, 'capital minimum');
+    const l = await call('list_fx', {}); ok(l.length === 1 && l[0].by === 'agent');
+    const g = await call('get_fx', { id: FXID }); ok(g.strategyRules && g.strategyRules.longEntry && g.withdrawMechanic.type === 'excess');
+    ok((await call('rename_fx', { id: FXID, name: 'Plan prudent' })).name === 'Plan prudent');
+    const nf = await call('build_fx', { id: B3, mechanic: 'none' }); ok(!nf.saved && nf.income.desc === 'sans retrait');
+  });
+  await test('mine_fx (rapide, synthétique) + save_fx avec la stratégie créée', async () => {
+    const r = await call('mine_fx', { budget: 5000, maxRisk: 5, minConf: 30, months: 9, maxLev: 20, pair: 'GBP/USD', source: 'synthetic', effort: 'fast' });
+    ok(r.combinations > 100 && r.candidates.length >= 1 && r.trials > r.combinations && r.candidates[0].pair === 'GBP/USD', JSON.stringify(r).slice(0, 300));
+    const gen = r.candidates.findIndex((c) => c.createdStrategy) + 1 || 1;
+    const s = await call('save_fx', { candidate: gen, saveStrategy: true });
+    ok(s.saved.id && (await call('list_fx', {})).length === 2);
+    if (r.candidates[gen - 1].createdStrategy) ok(s.strategySaved && (await call('list_strategies', {})).some((x) => x.name === s.strategySaved));
+  });
+  await test('note_add / note_list', async () => {
+    await call('note_add', { text: 'Levier 20 : plus de pertes que levier 10 sur les mêmes périodes', tags: ['levier'], refs: [B1, B2] });
+    await call('note_add', { text: 'Le filtre EMA 200 aide surtout avant 2008', tags: ['époques'] });
+    ok((await call('note_list', { tag: 'levier' })).length === 1 && (await call('note_list', { query: 'ema' })).length === 1);
+  });
+  await test('delete_fx / delete_batch', async () => {
+    ok((await call('delete_fx', { id: FXID })).deleted === 'Plan prudent');
+    await call('delete_batch', { id: B3 }); ok((await call('list_batches', {})).length === 3);
+  });
+  await test('forexia_sync sans passerelle : message clair', async () => {
+    const r = await rpc('tools/call', { name: 'forexia_sync', arguments: {} });
+    ok(r.result.isError && /FOREXIA_BRIDGE_TOKEN/.test(r.result.content[0].text));
+  });
   await test('outils MT5 sans passerelle : message clair', async () => {
     const r = await rpc('tools/call', { name: 'mt5_status', arguments: {} });
     ok(r.result.isError && /FOREXIA_BRIDGE_TOKEN/.test(r.result.content[0].text));

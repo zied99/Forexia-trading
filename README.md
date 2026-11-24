@@ -489,6 +489,11 @@ bridge/             passerelle locale Forexia <-> MetaTrader 5
 
 `mcp/forexia-mcp.js` donne à un agent IA (Claude Code, Claude Desktop…) l'accès à tout le moteur : backtests, lots
 aléatoires, Améliorer, robustesse, recommandations, EA MT5, passerelle MT5. Installation et outils : [mcp/README.md](mcp/README.md).
+Depuis la version 1.3, il couvre aussi toute la démarche FX de la page (55 outils) : batchs (dont « mêmes
+périodes qu'un autre batch » pour ne changer qu'une chose), comparaison de batchs, analyse temporelle et
+époques, événements de marché, Analyseur et analyseur d'époque, resimulation avec retrait et comparaison des
+mécaniques, construction et projection de FX, chercheur de FX, carnet de déductions de l'agent, et échange avec
+la page par la base de la passerelle (`forexia_sync`). Ces calculs sont partagés avec la page dans `js/fxcore.js`.
 
 ## Historique des versions
 

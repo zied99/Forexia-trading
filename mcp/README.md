@@ -3,7 +3,8 @@
 Donne à un agent IA (Claude Code, Claude Desktop ou tout client compatible MCP) l'accès complet au moteur
 de Forexia : backtests, lots de périodes aléatoires, « Améliorer », robustesse sur d'autres paires,
 recommandations, stratégies enregistrées, génération de l'EA MetaTrader 5 et, si la passerelle tourne,
-données du courtier, déploiement et test dans MT5.
+données du courtier, déploiement et test dans MT5. Et toute la démarche « FX » de la page : batchs, comparaisons
+temporelles, époques, analyseurs, retraits, FX, chercheur de FX, avec échange des résultats avec la page.
 
 Le serveur utilise **exactement les mêmes fichiers de calcul que le site** (`js/*.js`) : un backtest lancé par
 l'agent donne le même résultat que sur https://zied99.github.io/Forexia-trading/ avec les mêmes réglages.
@@ -95,6 +96,31 @@ node mcp/forexia-mcp.js --http 3333 --token UN_SECRET_LONG
 | `improve_across_periods` | Améliorations communes aux périodes perdantes / à fort impact, puis resimulation. |
 | `mt5_status` / `mt5_deploy_ea` / `mt5_run_test` / `mt5_export_calendar` | Passerelle MT5 : terminaux, envoi + compilation de l'EA, testeur de stratégie MT5, calendrier économique. |
 
+### Chercher un FX (plan d'investissement) comme un humain
+
+Tout ce que vous faites dans la page pour trouver un FX : lancer des batchs, comparer les époques et les batchs,
+comprendre les pertes, choisir la manière de retirer, le capital et la durée. Mêmes calculs que la page
+(`js/fxcore.js`, `js/advisor.js`, `js/analyzer.js`, `js/events.js`, `js/confidence.js`).
+
+| Outil | Rôle |
+|---|---|
+| `fx_method` | Méthode pas à pas pour trouver un FX, précautions, liste des outils. **À lire avant de chercher un FX.** |
+| `run_batch` | Batch : une stratégie sur N périodes de `months` mois (ou `monthsList`), dans une plage `yearFrom`–`yearTo`, graine `seed` reproductible, périodes données (`periods`) ou **les mêmes qu'un autre batch** (`sameAs`) pour ne changer qu'une chose (levier, capital, stratégie, paire, retrait). Enregistré. |
+| `list_batches` / `get_batch` / `rename_batch` / `delete_batch` | Batchs enregistrés (agent et, après `forexia_sync`, ceux de la page) : rendement médian, part gagnante, capital moyen, chaque simulation. |
+| `compare_batches` | Batchs côte à côte, par époque, et période par période quand ils ont les mêmes périodes (qui gagne le plus souvent, écart médian), classement « régularité ». |
+| `time_analysis` | Analyse temporelle : par année, par époque (avec les grands événements de marché), rupture, tendance avec les années, années non couvertes, verdict. |
+| `get_eras` / `set_eras` | Époques de l'analyse (les vôtres après `forexia_sync`, sinon 2000 / 2008 / 2013 / 2020). |
+| `market_events` | Événements du marché depuis 1971 et mouvements exceptionnels détectés (`detect`). |
+| `analyze_simulation` / `apply_proposal` | L'Analyseur : d'où vient la baisse, où la stratégie gagne et perd, corrections ; test d'une correction sur une simulation ou tout le batch (`saveAsBatch`). |
+| `era_analysis` | Analyseur d'époque : ce qui change entre époques perdantes et gagnantes, corrections testées époque par époque. |
+| `simulate_withdrawal` / `compare_withdrawals` | « Resimuler avec un retrait » et « Comparer » : la meilleure manière de retirer sur les mêmes simulations. |
+| `save_withdraw_mechanic` / `list_withdraw_mechanics` | Mécaniques de retrait enregistrées. |
+| `build_fx` / `fx_projection` | FX à partir d'un batch et d'une mécanique : durée recommandée, scénarios en €, revenu, capital au bout d'un an avec / sans retrait, risque 1–7, score de confiance ; projection pour un capital et un scénario (le point à glisser). |
+| `list_fx` / `get_fx` / `save_fx` / `rename_fx` / `delete_fx` | FX enregistrés ; `save_fx` garde un candidat de `mine_fx` (et sa stratégie créée). |
+| `mine_fx` | Le chercheur de FX : budget, risque, confiance, durée en mois, revenu, levier jusqu'à 1:500, paire ou toutes, manières de retirer ; crée aussi des variantes de stratégies. |
+| `note_add` / `note_list` | Carnet de déductions de l'agent, relu d'une itération à l'autre. |
+| `forexia_sync` | Échange avec la page par la base de la passerelle MT5 (1.6) : `pull` récupère vos FX, batchs, époques, mécaniques, événements ; `push` y envoie ceux de l'agent (visibles dans la page). |
+
 ### Décrire une stratégie (`strategy`)
 
 - un modèle : `{ "preset": "macd" }` ;
@@ -140,9 +166,23 @@ Le dossier [`agent/`](../agent/README.md) contient un projet complet pour un age
 > 5. Garde le meilleur avec `save_strategy` et donne-moi : les règles, le résultat médian, la part de périodes
 >    gagnantes, le pire drawdown, et pourquoi tu le penses robuste. Pas de déploiement MT5 sans mon accord.
 
+### Exemple : trouver un FX
+
+> Tu as accès à Forexia par le serveur MCP « forexia ». Lis `fx_method`, puis `forexia_sync` (pull) pour voir
+> mes batchs, mes époques et mes FX. Objectif : un FX pour 20 000 €, risque 4/7 au plus, revenu mensuel régulier.
+> 1. Pour 3 ou 4 stratégies, `run_batch` de 30 périodes de 12 mois sur tout l'historique (cours `online`).
+> 2. `time_analysis` de chacun ; `era_analysis` du meilleur ; teste les corrections recommandées (`apply_proposal`).
+> 3. Sur les mêmes périodes (`sameAs`) : levier 1:5, 1:10, 1:20 ; durée 6, 12, 18 mois ; `compare_batches`.
+> 4. `compare_withdrawals` sur le meilleur batch, puis `build_fx` avec la meilleure mécanique et `capital: 20000`.
+> 5. Lance aussi `mine_fx` avec mes critères et vérifie ses propositions de la même façon.
+> 6. Note chaque déduction (`note_add`). Garde le meilleur plan (`save=true`), `forexia_sync` push, et explique-moi
+>    pourquoi : époques gagnées, confiance, pire cas, revenu.
+
 ## Bon à savoir
 
-- Les stratégies et l'historique de l'agent sont dans `~/.forexia-mcp` (fichiers JSON), séparés de ceux du site.
+- Les stratégies, l'historique, les batchs, les FX, les époques, les mécaniques de retrait et le carnet de
+  l'agent sont dans `~/.forexia-mcp` (fichiers JSON). `forexia_sync` les échange avec la page (passerelle 1.6,
+  `FOREXIA_BRIDGE_TOKEN`) : la page les reprend en se reconnectant à la passerelle.
 - Les résultats passés ne garantissent rien : l'agent doit privilégier une stratégie gagnante sur la plupart
   des périodes plutôt qu'un seul gros résultat, et tout EA doit être testé en démo avant un compte réel.
 - `mt5_run_test` ferme MetaTrader 5 pendant le test si `closeTerminal` vaut `true`.
