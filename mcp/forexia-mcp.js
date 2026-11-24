@@ -710,7 +710,7 @@ const TOOLS = [
 ];
 
 // ---------------------------------------------------------------- démarche FX (batchs, époques, retraits, FX, chercheur) : mcp/fx-tools.js
-TOOLS.push(...require('./fx-tools')({ F, D, E, readJson, writeJson, store, resolveStrategy, strategyView, statsView, settingsOf, fail, r2, iso, today, onlineHistory, csvHistory, bridge, bridgeTerminal, toBar, subBars, obj, strategySchema, marketSchema }));
+TOOLS.push(...require('./fx-tools')({ callTool: (n, x) => TOOLS.find((t) => t.name === n).handler(x), DATA_DIR, F, D, E, readJson, writeJson, store, resolveStrategy, strategyView, statsView, settingsOf, fail, r2, iso, today, onlineHistory, csvHistory, bridge, bridgeTerminal, toBar, subBars, obj, strategySchema, marketSchema }));
 
 // ---------------------------------------------------------------- protocole MCP (JSON-RPC 2.0)
 const INSTRUCTIONS = 'Forexia : backtests de stratégies Forex. Commencez par forexia_help. Une stratégie se donne en règles techniques, en français (frenchText), ' +

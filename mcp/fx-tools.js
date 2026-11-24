@@ -11,7 +11,7 @@
 'use strict';
 
 module.exports = function fxTools(ctx) {
-  const { F, D, E, readJson, writeJson, store, resolveStrategy, strategyView, statsView, settingsOf, fail, r2, iso, today, onlineHistory, csvHistory, bridge, bridgeTerminal, toBar, subBars, obj, strategySchema, marketSchema } = ctx;
+  const { callTool, F, D, E, readJson, writeJson, store, resolveStrategy, strategyView, statsView, settingsOf, fail, r2, iso, today, onlineHistory, csvHistory, bridge, bridgeTerminal, toBar, subBars, obj, strategySchema, marketSchema } = ctx;
   const FC = F.fxcore, A = F.analyzer, ADV = F.advisor, EV = F.events;
   const path = require('path');
 
@@ -152,7 +152,18 @@ module.exports = function fxTools(ctx) {
   const simRow = (e, i) => ({ index: i, from: e.from, to: e.to, months: Math.max(1, Math.round(FC.durationDays(e.from, e.to) / 30.4375)), returnPct: r2(e.returnPct), maxDrawdownPct: r2(e.maxDrawdownPct), trades: e.trades, winRate: r2(e.winRate), withdrawn: r2(e.withdrawn || 0) });
   const batchHead = (b) => ({ id: b.id, name: b.name, at: b.at, by: b.by || (b.entries.some((e) => e.source === 'mcp') ? 'agent' : 'page'), periodsOf: b.periodsOf, note: b.note, stats: batchStats(b.entries) });
   /** Simulations d'un batch choisies par index (défaut : toutes). */
-  const pickEntries = (b, idx) => (idx && idx.length ? idx.map((i) => b.entries[i] || fail('Index ' + i + ' hors du batch (0 à ' + (b.entries.length - 1) + ').')) : b.entries);
+  /** Simulations d'un batch : par index, puis filtres facultatifs f = {era (nom), yearFrom, yearTo, minReturn, maxReturn}. */
+  function pickEntries(b, idx, f) {
+    let L = idx && idx.length ? idx.map((i) => b.entries[i] || fail('Index ' + i + ' hors du batch (0 à ' + (b.entries.length - 1) + ').')) : b.entries;
+    f = f || {};
+    if (f.era) { const er = ADV.normEras(erasNow()).find((x) => x.label === f.era) || fail('Époque inconnue : « ' + f.era + ' » (get_eras).'); L = L.filter((e) => { const m = ADV.midDate(e); return m >= er.fromD && m <= er.toD; }); }
+    if (f.yearFrom) L = L.filter((e) => +e.from.slice(0, 4) >= f.yearFrom);
+    if (f.yearTo) L = L.filter((e) => +e.to.slice(0, 4) <= f.yearTo);
+    if (f.minReturn != null) L = L.filter((e) => e.returnPct >= f.minReturn);
+    if (f.maxReturn != null) L = L.filter((e) => e.returnPct <= f.maxReturn);
+    if (!L.length) fail('Aucune simulation ne correspond à ce choix.');
+    return L;
+  }
 
   async function runBatch(a) {
     const strat = resolveStrategy(a.strategy), m = Object.assign({}, a.market || {});
@@ -180,6 +191,22 @@ module.exports = function fxTools(ctx) {
     const all = batches.get(); all.push(b); batches.set(all);
     return { batch: batchHead(b), simulations: entries.map(simRow), skipped: skipped, data: h.label, history: h.first + ' → ' + h.last,
       hint: 'Mêmes périodes pour une autre stratégie / un autre levier : run_batch avec sameAs="' + b.id + '". Puis compare_batches, time_analysis, simulate_withdrawal.' };
+  }
+
+  function compareBatches(B, eras) {
+    const out = { batches: B.map((b) => Object.assign(batchHead(b), { byEra: timeAnalysis(b.entries, eras, b.entries[0].pair).byEra.map((x) => ({ era: x.era, n: x.n, winRatePct: x.winRatePct, medianReturnPct: x.medianReturnPct })) })) };
+    const per = (b) => new Map(b.entries.map((e) => [e.from + '|' + e.to, e]));
+    out.headToHead = [];
+    for (let i = 0; i < B.length; i++) for (let j = i + 1; j < B.length; j++) {
+      const P = per(B[i]), Q = per(B[j]), common = [...P.keys()].filter((k) => Q.has(k));
+      if (common.length < 3) continue;
+      const d = common.map((k) => Q.get(k).returnPct - P.get(k).returnPct);
+      out.headToHead.push({ a: B[i].name, b: B[j].name, samePeriods: common.length, bBetterIn: d.filter((v) => v > 0).length, aBetterIn: d.filter((v) => v < 0).length, medianDiffPct: r2(median(d)), meanDiffPct: r2(mean(d)) });
+    }
+    const rank = B.map((b) => { const s = batchStats(b.entries); return { name: b.name, id: b.id, robust: r2(s.medianReturnPct + 0.2 * (s.winRatePct - 50) - 0.3 * s.meanMaxDrawdownPct) }; }).sort((x, y) => y.robust - x.robust);
+    out.ranking = rank;
+    out.note = 'robust = rendement médian + 0,2 × (part gagnante − 50) − 0,3 × baisse maximale moyenne : préfère la régularité à un gros résultat isolé.';
+    return out;
   }
 
   // ---------------------------------------------------------------- analyse temporelle et époques
@@ -222,6 +249,18 @@ module.exports = function fxTools(ctx) {
       capitalKept: g.kept + ' / ' + g.n, halfLost: g.ruined + ' / ' + g.n };
   }
 
+  /** Retraits époque par époque : ce que la mécanique donne dans chaque époque. */
+  function wdByEra(R, capital) {
+    const eras = ADV.normEras(erasNow()), out = [];
+    for (const er of eras) {
+      const G = R.filter((r) => { const m = ADV.midDate(r); return m >= er.fromD && m <= er.toD; });
+      if (!G.length) continue;
+      const g = FC.wdAgg(G);
+      out.push({ era: er.label, n: G.length, score: r2(g.score), usualBackPct: r2(median(G.map((r) => r.w.ret))), worstBackPct: r2(Math.min(...G.map((r) => r.w.ret))),
+        incomePerMonthEur: r2(g.perMonth), meanMaxDrawdownPct: r2(g.dd), capitalKept: g.kept + ' / ' + g.n });
+    }
+    return out;
+  }
   // ---------------------------------------------------------------- FX
   function trialsFor(name, extra) {
     const base = String(name || '').replace(/ \(améliorée\)$/, '').split(' + ')[0];
@@ -273,6 +312,8 @@ module.exports = function fxTools(ctx) {
   const strategyArg = strategySchema, marketArg = marketSchema;
   const wArg = { description: 'Mécanique de retrait : nom ou id enregistré (list_withdraw_mechanics), ou {mode:"periodic", every:"month"|"days", days, type:"excess"|"fixed"|"pct", value} (excess = % du gain du mois au-dessus du capital, fixed = somme en €, pct = % du compte), ou {pct, share, when} (au seuil de gain), ou "none".' };
   const idx = { type: 'array', items: { type: 'number' }, description: 'Index des simulations du batch (défaut : toutes).' };
+  const FILT = { era: { type: 'string', description: 'ne garder que les simulations de cette époque (nom, voir get_eras)' }, yearFrom: { type: 'number' }, yearTo: { type: 'number' },
+    minReturn: { type: 'number', description: 'rendement minimum (%)' }, maxReturn: { type: 'number', description: 'rendement maximum (%)' } };
 
   return [
     {
@@ -282,14 +323,15 @@ module.exports = function fxTools(ctx) {
       handler: async () => ({
         goal: 'Un FX = stratégie + paire + levier + capital + durée de placement + manière de retirer, testé sur de nombreuses périodes passées. Il donne ce que le client récupère au bout de la durée (pire cas, mauvais, le plus souvent, bon), le revenu mensuel, le risque (1 à 7) et un score de confiance statistique (DSR, Student, époques).',
         steps: [
-          '1. Hypothèse : stratégie (list_presets, list_strategies, frenchText) et paire. Un premier run_batch de 20 à 40 périodes de la durée visée (months) sur tout l\'historique.',
-          '2. time_analysis du batch : quelles années / époques gagnent ou perdent, rupture, événements de marché. Ajuster les époques si besoin (set_eras).',
-          '3. Comparer : nouveaux batchs sur LES MÊMES périodes (sameAs) en changeant une seule chose à la fois — levier, durée (months), capital, stratégie, paire —, puis compare_batches. Restreindre la plage (yearFrom / yearTo) pour vérifier une époque.',
-          '4. Comprendre les pertes : analyze_simulation sur les pires simulations, era_analysis sur le batch ; tester les corrections (apply_proposal, scope batch) et garder celles qui aident les époques perdantes sans abîmer les gagnantes.',
-          '5. Retraits : simulate_withdrawal puis compare_withdrawals (excédent 25/50/75 %, somme fixe, % du compte) sur le meilleur batch ; save_withdraw_mechanic pour la meilleure.',
-          '6. build_fx (batch + mécanique) : regarder confiance, risque, scénarios, revenu ; fx_projection pour le capital du client. Si la confiance est faible : plus de simulations, plus d\'années, cours réels (source online ou broker).',
-          '7. En parallèle, mine_fx explore toutes les combinaisons selon les critères (budget, risque, confiance, durée, revenu, levier, paire) ; vérifier ses propositions avec les étapes 2 à 6 avant de conclure.',
-          '8. Noter chaque déduction (note_add) pour ne pas refaire les mêmes essais ; save_fx / build_fx save=true pour garder le plan ; forexia_sync push pour le voir dans la page Forexia.',
+          '1. Choisir la stratégie : list_presets, list_strategies, frenchText ou règles. Premier run_batch de 20 à 40 périodes de la durée visée (months) sur tout l\'historique (cours online).',
+          '2. Constater : time_analysis (années, époques, rupture, événements), get_batch (pires et meilleures périodes), analyze_simulation sur les pires.',
+          '3. Affiner la stratégie progressivement : modify_strategy (ajouter un indicateur ou une condition, changer un réglage, stop / objectif / stop suiveur, achats ou ventes seulement, style), puis run_batch sameAs (mêmes périodes) et compare_batches. Garder seulement ce qui améliore la médiane ET la part gagnante.',
+          '4. Améliorer selon les propositions : improve_batch (« Améliorer » sur tout le batch), apply_proposal (une ou plusieurs corrections de l\'analyseur, scope batch), era_analysis (corrections par époque). Revalider chaque fois sur les mêmes périodes, puis sur de nouvelles périodes (autre seed).',
+          '5. Régler les éléments un par un avec vary_batch sur les mêmes périodes : levier, budget (capital), durée en mois, exposition, taille de position, paire, stratégie. subset_batch pour étudier une époque ou les périodes perdantes à part ; yearFrom / yearTo pour une plage.',
+          '6. Stratégie confirmée (régulière sur la plupart des époques, plusieurs seeds) : passer aux retraits. compare_withdrawals (avec byEra) puis simulate_withdrawal pour régler le type (excédent, somme fixe, % du compte, au seuil) et la valeur ; era / yearFrom pour régler selon l\'analyse temporelle ; vary_batch param withdraw pour l\'effet sur le batch.',
+          '7. build_fx (batch + meilleure mécanique, capital du client) : confiance, risque, scénarios, revenu ; fx_projection pour d\'autres budgets. Confiance faible : plus de simulations, plus d\'années, cours réels.',
+          '8. mine_fx explore toutes les combinaisons selon les critères ; ses propositions se revérifient avec les étapes 2 à 7.',
+          '9. Noter chaque déduction (note_add) ; save_strategy / save_fx ; forexia_sync push pour que l\'utilisateur voie tout dans la page.',
         ],
         cautions: [
           'Plus on essaie de combinaisons, plus un bon résultat peut venir du hasard : le score de confiance en tient compte (nombre d\'essais).',
@@ -297,8 +339,8 @@ module.exports = function fxTools(ctx) {
           'Une période choisie a posteriori n\'est pas reproductible : préférer un plan qui gagne dans la plupart des époques.',
           'Levier au-delà de 1:30 : hors limite européenne pour les particuliers.',
         ],
-        tools: ['run_batch', 'list_batches', 'get_batch', 'compare_batches', 'time_analysis', 'get_eras', 'set_eras', 'market_events', 'analyze_simulation', 'apply_proposal', 'era_analysis',
-          'simulate_withdrawal', 'compare_withdrawals', 'save_withdraw_mechanic', 'list_withdraw_mechanics', 'build_fx', 'fx_projection', 'list_fx', 'get_fx', 'save_fx', 'rename_fx', 'delete_fx', 'mine_fx', 'note_add', 'note_list', 'forexia_sync'],
+        tools: ['modify_strategy', 'run_batch', 'vary_batch', 'improve_batch', 'subset_batch', 'list_batches', 'get_batch', 'compare_batches', 'time_analysis', 'get_eras', 'set_eras', 'market_events', 'analyze_simulation', 'apply_proposal', 'era_analysis',
+          'simulate_withdrawal', 'compare_withdrawals', 'save_withdraw_mechanic', 'list_withdraw_mechanics', 'build_fx', 'fx_projection', 'list_fx', 'get_fx', 'save_fx', 'rename_fx', 'delete_fx', 'mine_fx', 'note_add', 'note_list', 'forexia_sync', 'import_ea'],
         currentEras: erasNow(),
       }),
     },
@@ -333,23 +375,7 @@ module.exports = function fxTools(ctx) {
       name: 'compare_batches',
       description: 'Compare des batchs côte à côte (chiffres, époques) ; si deux batchs ont les mêmes périodes (sameAs), comparaison période par période : qui gagne le plus souvent, écart médian. Pour déduire quel levier, quelle durée, quelle stratégie ou quelle paire est meilleure.',
       inputSchema: obj({ ids: { type: 'array', items: { type: 'string' } }, eras: { type: 'array', items: {}, description: 'époques (sinon celles enregistrées)' } }, ['ids']),
-      handler: async (a) => {
-        const B = (a.ids || []).map(getBatch);
-        if (B.length < 2) fail('Indiquez au moins deux batchs.');
-        const out = { batches: B.map((b) => Object.assign(batchHead(b), { byEra: timeAnalysis(b.entries, a.eras, b.entries[0].pair).byEra.map((x) => ({ era: x.era, n: x.n, winRatePct: x.winRatePct, medianReturnPct: x.medianReturnPct })) })) };
-        const per = (b) => new Map(b.entries.map((e) => [e.from + '|' + e.to, e]));
-        out.headToHead = [];
-        for (let i = 0; i < B.length; i++) for (let j = i + 1; j < B.length; j++) {
-          const P = per(B[i]), Q = per(B[j]), common = [...P.keys()].filter((k) => Q.has(k));
-          if (common.length < 3) continue;
-          const d = common.map((k) => Q.get(k).returnPct - P.get(k).returnPct);
-          out.headToHead.push({ a: B[i].name, b: B[j].name, samePeriods: common.length, bBetterIn: d.filter((v) => v > 0).length, aBetterIn: d.filter((v) => v < 0).length, medianDiffPct: r2(median(d)), meanDiffPct: r2(mean(d)) });
-        }
-        const rank = B.map((b) => { const s = batchStats(b.entries); return { name: b.name, id: b.id, robust: r2(s.medianReturnPct + 0.2 * (s.winRatePct - 50) - 0.3 * s.meanMaxDrawdownPct) }; }).sort((x, y) => y.robust - x.robust);
-        out.ranking = rank;
-        out.note = 'robust = rendement médian + 0,2 × (part gagnante − 50) − 0,3 × baisse maximale moyenne : préfère la régularité à un gros résultat isolé.';
-        return out;
-      },
+      handler: async (a) => { const B = (a.ids || []).map(getBatch); if (B.length < 2) fail('Indiquez au moins deux batchs.'); return compareBatches(B, a.eras); },
     },
     {
       name: 'time_analysis',
@@ -377,14 +403,20 @@ module.exports = function fxTools(ctx) {
     },
     {
       name: 'market_events',
-      description: 'Grands événements du marché des changes (base de Forexia depuis 1971 + mouvements exceptionnels détectés) pour une paire et une période. detect=true cherche les nouveaux mouvements exceptionnels dans l\'historique et les ajoute.',
-      inputSchema: obj({ pair: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, minImportance: { type: 'number', description: '1 à 3' }, detect: { type: 'boolean' }, source: { type: 'string', enum: ['online', 'synthetic', 'csv', 'broker'] } }),
+      description: 'Grands événements du marché des changes (base de Forexia depuis 1971 + mouvements exceptionnels détectés) pour une paire et une période. detect=true cherche les nouveaux mouvements exceptionnels dans l\'historique et les ajoute ; add ajoute un événement.',
+      inputSchema: obj({ pair: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, minImportance: { type: 'number', description: '1 à 3' }, detect: { type: 'boolean' },
+        add: { type: 'object', description: 'ajoute un événement (constaté par l\'agent) : {date, title, text, importance 1–3, currencies ["USD"]}' }, source: { type: 'string', enum: ['online', 'synthetic', 'csv', 'broker'] } }),
       handler: async (a) => {
         const pair = a.pair || 'EUR/USD', out = {};
         if (a.detect) {
           const h = await history({ pair: pair, source: a.source || 'online' }), daily = h.timeframe === 'D1' ? h.bars : D.resample(h.bars, 'D1');
           const r = EV.learn(evStore.get(), daily, pair); r.stored.scanned = Object.assign({}, evStore.get().scanned || {}, { [pair]: { from: h.first, to: h.last } });
           evStore.set(r.stored); out.detected = r.added.map((e) => e.date + ' ' + e.title);
+        }
+        if (a.add) {
+          const x = a.add; if (!/^\d{4}-\d{2}-\d{2}$/.test(x.date || '') || !x.title) fail('add : date (AAAA-MM-JJ) et title requis.');
+          const st = evStore.get(), ev = { id: 'u' + Date.now().toString(36), source: 'user', date: x.date, imp: Math.max(1, Math.min(3, Number(x.importance) || 2)), cur: x.currencies && x.currencies.length ? x.currencies : pair.split('/'), kind: 'Ajouté par l\'agent', title: x.title, text: x.text || '' };
+          st.items = (st.items || []).concat(ev); evStore.set(st); out.added = ev;
         }
         out.events = EV.list(evStore.get(), pair, { from: a.from, to: a.to, minImp: a.minImportance }).map((e) => ({ date: e.date, importance: e.imp, kind: e.kind, title: e.title, text: e.text, source: e.source }));
         return out;
@@ -413,18 +445,20 @@ module.exports = function fxTools(ctx) {
     {
       name: 'apply_proposal',
       description: 'Teste une correction de l\'analyseur (id de analyze_simulation) ou de l\'analyseur d\'époque (adx25, adx20, ema200, long, short, volhi, vollo, slope, sl, trail) sur une simulation ou sur tout le batch : résultat avant / après pour chaque simulation. saveAsBatch=true enregistre le batch corrigé (mêmes périodes).',
-      inputSchema: obj({ id: { type: 'string' }, proposal: { type: 'string' }, index: { type: 'number', description: 'simulation où la proposition a été trouvée (défaut 0)' }, scope: { type: 'string', enum: ['one', 'batch'] }, saveAsBatch: { type: 'boolean' } }, ['id', 'proposal']),
+      inputSchema: obj({ id: { type: 'string' }, proposal: { type: 'string' }, index: { type: 'number', description: 'simulation où la proposition a été trouvée (défaut 0)' }, proposals: { type: 'array', items: { type: 'string' }, description: 'plusieurs corrections combinées (à la place de proposal)' }, scope: { type: 'string', enum: ['one', 'batch'] }, saveAsBatch: { type: 'boolean' } }, ['id']),
       handler: async (a) => {
         const b = getBatch(a.id), e0 = b.entries[a.index || 0] || fail('Index hors du batch.'), c0 = await reload(e0);
         if (!c0) fail('Simulation impossible à recharger.');
         const P = A.analyze(c0.sim.bars, c0.strat, c0.sim.settings, c0.sim.res).proposals.concat(A.eraCandidates(c0.strat, null));
-        const p = P.find((x) => x.id === a.proposal) || fail('Proposition inconnue : ' + a.proposal + ' (disponibles : ' + P.map((x) => x.id).join(', ') + ').');
+        const ids = a.proposals && a.proposals.length ? a.proposals : [a.proposal || fail('Indiquez proposal ou proposals.')];
+        const PS = ids.map((id) => P.find((x) => x.id === id) || fail('Proposition inconnue : ' + id + ' (disponibles : ' + P.map((x) => x.id).join(', ') + ').'));
+        const p = { title: PS.map((x) => strip(x.title)).join(' + ') };
         const T = a.scope === 'batch' ? b.entries : [e0], rows = [], newEntries = [];
         let stratAfter = null;
         for (const e of T) {
           const c = e === e0 ? c0 : await reload(e);
           if (!c) continue;
-          const y = A.applyProposal(c.strat, c.sim.settings, p);
+          const y = PS.reduce((acc, q) => A.applyProposal(acc.strat, acc.settings, q), { strat: c.strat, settings: c.sim.settings });
           stratAfter = stratAfter || Object.assign({}, y.strat, { name: c.strat.name + ' + ' + strip(p.title).slice(0, 40) });
           const res = c.h.broker ? F.broker.runBrokerBacktest(c.sim.bars, y.strat, y.settings, c.h.broker) : F.backtest.runBacktest(c.sim.bars, y.strat, y.settings);
           rows.push({ from: e.from, to: e.to, before: r2(e.returnPct), after: r2(res.stats.returnPct), ddBefore: r2(e.maxDrawdownPct), ddAfter: r2(res.stats.maxDrawdownPct) });
@@ -482,22 +516,22 @@ module.exports = function fxTools(ctx) {
     {
       name: 'simulate_withdrawal',
       description: '« Resimuler avec un retrait » : relance les simulations d\'un batch (toutes ou certaines) avec une mécanique de retrait ; pour chacune : ce qui reste sur le compte, retiré au total, capital au bout d\'un an avec et sans retrait ; et les indicateurs d\'ensemble.',
-      inputSchema: obj({ id: { type: 'string' }, mechanic: wArg, indexes: idx }, ['id', 'mechanic']),
+      inputSchema: obj(Object.assign({ id: { type: 'string' }, mechanic: wArg, indexes: idx }, FILT), ['id', 'mechanic']),
       handler: async (a) => {
-        const b = getBatch(a.id), w = normW(a.mechanic), L = pickEntries(b, a.indexes), skipped = [];
+        const b = getBatch(a.id), w = normW(a.mechanic), L = pickEntries(b, a.indexes, a), skipped = [];
         const R = await wdRows(L, w, (e) => skipped.push(e.from));
         if (!R.length) fail('Simulations impossibles à relancer.');
         const cap = median(R.map((r) => r.capital));
-        return { mechanic: wName(a.mechanic, w), desc: FC.wdDesc(w), capital: cap, overall: aggView(FC.wdAgg(R), cap), skipped: skipped,
+        return { mechanic: wName(a.mechanic, w), desc: FC.wdDesc(w), capital: cap, overall: aggView(FC.wdAgg(R), cap), byEra: wdByEra(R, cap), skipped: skipped,
           simulations: FC.fxSimsFromRows(R).map((s) => ({ from: s.from, to: s.to, months: s.m, backPct: r2(s.b - 100), withdrawnTotalPct: r2(s.tot), incomePerMonthEur: r2((s.inc * cap) / 100), accountAtEndPct: r2(s.acc - 100), oneYearWithPct: r2(s.y1), oneYearWithoutPct: r2(s.y1b), estimatedOneYear: s.est })) };
       },
     },
     {
       name: 'compare_withdrawals',
       description: 'Compare plusieurs mécaniques de retrait sur les mêmes simulations d\'un batch (bouton « Comparer ») et désigne la meilleure (note d\'équilibre : rapporte, risque, capital préservé). Sans mechanics : excédent 25/50/75 %, somme fixe 0,5/1/2 % du capital par mois, 1 % du compte par mois.',
-      inputSchema: obj({ id: { type: 'string' }, mechanics: { type: 'array', items: {}, description: 'liste de mécaniques (voir simulate_withdrawal)' }, indexes: idx }, ['id']),
+      inputSchema: obj(Object.assign({ id: { type: 'string' }, mechanics: { type: 'array', items: {}, description: 'liste de mécaniques (voir simulate_withdrawal)' }, indexes: idx, byEra: { type: 'boolean', description: 'meilleure mécanique pour chaque époque' } }, FILT), ['id']),
       handler: async (a) => {
-        const b = getBatch(a.id), L = pickEntries(b, a.indexes), cap0 = median(L.map((e) => e.capital || 10000));
+        const b = getBatch(a.id), L = pickEntries(b, a.indexes, a), cap0 = median(L.map((e) => e.capital || 10000));
         const list = a.mechanics && a.mechanics.length ? a.mechanics : FC.minerMechs({ budget: cap0, prefs: { excess: true, fixed: true, pct: true, none: true } }).map((x) => x.w ? Object.assign({ name: x.name }, x.w) : 'none');
         const out = [];
         for (const x of list) {
@@ -505,7 +539,17 @@ module.exports = function fxTools(ctx) {
           if (R.length) out.push(Object.assign({ mechanic: x === 'none' ? 'Sans retrait' : wName(x, w), desc: FC.wdDesc(w), w: w }, aggView(FC.wdAgg(R), median(R.map((r) => r.capital)))));
         }
         out.sort((p, q) => q.score - p.score);
-        return { simulations: L.length, ranking: out, best: out[0] ? out[0].mechanic : null, note: 'score = rendement total (compte + retraits) − ½ baisse maximale + 20 × part du capital préservé − 25 × part des cas où la moitié est perdue.' };
+        let perEra;
+        if (a.byEra) {
+          perEra = {};
+          for (const x of list) {
+            const w = normW(x), R = await wdRows(L, w), name = x === 'none' ? 'Sans retrait' : wName(x, w);
+            for (const g of wdByEra(R, median(R.map((r) => r.capital)))) (perEra[g.era] = perEra[g.era] || []).push(Object.assign({ mechanic: name }, g));
+          }
+          for (const k of Object.keys(perEra)) perEra[k].sort((p, q) => q.score - p.score);
+          perEra = Object.keys(perEra).map((k) => ({ era: k, best: perEra[k][0].mechanic, ranking: perEra[k].map((x) => ({ mechanic: x.mechanic, score: x.score, usualBackPct: x.usualBackPct, incomePerMonthEur: x.incomePerMonthEur, capitalKept: x.capitalKept })) }));
+        }
+        return { simulations: L.length, ranking: out, byEra: perEra, best: out[0] ? out[0].mechanic : null, note: 'score = rendement total (compte + retraits) − ½ baisse maximale + 20 × part du capital préservé − 25 × part des cas où la moitié est perdue.' };
       },
     },
     {
@@ -521,10 +565,10 @@ module.exports = function fxTools(ctx) {
     {
       name: 'build_fx',
       description: 'Construit un FX (plan d\'investissement) à partir d\'un batch et d\'une mécanique de retrait : durée recommandée (mois), part de réussite, scénarios (pire, mauvais, le plus souvent, bon) en € pour le capital, revenu mensuel, capital au bout d\'un an avec / sans retrait, risque 1–7, score de confiance (DSR, Student, époques, corrigé du nombre d\'essais). save=true l\'enregistre.',
-      inputSchema: obj({ id: { type: 'string' }, mechanic: wArg, indexes: idx, capital: { type: 'number', description: 'capital du client (€) pour les montants (≥ capital des simulations)' }, name: { type: 'string' }, save: { type: 'boolean' },
-        trials: { type: 'number', description: 'nombre d\'essais à déclarer pour la confiance (défaut : variantes de la stratégie dans l\'historique × 2 + batchs comparés)' } }, ['id', 'mechanic']),
+      inputSchema: obj(Object.assign({ id: { type: 'string' }, mechanic: wArg, indexes: idx, capital: { type: 'number', description: 'capital du client (€) pour les montants (≥ capital des simulations)' }, name: { type: 'string' }, save: { type: 'boolean' },
+        trials: { type: 'number', description: 'nombre d\'essais à déclarer pour la confiance (défaut : variantes de la stratégie dans l\'historique × 2 + batchs comparés)' } }, FILT), ['id', 'mechanic']),
       handler: async (a) => {
-        const b = getBatch(a.id), w = normW(a.mechanic), L = pickEntries(b, a.indexes), R = await wdRows(L, w);
+        const b = getBatch(a.id), w = normW(a.mechanic), L = pickEntries(b, a.indexes, a), R = await wdRows(L, w);
         if (R.length < 3) fail('Il faut au moins 3 simulations relancées (batch plus grand).');
         const e0 = L[0], nameW = a.mechanic === 'none' || !w ? 'Sans retrait' : wName(a.mechanic, w);
         const fx = FC.fxFromRows(R, { name: e0.name, strategy: e0.strategy, config: e0.config, pair: e0.pair, leverage: e0.leverage, dataLabel: e0.data, synthetic: L.some((e) => /simul/i.test(e.data || '')),
@@ -614,6 +658,110 @@ module.exports = function fxTools(ctx) {
           hint: 'save_fx (candidate) pour garder un plan ; avant de conclure, refaire un run_batch de la stratégie retenue (plus de périodes, cours réels) puis time_analysis et build_fx.' };
       },
     },
+    // ------------------------------------------------------------ affiner pas à pas
+    {
+      name: 'modify_strategy',
+      description: 'Modifie une stratégie pas à pas, comme dans l\'éditeur de la page : ajouter un indicateur / une condition (ET ou OU) à une règle ou aux deux entrées, remplacer un réglage (ex. "RSI(14)" → "RSI(10)", "> 30" → "> 25"), retirer des conditions, régler la gestion des trades (stop, objectif, stop suiveur, break-even, durée max, pause), ne garder que les achats ou les ventes, adapter au style (scalping, court, moyen, long terme), renommer. Renvoie la stratégie validée, sa description en français et ses conditions ; save=true l\'enregistre.',
+      inputSchema: obj({
+        strategy: strategyArg,
+        add: { type: 'array', items: { type: 'object', properties: { rule: { type: 'string', enum: ['longEntry', 'longExit', 'shortEntry', 'shortExit', 'entries', 'exits'], description: 'entries = les deux entrées, exits = les deux sorties' }, condition: { type: 'string', description: 'ex. ADX(14) > 25, CLOSE > EMA(200)' }, shortCondition: { type: 'string', description: 'avec entries / exits : condition miroir pour les ventes (sinon la même)' }, join: { type: 'string', enum: ['AND', 'OR'] } } } },
+        replace: { type: 'array', items: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' }, rule: { type: 'string' } } } },
+        remove: { type: 'array', items: { type: 'object', properties: { match: { type: 'string' }, rule: { type: 'string' }, path: { type: 'string' } } } },
+        set: { type: 'object', description: 'gestion des trades : stopLossPips, takeProfitPips, stopAtr, takeAtr, atrPeriod, trailPips, trailAtr, breakevenPips, breakevenAtr, maxBars, pauseLosses, pauseBars (0 = désactivé)' },
+        only: { type: 'string', enum: ['long', 'short'] }, style: { type: 'string', enum: ['none', 'scalping', 'short', 'medium', 'long'] }, name: { type: 'string' }, save: { type: 'boolean' },
+      }, ['strategy']),
+      handler: async (a) => {
+        let s = Object.assign({}, resolveStrategy(a.strategy));
+        const before = strategyView(s), changes = [];
+        for (const x of a.add || []) {
+          if (!x.condition) continue;
+          const err = F.rules.validate(x.condition); if (err) fail('Condition invalide « ' + x.condition + ' » : ' + err);
+          const keys = x.rule === 'entries' ? ['longEntry', 'shortEntry'] : x.rule === 'exits' ? ['longExit', 'shortExit'] : [x.rule || 'longEntry'];
+          for (const k of keys) {
+            const c = k.startsWith('short') && x.shortCondition ? x.shortCondition : x.condition;
+            if (k.endsWith('Entry') && !s[k]) continue;
+            s[k] = x.join === 'OR' ? E.orWith(s[k], c) : s[k] ? E.andWith(s[k], c) : c;
+            changes.push(k + ' ' + (x.join === 'OR' ? 'OU ' : 'ET ') + c);
+          }
+        }
+        for (const x of a.replace || []) {
+          let n = 0;
+          for (const k of ['longEntry', 'longExit', 'shortEntry', 'shortExit']) if ((!x.rule || x.rule === k) && s[k] && s[k].includes(x.from)) { s[k] = s[k].split(x.from).join(x.to); n++; }
+          if (!n) fail('« ' + x.from + ' » ne figure dans aucune règle.');
+          changes.push('« ' + x.from + ' » → « ' + x.to + ' »');
+        }
+        if (a.remove && a.remove.length) { const r = await callTool('edit_conditions', { strategy: Object.assign({}, s, { saved: undefined, preset: undefined }), remove: a.remove }); s = Object.assign(s, resolveStrategy(r.strategy)); changes.push('conditions retirées : ' + a.remove.map((x) => x.match || x.path).join(', ')); }
+        if (a.set) for (const [k, v] of Object.entries(a.set)) { if (!TM.concat(['stopLossPips', 'takeProfitPips']).includes(k)) fail('Réglage inconnu : ' + k); s[k] = Number(v) || 0; changes.push(k + ' = ' + s[k]); }
+        if (a.only) { const y = A.applyProposal(s, {}, { change: a.only === 'long' ? { onlyLong: true } : { onlyShort: true } }); s = y.strat; changes.push(a.only === 'long' ? 'achats seulement' : 'ventes seulement'); }
+        if (a.style) { s = E.adaptToStyle(s, a.style, { fromStyle: s.style }); changes.push('style ' + a.style); }
+        if (a.name) s.name = a.name;
+        const v = resolveStrategy(strategyView(s));
+        const view = strategyView(v), cond = (await callTool('edit_conditions', { strategy: view })).conditions;
+        if (a.save) await callTool('save_strategy', { strategy: view });
+        return { strategy: view, before: before, changes: changes, conditions: cond, saved: !!a.save, hint: 'Tester : run_batch avec sameAs (mêmes périodes que le batch de référence) puis compare_batches.' };
+      },
+    },
+    {
+      name: 'vary_batch',
+      description: 'Fait varier UN élément à partir d\'un batch de référence, sur les mêmes périodes : levier, capital (budget), durée en mois (mêmes dates de début), exposition, taille de position, spread, paire, stratégie, ou retrait. Crée un batch par valeur et renvoie la comparaison (période par période, époques, classement). Pour décider « quel levier / quel budget / quelle durée / quelle stratégie ».',
+      inputSchema: obj({ id: { type: 'string', description: 'batch de référence' }, param: { type: 'string', enum: ['leverage', 'capital', 'months', 'exposurePct', 'riskPct', 'fixedLots', 'sizing', 'spreadPips', 'pair', 'strategy', 'withdraw', 'timeframe'] },
+        values: { type: 'array', items: {}, description: 'valeurs à essayer (stratégies : objets stratégie ; retrait : mécaniques)' } }, ['id', 'param', 'values']),
+      handler: async (a) => {
+        const ref = getBatch(a.id), e0 = ref.entries[0], ids = [ref.id];
+        for (const v of a.values) {
+          const m = marketOfEntry(e0);
+          let strat = Object.assign({}, e0.strategy, { name: e0.name }), periods = ref.entries.map((e) => ({ from: e.from, to: e.to })), label;
+          if (a.param === 'strategy') { strat = resolveStrategy(v); label = strat.name; }
+          else if (a.param === 'months') { periods = ref.entries.map((e) => ({ from: e.from, to: iso(new Date(D.addMonths(new Date(e.from + 'T00:00:00Z'), Number(v)).getTime() - 864e5)) })); label = v + ' mois'; }
+          else if (a.param === 'withdraw') { const w = normW(v); m.withdraw = w ? (w.mode === 'periodic' ? { mode: 'periodic', every: w.every, days: w.days, type: w.type, value: w.value } : { pct: w.pct, share: w.share, when: w.when }) : undefined; label = w ? wName(v, w) : 'sans retrait'; }
+          else { m[a.param] = typeof v === 'string' && a.param !== 'pair' && a.param !== 'sizing' && a.param !== 'timeframe' ? Number(v) : v; label = a.param + ' ' + v; }
+          const r = await runBatch({ strategy: strat, market: m, periods: periods, name: ref.name + ' · ' + label });
+          const l = batches.get(), nb = l.find((x) => x.id === r.batch.id); nb.periodsOf = ref.id; nb.variedFrom = { batch: ref.id, param: a.param, value: v }; batches.set(l);
+          ids.push(r.batch.id);
+        }
+        return Object.assign({ param: a.param, reference: ref.name }, compareBatches(ids.map(getBatch)));
+      },
+    },
+    {
+      name: 'improve_batch',
+      description: '« Améliorer » sur tout un batch (comme la sélection de simulations dans l\'évaluation) : cherche les améliorations (réglages, filtres, stops, sorties, jours / heures…) communes aux simulations perdantes et celles à fort impact sur toutes ; avec apply (ids), crée le batch amélioré sur les mêmes périodes et le compare au batch d\'origine.',
+      inputSchema: obj({ id: { type: 'string' }, apply: { type: 'array', items: { type: 'string' } }, indexes: idx }, ['id']),
+      handler: async (a) => {
+        const b = getBatch(a.id), L = pickEntries(b, a.indexes), e0 = L[0], m = marketOfEntry(e0);
+        const strat = Object.assign(strategyView(Object.assign({}, e0.strategy, { name: e0.name })), {});
+        const r = await callTool('improve_across_periods', { strategy: strat, market: m, periods: L.map((e) => ({ dateFrom: e.from, dateTo: e.to })), apply: a.apply });
+        if (a.apply && a.apply.length && r.improvedStrategy) {
+          const nb = await runBatch({ strategy: r.improvedStrategy, market: m, periods: L.map((e) => ({ from: e.from, to: e.to })), name: b.name + ' · améliorée' });
+          const l = batches.get(), x = l.find((y) => y.id === nb.batch.id); x.periodsOf = b.id; batches.set(l);
+          r.newBatch = batchHead(x);
+          r.comparison = compareBatches([b, x]).headToHead[0] || null;
+        }
+        return r;
+      },
+    },
+    {
+      name: 'subset_batch',
+      description: 'Crée un batch à partir d\'une partie d\'un autre (index, époque, années, rendement mini / maxi) : pour étudier séparément les périodes perdantes, une époque, etc.',
+      inputSchema: obj(Object.assign({ id: { type: 'string' }, indexes: idx, name: { type: 'string' } }, FILT), ['id']),
+      handler: async (a) => {
+        const b = getBatch(a.id), L = pickEntries(b, a.indexes, a);
+        const nb = { id: uid(''), at: new Date().toISOString(), by: 'agent', periodsOf: b.id, entries: L.map((e) => Object.assign({}, e)), name: a.name || b.name + ' · extrait (' + L.length + ')' };
+        const l = batches.get(); l.push(nb); batches.set(l);
+        return batchHead(nb);
+      },
+    },
+    {
+      name: 'import_ea',
+      description: 'Relit un Expert Advisor généré par Forexia (.mq5, comme « Importer un EA Forexia » dans la page) : retrouve la stratégie et ses réglages. save=true enregistre la stratégie.',
+      inputSchema: obj({ path: { type: 'string' }, code: { type: 'string' }, save: { type: 'boolean' } }),
+      handler: async (a) => {
+        const code = a.code || (a.path ? require('fs').readFileSync(a.path, 'utf8') : fail('Indiquez path ou code.'));
+        const r = F.mql5.parseEA(code) || fail('Ce fichier n\'est pas un EA généré par Forexia.');
+        const st = strategyView(resolveStrategy(Object.assign({}, r.strategy || r, { name: (r.strategy || r).name || 'EA importé' })));
+        if (a.save) await callTool('save_strategy', { strategy: st });
+        return { strategy: st, settings: r.config || r.settings || null, saved: !!a.save };
+      },
+    },
     // ------------------------------------------------------------ carnet de déductions
     {
       name: 'note_add', description: 'Carnet de l\'agent : note une déduction (ce qui marche, ce qui ne marche pas, sur quelle base) pour s\'en servir dans les itérations suivantes.',
@@ -627,7 +775,7 @@ module.exports = function fxTools(ctx) {
     // ------------------------------------------------------------ page Forexia
     {
       name: 'forexia_sync',
-      description: 'Échange avec la page Forexia via la base de la passerelle MT5 (FOREXIA_BRIDGE_TOKEN) : pull = récupère les FX, batchs, époques, mécaniques de retrait et événements de l\'utilisateur ; push = y envoie ceux de l\'agent (ils apparaissent dans la page) ; both (défaut) = les deux, en réunissant les listes.',
+      description: 'Échange avec la page Forexia via la base de la passerelle MT5 (FOREXIA_BRIDGE_TOKEN) : pull = récupère les stratégies, FX, batchs, époques, mécaniques de retrait et événements de l\'utilisateur ; push = y envoie ceux de l\'agent (ils apparaissent dans la page) ; both (défaut) = les deux, en réunissant les listes.',
       inputSchema: obj({ direction: { type: 'string', enum: ['pull', 'push', 'both'] } }),
       handler: async (a) => {
         const dir = a.direction || 'both', r = await bridge('POST', '/db/kv/list', {});
@@ -646,6 +794,13 @@ module.exports = function fxTools(ctx) {
           }
           out[k.replace('forexia.', '')] = Array.isArray(merged) ? merged.length : (merged.items || []).length;
         }
+        // stratégies (table « strategies » de la base) : la plus récente l'emporte, nom par nom
+        const rs = await bridge('POST', '/db/strategies/list', {}), remoteS = new Map(((rs && rs.items) || []).map((x) => [x.name, x])), localS = store.strategies();
+        let pulled = 0, pushed = 0;
+        if (dir !== 'push') for (const [name, x] of remoteS) { const i = localS.findIndex((y) => y.name === name); if (i < 0 || (x.data.savedAt || x.updatedAt || '') > (localS[i].savedAt || '')) { const d = Object.assign({}, x.data); if (i < 0) localS.push(d); else localS[i] = d; pulled++; } }
+        if (dir !== 'push') store.setStrategies(localS);
+        if (dir !== 'pull') for (const l of localS) { const r = remoteS.get(l.name); if (!r || (l.savedAt || '') > (r.data.savedAt || r.updatedAt || '')) { const d = Object.assign({}, l, { savedAt: l.savedAt || new Date().toISOString() }); if (d.config && !d.config.withdraw) delete d.config; await bridge('POST', '/db/strategies/put', { name: d.name, data: d, updatedAt: d.savedAt }); pushed++; } }
+        out.strategies = { pulled: pulled, pushed: pushed, total: localS.length };
         return { direction: dir, counts: out, note: 'La page reprend ces données à sa prochaine connexion à la passerelle (ou en rechargeant la page).' };
       },
     },

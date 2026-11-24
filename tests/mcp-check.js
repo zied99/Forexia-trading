@@ -202,6 +202,51 @@ const SYN = { pair: 'EUR/USD', source: 'synthetic', dateFrom: '2019-01-01', date
     ok(s.saved.id && (await call('list_fx', {})).length === 2);
     if (r.candidates[gen - 1].createdStrategy) ok(s.strategySaved && (await call('list_strategies', {})).some((x) => x.name === s.strategySaved));
   });
+  await test('modify_strategy : ajout progressif, réglage, gestion, style, sauvegarde', async () => {
+    const r = await call('modify_strategy', { strategy: { preset: 'rsi' }, add: [{ rule: 'entries', condition: 'CLOSE > EMA(200)', shortCondition: 'CLOSE < EMA(200)' }, { rule: 'longEntry', condition: 'ADX(14) < 30' }],
+      replace: [{ from: 'RSI(14)', to: 'RSI(10)' }], set: { stopAtr: 2, atrPeriod: 14, trailAtr: 3 }, name: 'RSI affiné', save: true });
+    ok(/EMA\(200\)/.test(r.strategy.longEntry) && /CLOSE < EMA\(200\)/.test(r.strategy.shortEntry) && /ADX\(14\) < 30/.test(r.strategy.longEntry) && /RSI\(10\)/.test(r.strategy.longEntry) && !/RSI\(14\)/.test(r.strategy.longEntry), JSON.stringify(r.strategy));
+    ok(r.strategy.stopAtr === 2 && r.strategy.trailAtr === 3 && r.changes.length >= 5 && r.conditions.longEntry.length >= 3 && r.saved);
+    const r2 = await call('modify_strategy', { strategy: { saved: 'RSI affiné' }, remove: [{ match: 'ADX' }], only: 'long', style: 'long', name: 'RSI long terme' });
+    ok(!/ADX/.test(r2.strategy.longEntry) && !r2.strategy.shortEntry && r2.strategy.stopLossPips > 0, JSON.stringify(r2.strategy));
+    const bad = await rpc('tools/call', { name: 'modify_strategy', arguments: { strategy: { preset: 'rsi' }, add: [{ rule: 'longEntry', condition: 'FOO(3) >' }] } });
+    ok(bad.result.isError && /invalide/.test(bad.result.content[0].text));
+  });
+  await test('vary_batch : levier, budget, durée, stratégie sur les mêmes périodes', async () => {
+    const ref = await call('run_batch', { strategy: { preset: 'macd' }, market: MK, n: 10, months: 12, seed: 3 });
+    const v = await call('vary_batch', { id: ref.batch.id, param: 'leverage', values: [5, 20] });
+    ok(v.batches.length === 3 && v.headToHead.length === 3 && v.headToHead.every((h) => h.samePeriods === 10) && v.ranking.length === 3, JSON.stringify(v.headToHead));
+    const c = await call('vary_batch', { id: ref.batch.id, param: 'capital', values: [25000] }); ok(c.batches[1].stats.avgStartCapital === 25000);
+    const d = await call('vary_batch', { id: ref.batch.id, param: 'months', values: [6] }); ok(d.batches[1].stats.monthsMax === 6 && d.batches[1].stats.from === d.batches[0].stats.from);
+    const s = await call('vary_batch', { id: ref.batch.id, param: 'strategy', values: [{ saved: 'RSI affiné' }] }); ok(s.batches[1].stats.strategies[0] === 'RSI affiné');
+    const w = await call('vary_batch', { id: ref.batch.id, param: 'withdraw', values: [{ mode: 'periodic', type: 'excess', value: 50 }] }); ok(w.batches[1].stats.totalWithdrawn >= 0);
+  });
+  await test('improve_batch (+ apply → batch amélioré comparé)', async () => {
+    const r = await call('improve_batch', { id: B1 });
+    ok(r.periods.length === 16 && Array.isArray(r.highImpact), JSON.stringify(r).slice(0, 200));
+    const pick = r.highImpact[0] || r.commonToLosers[0];
+    if (pick) { const a = await call('improve_batch', { id: B1, apply: [pick.id] }); ok(a.newBatch && a.newBatch.periodsOf === B1 && a.comparison && a.comparison.samePeriods === 16, JSON.stringify(a.comparison)); }
+  });
+  await test('apply_proposal : plusieurs corrections combinées', async () => {
+    const r = await call('apply_proposal', { id: B1, proposals: ['ema200', 'trail'], scope: 'batch' });
+    ok(r.summary.n === 16 && /EMA\(200\)/.test(r.strategyAfter.longEntry) && r.strategyAfter.trailAtr === 2, JSON.stringify(r.strategyAfter));
+  });
+  await test('subset_batch + retraits par époque', async () => {
+    const s = await call('subset_batch', { id: B1, era: 'Récent' }); ok(s.stats.n >= 1 && s.stats.from >= '2014');
+    const w = await call('simulate_withdrawal', { id: B1, mechanic: { mode: 'periodic', type: 'fixed', value: 50 }, era: 'Avant crise' });
+    ok(w.byEra.length === 1 && w.byEra[0].era === 'Avant crise', JSON.stringify(w.byEra));
+    const c = await call('compare_withdrawals', { id: B1, byEra: true, mechanics: [{ mode: 'periodic', type: 'excess', value: 25 }, { mode: 'periodic', type: 'fixed', value: 100 }, 'none'] });
+    ok(c.byEra.length >= 2 && c.byEra[0].ranking.length === 3 && c.byEra[0].best, JSON.stringify(c.byEra[0]));
+  });
+  await test('import_ea (EA généré puis relu)', async () => {
+    const g = await call('generate_ea', { strategy: { saved: 'RSI affiné' }, pair: 'EUR/USD' });
+    const r = await call('import_ea', { code: g.code, save: false });
+    ok(r.strategy.name === 'RSI affiné' && /RSI\(10\)/.test(r.strategy.longEntry), JSON.stringify(r.strategy));
+  });
+  await test('market_events : événement ajouté par l\'agent', async () => {
+    const r = await call('market_events', { pair: 'EUR/USD', add: { date: '2016-06-24', title: 'Test agent', importance: 3 }, from: '2016-06-01', to: '2016-06-30' });
+    ok(r.added && r.events.some((e) => e.title === 'Test agent'));
+  });
   await test('note_add / note_list', async () => {
     await call('note_add', { text: 'Levier 20 : plus de pertes que levier 10 sur les mêmes périodes', tags: ['levier'], refs: [B1, B2] });
     await call('note_add', { text: 'Le filtre EMA 200 aide surtout avant 2008', tags: ['époques'] });
@@ -209,7 +254,7 @@ const SYN = { pair: 'EUR/USD', source: 'synthetic', dateFrom: '2019-01-01', date
   });
   await test('delete_fx / delete_batch', async () => {
     ok((await call('delete_fx', { id: FXID })).deleted === 'Plan prudent');
-    await call('delete_batch', { id: B3 }); ok((await call('list_batches', {})).length === 3);
+    const nb = (await call('list_batches', {})).length; await call('delete_batch', { id: B3 }); ok((await call('list_batches', {})).length === nb - 1);
   });
   await test('forexia_sync sans passerelle : message clair', async () => {
     const r = await rpc('tools/call', { name: 'forexia_sync', arguments: {} });

@@ -105,6 +105,11 @@ comprendre les pertes, choisir la manière de retirer, le capital et la durée. 
 | Outil | Rôle |
 |---|---|
 | `fx_method` | Méthode pas à pas pour trouver un FX, précautions, liste des outils. **À lire avant de chercher un FX.** |
+| `modify_strategy` | Affiner pas à pas : ajouter un indicateur / une condition (ET, OU, aux deux entrées avec miroir pour les ventes), remplacer un réglage (`RSI(14)` → `RSI(10)`), retirer, stop / objectif / stop suiveur / break-even / durée max / pause, achats ou ventes seulement, style (scalping → long terme). |
+| `vary_batch` | Faire varier **un** élément sur les mêmes périodes qu'un batch : levier, budget, durée en mois, exposition, taille de position, spread, paire, stratégie, retrait ; comparaison automatique. |
+| `improve_batch` | « Améliorer » sur tout un batch, puis batch amélioré sur les mêmes périodes et comparaison. |
+| `subset_batch` | Batch extrait d'un autre (époque, années, périodes perdantes…). |
+| `import_ea` | Relit un EA Forexia (.mq5) : stratégie et réglages. |
 | `run_batch` | Batch : une stratégie sur N périodes de `months` mois (ou `monthsList`), dans une plage `yearFrom`–`yearTo`, graine `seed` reproductible, périodes données (`periods`) ou **les mêmes qu'un autre batch** (`sameAs`) pour ne changer qu'une chose (levier, capital, stratégie, paire, retrait). Enregistré. |
 | `list_batches` / `get_batch` / `rename_batch` / `delete_batch` | Batchs enregistrés (agent et, après `forexia_sync`, ceux de la page) : rendement médian, part gagnante, capital moyen, chaque simulation. |
 | `compare_batches` | Batchs côte à côte, par époque, et période par période quand ils ont les mêmes périodes (qui gagne le plus souvent, écart médian), classement « régularité ». |
@@ -165,6 +170,32 @@ Le dossier [`agent/`](../agent/README.md) contient un projet complet pour un age
 > 4. Vérifie avec `test_other_pairs` et `recommend`.
 > 5. Garde le meilleur avec `save_strategy` et donne-moi : les règles, le résultat médian, la part de périodes
 >    gagnantes, le pire drawdown, et pourquoi tu le penses robuste. Pas de déploiement MT5 sans mon accord.
+
+### Tout ce que fait la page, côté agent
+
+| Dans la page | Outils de l'agent |
+|---|---|
+| Choisir un modèle, écrire en français ou en règles, aide syntaxe | `list_presets`, `translate_french`, `validate_strategy`, `forexia_help` |
+| Éditer les règles, ajouter / retirer des indicateurs, gestion des trades, style | `modify_strategy`, `edit_conditions` |
+| Enregistrer / charger / supprimer une stratégie, importer un EA | `save_strategy`, `list_strategies`, `delete_strategy`, `import_ea` |
+| Marché et capital, source des cours, spread, taille, news, MT5 | paramètre `market` de chaque outil |
+| Lancer le backtest, graphiques, rentabilité mensuelle, trades | `run_backtest`, `get_market_data` |
+| Dessiner supports / lignes de tendance | `find_levels`, `make_trend_line` |
+| Prolonger, raccourcir, découper, autre capital | `stress_test` |
+| Améliorer la stratégie (une simulation / plusieurs / un batch) | `enhance_strategy`, `apply_improvements`, `improve_across_periods`, `improve_batch` |
+| Lancer un lot (plage d'années), enregistrer un batch, recharger | `run_batch`, `list_batches`, `get_batch`, `rename_batch`, `delete_batch`, `subset_batch` |
+| Changer un élément et comparer (levier, budget, durée, paire…) | `vary_batch`, `run_batch` `sameAs`, `compare_batches` |
+| Évaluation, historique, recommandations | `list_evaluations`, `clear_evaluations`, `recommend` |
+| Analyse temporelle, époques, événements de marché | `time_analysis`, `get_eras`, `set_eras`, `market_events` |
+| Analyseur, Appliquer à tout le batch, Analyseur d'époque | `analyze_simulation`, `apply_proposal`, `era_analysis` |
+| Resimuler avec un retrait, mécaniques, comparer (aussi par époque) | `simulate_withdrawal`, `compare_withdrawals`, `save_withdraw_mechanic`, `list_withdraw_mechanics`, `vary_batch` `withdraw` |
+| FX : enregistrer, cartes, capital, point à glisser, renommer | `build_fx`, `list_fx`, `get_fx`, `fx_projection`, `rename_fx`, `delete_fx` |
+| Chercheur de FX | `mine_fx`, `save_fx` |
+| Tester sur d'autres paires | `test_other_pairs`, `vary_batch` `pair` |
+| EA MT5 : générer, déployer, tester, calendrier | `generate_ea`, `mt5_deploy_ea`, `mt5_run_test`, `mt5_status`, `mt5_export_calendar` |
+| Base de données (passerelle) | `forexia_sync` (stratégies, FX, batchs, époques, mécaniques, événements) |
+
+Restent propres à la page : compte cloud (connexion), export CSV / JSON, annuler (Ctrl+Z), affichage.
 
 ### Exemple : trouver un FX
 
