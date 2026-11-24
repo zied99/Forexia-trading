@@ -269,6 +269,10 @@ chaque stratégie (filtre ADX, filtre EMA 200, pente EMA 50, filtres de volatili
 entrent dans la recherche. Une proposition qui utilise une stratégie créée l'indique (« 🧪 Stratégie créée par le
 chercheur ») et propose « 💾 Enregistrer la stratégie » ; enregistrer le FX propose aussi d'enregistrer la stratégie.
 Toutes les variantes testées comptent dans le nombre d'essais du score de confiance.
+**Paire et levier** : la paire se choisit dans le chercheur (par défaut celle de la page d'accueil), ou « Toutes
+les paires » pour chercher sur chacune (plus long). Le levier maximum va jusqu'à 1:500 ; au-delà de 1:30, un
+avertissement rappelle la limite européenne pour les particuliers. **Durée** : en mois, n'importe quel nombre de 1 à
+120 (raccourcis 3, 6, 12, 18, 24, 36).
 
 ## Événements de marché
 
