@@ -3438,7 +3438,14 @@
     const st = wdState, best = c.bestSide === 'b' ? 'b' : 'a';
     const mech = best === 'a' ? c.A : c.B, other = best === 'a' ? c.B : c.A;
     const R = best === 'a' ? st.cmpRows.RA : st.cmpRows.RB, sims = R.map((r) => evalList().find((e) => e.key === r.key));
-    const n = R.length, first = sims.find(Boolean) || {}, cfg = first.config || {};
+    const first = sims.find(Boolean) || {};
+    return fxFromRows(R, { name: first.name, strategy: first.strategy, config: first.config, pair: first.pair, leverage: first.leverage, dataLabel: first.data,
+      synthetic: sims.some((e) => e && /simul/i.test(e.data || '')), mech: mech, other: other });
+  }
+  /** FX à partir des simulations relancées avec une mécanique de retrait (rows : voir wdRow). */
+  function fxFromRows(R, meta) {
+    const n = R.length, cfg = meta.config || {}, mech = meta.mech, other = meta.other || { name: '—' };
+    const first = { name: meta.name || '', strategy: meta.strategy || null, config: meta.config || null, pair: meta.pair || '', leverage: meta.leverage || cfg.leverage || null, data: meta.dataLabel || '' };
     const capital = pctile(R.map((r) => r.capital), 0.5);
     // ce que le client récupère à la fin (compte + retraits), en % du capital investi
     const back = R.map((r) => 100 + r.w.ret);
@@ -3462,7 +3469,7 @@
     const eras = F.advisor.erasFromCuts(F.advisor.DEFAULT_CUTS);
     R.forEach((r) => { for (let y = +r.from.slice(0, 4); y <= +r.to.slice(0, 4); y++) years.add(y); const m = F.advisor.midDate(r), er = eras.find((x) => m >= x.fromD && m <= x.toD); if (er) (eraRes[er.label] = eraRes[er.label] || []).push(r.w.ret); });
     const eraKeys = Object.keys(eraRes), eraWin = eraKeys.filter((k) => pctile(eraRes[k], 0.5) > 0).length;
-    const synthetic = sims.some((e) => e && /simul/i.test(e.data || ''));
+    const synthetic = !!meta.synthetic;
     const parts = {
       simulations: Math.min(1, n / 40) * 30,
       annees: Math.min(1, years.size / 15) * 25,
@@ -3475,7 +3482,7 @@
     const p10 = pctile(back, 0.1), med = pctile(back, 0.5), p90 = pctile(back, 0.9), worst = Math.min(...back), ddMed = pctile(dds, 0.5);
     const w = mech.w, fixedPct = w.mode === 'periodic' && w.type === 'fixed' ? (Number(w.value) / capital) * 100 : null;
     return {
-      v: 2, id: 'fx' + Date.now().toString(36), createdAt: new Date().toISOString(), 
+      v: 2, id: 'fx' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), createdAt: new Date().toISOString(), trials: meta.trials || undefined,
       name: 'FX ' + (first.name || 'stratégie') + ' · ' + mech.name,
       strategy: { name: first.name || '', data: first.strategy || null, config: first.config || null, pair: first.pair || '', leverage: first.leverage || cfg.leverage || null, dataLabel: first.data || '' },
       principle: fxPrinciple(first.strategy, first.pair),
@@ -3640,7 +3647,7 @@
   }
   /** Met à jour la carte quand on déplace le point (sans tout redessiner). */
   function fxSetQ(id, q) {
-    const fx = fxList().find((x) => x.id === id), card = document.querySelector('.fx-card[data-fx="' + id + '"]');
+    const fx = fxFind(id), card = document.querySelector('.fx-card[data-fx="' + id + '"]');
     if (!fx || !card) return;
     fxQ.set(id, q); FX_BASE = fxInvest(fx);
     const pt = fxPoint(fx, q), rg = fxRange(fx), x = 12 + ((Math.max(rg.lo, Math.min(rg.hi, pt.b)) - rg.lo) / (rg.hi - rg.lo)) * 336;
@@ -3714,7 +3721,7 @@
     const l = fxList();
     $('fxBody').innerHTML = l.length ? '<div class="fx-grid">' + l.slice().reverse().map(fxCardHtml).join('') + '</div>' +
       '<p class="hint fx-note">Chiffres issus de simulations passées (backtests) : ils ne garantissent pas les résultats futurs. « Probabilité » et « Risque » comptent les retraits (compte final + sommes retirées).</p>'
-      : '<p class="eval-empty">Aucun FX pour l\'instant. Dans Évaluation › « 💸 Resimuler avec un retrait », comparez deux mécaniques (⚖️ Comparer) puis cliquez sur « 💼 Enregistrer un FX ».</p>';
+      : '<p class="eval-empty">Aucun FX pour l\'instant. Utilisez le <b>⛏️ Chercheur de FX</b> ci-dessus, ou, dans Évaluation › « 💸 Resimuler avec un retrait », comparez deux mécaniques (⚖️ Comparer) puis cliquez sur « 💼 Enregistrer un FX ».</p>';
     $('fxModal').hidden = false; document.body.style.overflow = 'hidden';
   }
   function closeFx() { $('fxModal').hidden = true; if ($('evalModal').hidden && $('wdModal').hidden) document.body.style.overflow = ''; }
@@ -3726,7 +3733,7 @@
     if (del) { const fx = fxList().find((x) => x.id === del.dataset.fxDel); if (fx && confirm('Supprimer le FX « ' + fx.name + ' » ?')) { setFxList(fxList().filter((x) => x.id !== fx.id)); openFx(); } return; }
     const ld = t.closest('[data-fx-load]');
     if (ld) {
-      const fx = fxList().find((x) => x.id === ld.dataset.fxLoad);
+      const fx = fxFind(ld.dataset.fxLoad);
       if (!fx) return;
       undoable('FX « ' + fx.name + ' » chargé', () => {
         loadStrategy(fx.strategy.data); if (fx.strategy.config) applyConfig(fx.strategy.config);
@@ -3739,10 +3746,223 @@
       closeFx();
     }
   });
+  // ---------- Chercheur de FX : essaie les combinaisons (stratégie × levier × retrait) et propose les plans proches des critères ----------
+  let minerState = { open: false, status: 'idle', res: null };
+  const fxFind = (id) => fxList().find((x) => x.id === id) || ((minerState.res && minerState.res.cands) || []).map((c) => c.fx).find((x) => x.id === id);
+  const MINER_LEV = [3, 5, 10, 20, 30];
+  function minerDefaults() {
+    return { budget: Math.max(100, Number($('capital').value) || 10000), maxRisk: 4, minConf: 50, months: 12, income: '', prefs: { excess: true, fixed: true, pct: false, none: false },
+      saved: true, effort: 'normal', maxLev: 30 };
+  }
+  let minerOpt = null;
+  function minerFormHtml() {
+    const o = minerOpt, chk = (k, l) => '<label class="check"><input type="checkbox" data-mp="' + k + '"' + (o.prefs[k] ? ' checked' : '') + '><span>' + l + '</span></label>';
+    const src = sourceValue(), srcTxt = { broker: 'cours de votre courtier MT5', online: 'cours BCE en ligne', csv: 'votre fichier CSV', synthetic: 'données simulées' }[src] || src;
+    return '<div class="miner-form"><div class="miner-grid">' +
+      '<label class="field">Budget à investir (€)<input id="mnBudget" type="number" min="100" step="100" value="' + esc(o.budget) + '"></label>' +
+      '<label class="field">Risque maximum<select id="mnRisk">' + [1, 2, 3, 4, 5, 6, 7].map((r) => '<option value="' + r + '"' + (r === o.maxRisk ? ' selected' : '') + '>' + r + ' / 7 — ' + RISK_TXT[r] + '</option>').join('') + '</select></label>' +
+      '<label class="field">Confiance minimum<select id="mnConf">' + [[30, '30 — faible acceptée'], [40, '40 — moyenne'], [50, '50'], [60, '60 — bonne'], [70, '70'], [80, '80 — élevée']].map(([v, l]) => '<option value="' + v + '"' + (v === o.minConf ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></label>' +
+      '<label class="field">Durée du placement<select id="mnMonths">' + [[6, '6 mois'], [12, '1 an'], [24, '2 ans'], [36, '3 ans']].map(([v, l]) => '<option value="' + v + '"' + (v === o.months ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></label>' +
+      '<label class="field">Revenu souhaité (€ / mois, facultatif)<input id="mnIncome" type="number" min="0" step="10" value="' + esc(o.income) + '" placeholder="ex. 100"></label>' +
+      '<label class="field">Levier maximum<select id="mnLev">' + MINER_LEV.map((l) => '<option value="' + l + '"' + (l === o.maxLev ? ' selected' : '') + '>1:' + l + '</option>').join('') + '</select></label></div>' +
+      '<div class="miner-prefs"><b>Manières de retirer acceptées</b>' + chk('excess', 'Retrait de l\'excédent') + chk('fixed', 'Somme fixe chaque mois') + chk('pct', '% du compte chaque mois') + chk('none', 'Sans retrait') + '</div>' +
+      '<div class="miner-prefs"><b>Recherche</b><label class="check"><input type="checkbox" id="mnSaved"' + (o.saved ? ' checked' : '') + '><span>Inclure mes stratégies enregistrées</span></label>' +
+      '<select id="mnEffort"><option value="fast"' + (o.effort === 'fast' ? ' selected' : '') + '>Rapide (12 essais par combinaison)</option><option value="normal"' + (o.effort === 'normal' ? ' selected' : '') + '>Normale (20 essais)</option><option value="deep"' + (o.effort === 'deep' ? ' selected' : '') + '>Approfondie (40 essais)</option></select></div>' +
+      '<p class="hint">Paire : <b>' + esc($('pair').value) + '</b> · données : <b>' + esc(srcTxt) + '</b> (réglages de la page d\'accueil). Chaque combinaison est essayée sur des périodes passées tirées au hasard, de la durée choisie ; les mêmes périodes servent à toutes les combinaisons pour les comparer équitablement.</p>' +
+      '<div class="row buttons"><button type="button" class="primary small" id="mnRun"' + (minerState.status === 'run' ? ' disabled' : '') + '>⛏️ Lancer la recherche</button>' + (minerState.status === 'run' ? '<button type="button" class="secondary small" id="mnStop">Arrêter</button>' : '') + '</div></div>';
+  }
+  function renderMiner() {
+    const box = $('fxMiner');
+    if (!minerState.open) { box.hidden = true; return; }
+    box.hidden = false;
+    let h = '<section class="miner"><div class="miner-head"><h3>⛏️ Chercheur de FX</h3><button type="button" class="ghost small" id="mnClose">Fermer le chercheur</button></div>' +
+      '<p class="hint">Indiquez vos critères : le chercheur essaie toutes les combinaisons (stratégies × levier × manière de retirer) sur l\'historique, calcule pour chacune le risque, le score de confiance et ce qu\'elle rapporte, puis propose les plans les plus proches de vos critères.</p>' + minerFormHtml();
+    if (minerState.status === 'run') h += '<div class="modal-loading"><span class="spinner"></span>' + esc(minerState.msg || '') + '<div class="miner-bar"><i style="width:' + Math.round((minerState.pct || 0) * 100) + '%"></i></div></div>';
+    if (minerState.status === 'err') h += '<p class="val ko">' + esc(minerState.msg) + '</p>';
+    if (minerState.res) h += minerResultsHtml(minerState.res);
+    box.innerHTML = h + '</section>';
+  }
+  function minerRead() {
+    const o = minerOpt;
+    o.budget = Math.max(100, Math.round(Number($('mnBudget').value) || 0)); o.maxRisk = +$('mnRisk').value; o.minConf = +$('mnConf').value; o.months = +$('mnMonths').value;
+    o.income = $('mnIncome').value; o.maxLev = +$('mnLev').value; o.saved = $('mnSaved').checked; o.effort = $('mnEffort').value;
+    document.querySelectorAll('#fxMiner [data-mp]').forEach((x) => { o.prefs[x.dataset.mp] = x.checked; });
+  }
+  /** Manières de retirer à essayer, selon les préférences et le budget. */
+  function minerMechs(o) {
+    const out = [], inc = Number(o.income) || 0;
+    if (o.prefs.excess) for (const v of [25, 50, 75]) out.push({ name: 'Retrait de l\'excédent ' + v + ' %', w: { on: true, mode: 'periodic', every: 'month', days: 30, type: 'excess', value: v } });
+    if (o.prefs.fixed) {
+      const sums = inc > 0 ? [inc] : [0.005, 0.01, 0.02].map((f) => Math.max(5, Math.round((o.budget * f) / 5) * 5));
+      for (const v of [...new Set(sums)]) out.push({ name: 'Somme fixe ' + v + ' € / mois', w: { on: true, mode: 'periodic', every: 'month', days: 30, type: 'fixed', value: v } });
+    }
+    if (o.prefs.pct) for (const v of [0.5, 1, 2]) out.push({ name: v.toString().replace('.', ',') + ' % du compte / mois', w: { on: true, mode: 'periodic', every: 'month', days: 30, type: 'pct', value: v } });
+    if (o.prefs.none) out.push({ name: 'Sans retrait', w: null });
+    return out;
+  }
+  /** Historique de cours pour la recherche (source choisie sur la page d'accueil). */
+  async function minerBars(pair) {
+    const src = sourceValue(), today = new Date(F.data.iso(new Date()) + 'T00:00:00Z');
+    const y0 = src === 'broker' ? 2012 : src === 'online' ? 2000 : 1998, start = new Date(Date.UTC(y0, 0, 1)), fetchStart = new Date(Date.UTC(y0 - 2, 0, 1));
+    if (src === 'broker') { const l = await loadBrokerBars({ start: start, end: today }); return { bars: l.bars, broker: l.broker, tf: l.timeframe, label: 'MT5', synthetic: false, symbol: l.symbol }; }
+    if (src === 'csv') { if (!csvBars) throw new Error('Choisissez d\'abord un fichier CSV (page d\'accueil, section Données).'); return { bars: csvBars, tf: csvMeta.timeframe, label: 'CSV', synthetic: false }; }
+    if (src === 'online') {
+      try {
+        const key = pair + '|' + F.data.iso(fetchStart) + '|' + F.data.iso(today);
+        if (!onlineCache.has(key)) onlineCache.set(key, await F.data.fetchFrankfurter(pair, fetchStart, today));
+        return { bars: $('estimateWicks').checked ? F.data.estimateWicks(onlineCache.get(key)) : onlineCache.get(key), tf: 'D1', label: 'BCE', synthetic: false };
+      } catch (e) { /* cours en ligne indisponibles : données simulées */ }
+    }
+    return { bars: F.data.generateSynthetic(pair, fetchStart, today), tf: 'D1', label: 'Simulées', synthetic: true };
+  }
+  async function runMiner() {
+    if (checkRunning || minerState.status === 'run') return;
+    minerRead();
+    const o = minerOpt, mechs = minerMechs(o);
+    if (!mechs.length) { minerState.status = 'err'; minerState.msg = 'Cochez au moins une manière de retirer.'; return renderMiner(); }
+    const strats = F.presets.list.map((p) => Object.assign({}, p)).concat(o.saved ? storage.get().map((s) => Object.assign({}, s)) : []).filter((s) => s.longEntry || s.shortEntry);
+    const levs = MINER_LEV.filter((l) => l <= o.maxLev), K = { fast: 12, normal: 20, deep: 40 }[o.effort] || 20;
+    const pair = $('pair').value;
+    minerState = { open: true, status: 'run', msg: 'Chargement des cours de ' + pair + '…', pct: 0, res: null };
+    renderMiner();
+    checkRunning = 'miner'; checkStop = false; setRunLabel('Chercheur de FX');
+    try {
+      const data = await minerBars(pair), bars = data.bars, WARM = 300;
+      const dayOf = (b) => String(b.date).slice(0, 10);
+      // périodes d'essai : mêmes dates pour toutes les combinaisons
+      const lastIdx = bars.length - 1, starts = [];
+      const endOf = (i) => { const d = new Date(dayOf(bars[i]) + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + o.months); const iso = F.data.iso(d); let j = i; while (j < lastIdx && dayOf(bars[j + 1]) <= iso) j++; return dayOf(bars[j]) >= F.data.iso(new Date(d.getTime() - 5 * 864e5)) ? j : -1; };
+      const cand = []; for (let i = WARM; i <= lastIdx; i++) { const j = endOf(i); if (j > 0) cand.push([i, j]); else break; }
+      if (cand.length < 5) throw new Error('Historique trop court pour des placements de ' + durTxt2(o.months) + '.');
+      let seed = 12345; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+      for (let k = 0; k < K; k++) starts.push(cand[Math.floor(((k + rnd()) / K) * cand.length) % cand.length]); // réparties sur tout l'historique
+      const base = {
+        capital: o.budget, exposurePct: Number($('exposure').value) || 100, spreadPips: Number($('spread').value) || 0, pair: pair, timeframe: data.tf || 'D1',
+        sizing: $('brokerSizing').value, fixedLots: Number($('brokerLots').value) || 0.01, riskPct: Number($('brokerRisk').value) || 1, commissionPerLot: Number($('commission').value) || 0,
+      };
+      if (data.broker) Object.assign(base, { broker: data.broker, symbol: data.symbol, spreadMode: $('spreadMode').value, maxLots: Number($('brokerMaxLots').value) || 1, maxSpreadPips: Number($('brokerMaxSpread').value) || 0 });
+      const run = (strat, se, s0, s1) => {
+        const from = Math.max(0, s0 - WARM), sl = bars.slice(from, s1 + 1), st = Object.assign({}, se, { startIndex: s0 - from });
+        try { return se.broker ? F.broker.runBrokerBacktest(sl, strat, st, se.broker) : F.backtest.runBacktest(sl, strat, st); } catch (e) { return null; }
+      };
+      const combos = strats.length * levs.length, trials = combos * mechs.length, found = [];
+      let done = 0, lastYield = Date.now();
+      for (const strat of strats) for (const lev of levs) {
+        if (checkStop) break;
+        const se = Object.assign({}, base, { leverage: lev });
+        // sans retrait : une fois par période
+        const bases = starts.map(([s0, s1]) => run(strat, wdApply(se, null), s0, s1));
+        for (const m of mechs) {
+          if (checkStop) break;
+          const R = [];
+          starts.forEach(([s0, s1], k) => {
+            const b = bases[k], w = m.w ? run(strat, wdApply(se, m.w), s0, s1) : b;
+            if (b && w && w.equity && w.equity.length) R.push(wdRow({ key: 'mn' + k, from: dayOf(bars[s0]), to: dayOf(bars[s1]) }, o.budget, b, w));
+          });
+          done++;
+          if (R.length >= Math.max(5, K * 0.6)) {
+            const wn = m.w || { on: false };
+            const fx = fxFromRows(R, { name: strat.name, strategy: strat, config: Object.assign(currentConfig(), { leverage: lev, capital: o.budget }), pair: pair, leverage: lev, dataLabel: data.label,
+              synthetic: data.synthetic, mech: { name: m.name, w: m.w ? m.w : { on: false, mode: 'periodic', type: 'none', value: 0 } }, other: { name: mechs.length - 1 + ' autre' + (mechs.length > 2 ? 's' : '') + ' manière' + (mechs.length > 2 ? 's' : '') }, trials: trials });
+            fx.name = 'FX ' + strat.name + ' · ' + pair + ' · 1:' + lev + ' · ' + m.name;
+            if (!m.w) { fx.income = Object.assign(fx.income, { desc: 'sans retrait', perMonthPct: 0, fixedPct: null }); }
+            found.push(minerScore(fx, o, wn));
+          }
+          if (Date.now() - lastYield > 60) {
+            minerState.pct = done / trials; minerState.msg = 'Essai ' + done + ' / ' + trials + ' combinaisons · ' + strat.name + ' · levier 1:' + lev;
+            renderMinerProgress(); await new Promise((r) => setTimeout(r, 0)); lastYield = Date.now();
+          }
+        }
+      }
+      found.sort((a, b) => (b.ok - a.ok) || (b.ok ? b.rank - a.rank : a.dist - b.dist));
+      // propositions variées : d'abord la meilleure combinaison de chaque stratégie, puis les suivantes
+      const seen = new Set(), pick = [];
+      for (const c of found) if (!seen.has(c.fx.strategy.name)) { seen.add(c.fx.strategy.name); pick.push(c); }
+      for (const c of found) if (pick.length < 6 && !pick.includes(c)) pick.push(c);
+      pick.sort((a, b) => (b.ok - a.ok) || (b.ok ? b.rank - a.rank : a.dist - b.dist));
+      minerState = { open: true, status: 'done', res: { cands: pick.slice(0, 6), total: found.length, ok: found.filter((x) => x.ok).length, trials: trials, done: done, stopped: checkStop, K: K, opt: JSON.parse(JSON.stringify(o)), synthetic: data.synthetic } };
+      logEvent('fx.miner', 'Chercheur de FX : ' + done + ' combinaisons, ' + minerState.res.ok + ' conformes', { opt: o });
+    } catch (e) {
+      minerState = { open: true, status: 'err', msg: e.message, res: null };
+    } finally {
+      checkRunning = ''; setRunLabel('');
+    }
+    renderMiner();
+    const r = $('fxMiner').querySelector('.miner-res'); if (r) r.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  function renderMinerProgress() {
+    const box = $('fxMiner').querySelector('.modal-loading');
+    if (!box) return renderMiner();
+    box.innerHTML = '<span class="spinner"></span>' + esc(minerState.msg || '') + '<div class="miner-bar"><i style="width:' + Math.round((minerState.pct || 0) * 100) + '%"></i></div>';
+  }
+  /** Note d'un candidat par rapport aux critères. */
+  function minerScore(fx, o, w) {
+    FX_BASE = fx.capital;
+    const conf = fxConfidence(fx).score, pt = fxPoint(fx, 0.5), incEur = (o.budget * (pt.inc || 0)) / 100, want = Number(o.income) || 0;
+    const miss = [];
+    if (fx.riskNote > o.maxRisk) miss.push('risque ' + fx.riskNote + '/7 (max ' + o.maxRisk + ')');
+    if (conf < o.minConf) miss.push('confiance ' + conf + ' (min ' + o.minConf + ')');
+    if (want > 0 && w && w.on !== false && incEur < want * 0.9) miss.push('revenu ≈ ' + Math.round(incEur) + ' €/mois (souhaité ' + want + ')');
+    // classement : capital au bout de la durée le plus souvent (compte + revenus), puis confiance
+    const rank = fx.scenarios.med + conf * 0.2 + fx.winRate * 0.1;
+    const dist = Math.max(0, fx.riskNote - o.maxRisk) * 15 + Math.max(0, o.minConf - conf) + (want > 0 ? Math.max(0, want - incEur) / Math.max(1, want) * 30 : 0) - fx.scenarios.med * 0.05;
+    return { fx: fx, conf: conf, incEur: incEur, ok: miss.length ? 0 : 1, miss: miss, rank: rank, dist: dist };
+  }
+  function minerResultsHtml(res) {
+    const o = res.opt;
+    let h = '<div class="miner-res"><h4>' + (res.ok ? '✅ ' + res.ok + ' plan' + (res.ok > 1 ? 's' : '') + ' respecte' + (res.ok > 1 ? 'nt' : '') + ' vos critères' : '⚠ Aucun plan ne respecte tous vos critères : voici les plus proches') + '</h4>' +
+      '<p class="hint">' + res.done + ' combinaisons essayées sur ' + res.trials + (res.stopped ? ' (recherche arrêtée)' : '') + ', ' + res.K + ' périodes passées de ' + durTxt2(o.months) + ' chacune. Le score de confiance tient compte du nombre de combinaisons essayées (plus on cherche, plus le hasard peut faire briller un plan).' +
+      (res.synthetic ? ' <b>Données simulées : à refaire avec les cours réels (MT5) avant de présenter un plan.</b>' : '') + '</p><div class="miner-list">';
+    for (const c of res.cands) {
+      const fx = c.fx, pt = fxPoint(fx, 0.5);
+      FX_BASE = fx.capital;
+      h += '<article class="miner-card ' + (c.ok ? 'ok' : 'near') + '" data-mn="' + esc(fx.id) + '"><header><b>' + esc(fx.strategy.name) + '</b><span>' + esc(fx.strategy.pair) + ' · levier 1:' + fx.strategy.leverage + ' · ' + esc(fx.income.name) + '</span></header>' +
+        '<div class="miner-kpis"><div><span>Le plus souvent, au bout de ' + durTxt2(o.months) + '</span><b class="' + (fx.scenarios.med >= 100 ? 'pos' : 'neg') + '">' + fxMoney(fx.scenarios.med) + '</b></div>' +
+        '<div><span>Revenu</span><b>≈ ' + fxMoney(pt.inc || 0) + ' / mois</b></div><div><span>Risque</span><b>' + fx.riskNote + ' / 7</b></div><div><span>Confiance</span><b>' + c.conf + ' / 100</b></div><div><span>Chances de gain</span><b>' + Math.round(fx.winRate / 10) + ' sur 10</b></div></div>' +
+        (c.ok ? '<p class="miner-ok">✓ Respecte vos critères</p>' : '<p class="miner-miss">✗ ' + c.miss.map(esc).join(' · ') + '</p>') +
+        '<div class="row buttons"><button type="button" class="secondary small" data-mn-view="' + esc(fx.id) + '">Voir le FX complet</button><button type="button" class="primary small" data-mn-save="' + esc(fx.id) + '">💼 Enregistrer ce FX</button></div>' +
+        '<div class="miner-full" id="mnFull-' + esc(fx.id) + '" hidden></div></article>';
+    }
+    return h + '</div></div>';
+  }
+  $('fxMinerBtn').addEventListener('click', () => {
+    minerState.open = !minerState.open;
+    if (!minerOpt) minerOpt = minerDefaults();
+    renderMiner();
+    if (minerState.open) $('fxMiner').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  $('fxMiner').addEventListener('click', (ev) => {
+    const t = ev.target;
+    if (t.id === 'mnClose') { minerState.open = false; return renderMiner(); }
+    if (t.id === 'mnRun') return runMiner();
+    if (t.id === 'mnStop') { checkStop = true; return; }
+    const v = t.closest('[data-mn-view]');
+    if (v) {
+      const fx = fxFind(v.dataset.mnView), box = $('mnFull-' + fx.id);
+      box.hidden = !box.hidden;
+      if (!box.hidden) { box.innerHTML = fxCardHtml(fx); v.textContent = 'Masquer le FX complet'; } else v.textContent = 'Voir le FX complet';
+      return;
+    }
+    const sv = t.closest('[data-mn-save]');
+    if (sv) {
+      const fx = fxFind(sv.dataset.mnSave);
+      if (!fx || fxList().some((x) => x.id === fx.id)) return toast('Ce FX est déjà enregistré.', false);
+      const name = (prompt('Nom du FX (plan d\'investissement) :', fx.name) || '').trim().slice(0, 80);
+      if (!name) return;
+      fx.name = name;
+      setFxList(fxList().concat(fx));
+      logEvent('fx.saved', 'FX enregistré depuis le chercheur : ' + name, { id: fx.id });
+      sv.textContent = '✓ Enregistré'; sv.disabled = true;
+      openFx(); renderMiner();
+      toast('FX « ' + name + ' » enregistré.', false);
+    }
+  });
+  $('fxMiner').addEventListener('change', (ev) => { if (ev.target.closest('.miner-form')) minerRead(); });
+
   // point blanc des scénarios : glisser (souris ou doigt) pour choisir un scénario
   let fxDrag = null;
   function fxDragAt(ev) {
-    const fx = fxList().find((x) => x.id === fxDrag.id), svg = fxDrag.svg;
+    const fx = fxFind(fxDrag.id), svg = fxDrag.svg;
     if (!fx) return;
     const b = svg.getBoundingClientRect(), vx = ((ev.clientX - b.left) / b.width) * 360, rg = fxRange(fx);
     const v = rg.lo + ((vx - 12) / 336) * (rg.hi - rg.lo);
@@ -3786,7 +4006,7 @@
   $('fxModal').addEventListener('change', (ev) => {
     const id = ev.target.dataset && ev.target.dataset.fxInvest;
     if (!id || !ev.target.isConnected || fxInvBusy) return; // déjà traité (Entrée puis perte du focus)
-    const l = fxList(), fx = l.find((x) => x.id === id);
+    const l = fxList(), fx = l.find((x) => x.id === id) || fxFind(id);
     if (!fx) return;
     fxInvBusy = true;
     try { fxInvestApply(ev, l, fx, id); } finally { fxInvBusy = false; }
@@ -3795,7 +4015,7 @@
   function fxInvestApply(ev, l, fx, id) {
     let v = Math.round(Number(ev.target.value) || 0);
     if (v < fx.capital) { v = Math.ceil(fx.capital); toast('Montant minimum pour ce plan : ' + money0.format(fx.capital) + '.', false); }
-    fx.invest = v; setFxList(l);
+    fx.invest = v; if (l.includes(fx)) setFxList(l); // FX proposé par le chercheur : pas encore enregistré
     const card = document.querySelector('.fx-card[data-fx="' + id + '"]');
     if (card) card.outerHTML = fxCardHtml(fx);
   }

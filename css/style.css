@@ -923,3 +923,31 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 .fx-tip-scale { color: var(--muted, #64748b); font-size: 11.5px; }
 .fx-conf:hover .fx-tip, .fx-conf:focus .fx-tip, .fx-conf.open .fx-tip { display: block; }
 @media (max-width: 700px) { .fx-tip { position: static; width: auto; margin-top: 8px; box-shadow: none; } }
+/* Chercheur de FX */
+.fx-miner-btn { width: auto !important; margin-top: 8px !important; }
+.miner { border: 2px solid var(--accent); border-radius: 14px; padding: 12px 14px; margin-bottom: 16px; background: var(--panel); }
+.miner-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.miner-head h3 { margin: 0; font-size: 16px; }
+.miner-head button, .miner .row.buttons button { width: auto; margin: 0; }
+.miner .row.buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+.miner-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px 12px; }
+.miner-prefs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 10px 0 0; font-size: 13px; }
+.miner-prefs b { width: 100%; }
+.miner-prefs select { width: auto; }
+.miner-bar { height: 6px; background: var(--panel-2); border-radius: 99px; margin-top: 8px; overflow: hidden; width: 100%; }
+.miner-bar i { display: block; height: 100%; background: var(--accent); transition: width .2s; }
+.miner .modal-loading { flex-wrap: wrap; }
+.miner-res h4 { margin: 14px 0 4px; }
+.miner-list { display: grid; gap: 10px; }
+.miner-card { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; }
+.miner-card.ok { border-color: var(--up); }
+.miner-card.near { border-color: var(--warn); }
+.miner-card header { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.miner-card header span { font-size: 12.5px; color: var(--muted, #64748b); }
+.miner-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px; margin: 8px 0; }
+.miner-kpis div { background: var(--panel-2); border-radius: 8px; padding: 6px 8px; display: flex; flex-direction: column; font-size: 11.5px; color: var(--muted, #64748b); }
+.miner-kpis b { font-size: 15px; color: var(--text); }
+.miner-kpis b.pos { color: var(--up); } .miner-kpis b.neg { color: var(--down); }
+.miner-ok { color: var(--up); font-weight: 600; margin: 4px 0; font-size: 13px; }
+.miner-miss { color: var(--warn); margin: 4px 0; font-size: 13px; }
+.miner-full { margin-top: 10px; }

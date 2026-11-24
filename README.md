@@ -253,6 +253,17 @@ choisit un scénario (du pire au meilleur cas testé) : le gain au bout d'un an 
 
 Un FX construit sur des données simulées est signalé (« à refaire avec les cours réels MT5 avant de le présenter »).
 
+## Chercheur de FX
+
+Dans la fenêtre **💼 FX**, **⛏️ Chercheur de FX** : vous indiquez le budget, le risque maximum (1 à 7), la confiance
+minimum, la durée du placement, le revenu souhaité (facultatif), le levier maximum et les manières de retirer
+acceptées (excédent, somme fixe, % du compte, sans retrait). Le chercheur essaie **toutes les combinaisons** stratégies
+(modèles + vos stratégies enregistrées) × leviers × manières de retirer, chacune sur les mêmes périodes passées tirées au
+hasard (12, 20 ou 40 selon la recherche) de la durée choisie, sur la paire et la source de données de la page
+d'accueil. Pour chaque combinaison il construit un FX complet (scénarios, risque, score de confiance — corrigé du
+nombre de combinaisons essayées —, revenu) et le compare aux critères. Il propose les plans conformes, sinon les plus
+proches avec les critères non atteints ; chacun peut être affiché en entier (« Voir le FX complet ») et enregistré.
+
 ## Événements de marché
 
 Forexia connaît les grands événements du marché des changes depuis 1971 (Bretton Woods, accords du Plaza, mercredi
