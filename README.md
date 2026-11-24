@@ -263,6 +263,12 @@ hasard (12, 20 ou 40 selon la recherche) de la durée choisie, sur la paire et l
 d'accueil. Pour chaque combinaison il construit un FX complet (scénarios, risque, score de confiance — corrigé du
 nombre de combinaisons essayées —, revenu) et le compare aux critères. Il propose les plans conformes, sinon les plus
 proches avec les critères non atteints ; chacun peut être affiché en entier (« Voir le FX complet ») et enregistré.
+**🧪 Création de stratégies** (option cochée par défaut) : avant la recherche, le chercheur crée des variantes de
+chaque stratégie (filtre ADX, filtre EMA 200, pente EMA 50, filtres de volatilité, achats ou ventes seulement, stop
+2 ATR, stop suiveur) et les teste sur les mêmes périodes ; les 8 meilleures, celles qui font mieux que leur modèle,
+entrent dans la recherche. Une proposition qui utilise une stratégie créée l'indique (« 🧪 Stratégie créée par le
+chercheur ») et propose « 💾 Enregistrer la stratégie » ; enregistrer le FX propose aussi d'enregistrer la stratégie.
+Toutes les variantes testées comptent dans le nombre d'essais du score de confiance.
 
 ## Événements de marché
 
