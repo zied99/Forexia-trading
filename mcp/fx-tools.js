@@ -615,7 +615,7 @@ module.exports = function fxTools(ctx) {
         const e0 = L[0], nameW = a.mechanic === 'none' || !w ? 'Sans retrait' : wName(a.mechanic, w);
         const fx = FC.fxFromRows(R, { name: e0.name, strategy: e0.strategy, config: e0.config, pair: e0.pair, leverage: e0.leverage, dataLabel: e0.data, synthetic: L.some((e) => /simul/i.test(e.data || '')),
           mech: { name: nameW, w: w || { on: false, mode: 'periodic', type: 'none', value: 0 } }, other: { name: '—' }, trials: a.trials || trialsFor(e0.name, batches.get().length), eras: eraStore.get().length ? eraStore.get() : undefined });
-        if (!w) fx.income = Object.assign(fx.income, { desc: 'sans retrait', perMonthPct: 0, fixedPct: null });
+        if (!w) fx.income = Object.assign(fx.income, { desc: 'pas de retrait partiel durant la période de trading', perMonthPct: 0, fixedPct: null });
         fx.name = a.name || 'FX ' + e0.name + ' · ' + e0.pair + ' · 1:' + e0.leverage + ' · ' + nameW;
         fx.batch = b.id; fx.keys = R.map((r) => r.key);
         const capital = Math.max(fx.capital, Number(a.capital) || fx.capital);

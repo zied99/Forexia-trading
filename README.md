@@ -253,6 +253,14 @@ choisit un scénario (du pire au meilleur cas testé) : le gain au bout d'un an 
 
 Un FX construit sur des données simulées est signalé (« à refaire avec les cours réels MT5 avant de le présenter »).
 
+**Sans retrait** : un FX peut ne prévoir **aucun retrait partiel durant la période de trading** (le capital et les
+gains restent sur le compte jusqu'à la fin). Trois façons de l'enregistrer :
+- **Évaluation › 💼 Enregistrer un FX** : à partir des simulations affichées (ou sélectionnées), sans préférence de
+  retrait ;
+- **💸 Resimuler avec un retrait** : type de retrait « Aucun retrait pendant la période », puis « 💼 Enregistrer un FX »
+  au-dessus des résultats (ce bouton enregistre aussi un FX avec la mécanique en cours, sans passer par la comparaison) ;
+- **⚖️ Comparer** : « Sans retrait » est proposé face à vos mécaniques enregistrées ; s'il gagne, le FX est sans retrait.
+
 **📂 Voir les simulations** (sur chaque FX) : remet la stratégie, le capital et le retrait du FX dans le formulaire et
 ouvre ses simulations dans l'Évaluation, comme un batch. Elles sont retrouvées dans l'historique (batch de l'agent,
 simulations d'origine, ou mêmes dates) ; sinon elles sont recalculées une fois sur les mêmes dates, puis gardées.

@@ -724,6 +724,8 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 #wdModal { z-index: 60; }
 #wdModal .modal-box { width: min(1000px, 100%); }
 .scope-tab.wd-tab { background: var(--warn-soft); border-color: var(--star-edge); color: var(--text); }
+.scope-tab.fx-tab { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.scope-tab.fx-tab:hover { filter: brightness(1.08); }
 .wd-form { margin: 12px 0; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel-2); }
 .wd-presets, .wd-fields { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
 .wd-fields { margin-top: 10px; }

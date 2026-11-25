@@ -3130,6 +3130,8 @@
   const WD_KEY = 'forexia.wdPresets', WD_RES_KEY = 'forexia.wdResults';
   const wdPresets = () => { try { const l = JSON.parse(localStorage.getItem(WD_KEY)); return Array.isArray(l) ? l : []; } catch (e) { return wdPresetMem || []; } };
   let wdPresetMem = null, wdResMem = {};
+  /** Mécaniques proposées à la comparaison : les mécaniques enregistrées + « Sans retrait ». */
+  const wdChoices = () => wdPresets().concat({ id: 'none', name: 'Sans retrait', w: { on: false, mode: 'none' } });
   function setWdPresets(l) { wdPresetMem = l; try { localStorage.setItem(WD_KEY, JSON.stringify(l)); } catch (e) { /* ignoré */ } refreshWdPresetPick(); }
   /** Réglages de simulation avec la mécanique de retrait w ({on, mode, pct, share, when, every, days, type, value}). */
   function wdApply(se, w) { return F.fxcore.wdApply(se, w); }
@@ -3192,9 +3194,10 @@
     if (!$('wdMode')) return;
     // seuls les champs affichés sont lus : les autres gardent leur valeur
     const map = { mode: 'wdMode', pct: 'wdPct', share: 'wdShare', when: 'wdWhen', every: 'wdEvery', days: 'wdDays', type: 'wdType', value: 'wdValue' };
-    w.on = true;
     for (const k in map) { const x = v(map[k]); if (x !== undefined) w[k] = x; }
+    w.on = w.mode !== 'none';
   }
+  const wdMechHint = (w) => 'Mécanique : <b>' + esc(w.mode === 'none' ? 'aucun retrait : le capital et les gains restent sur le compte jusqu\'à la fin de la période' : wdDesc(w)) + '</b>. Comme chez un courtier, seule la marge libre peut être retirée : si une position bloque la marge, le retrait attend sa clôture.';
   function wdFormHtml(w) {
     const st = wdState, opt = (cur, list) => list.map(([v, l]) => '<option value="' + v + '"' + (String(cur) === v ? ' selected' : '') + '>' + l + '</option>').join('');
     const per = w.mode === 'periodic', pres = wdPresets(), all = evalList();
@@ -3207,15 +3210,15 @@
       '<div class="wd-presets"><label class="field">Mécanique enregistrée<select id="wdPreset"><option value="">—</option>' + pres.map((p) => '<option value="' + esc(p.id) + '"' + (st.presetId === p.id ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('') + '</select></label>' +
       (st.presetId ? '<button type="button" class="ghost small" id="wdPresetDel" title="Supprimer cette mécanique">🗑</button>' : '') +
       '<button type="button" class="secondary small" id="wdSave">💾 Enregistrer cette mécanique</button><button type="button" class="secondary small wd-cmp-btn" id="wdCmp" title="Comparer deux mécaniques enregistrées sur les simulations choisies">⚖️ Comparer</button><button type="button" class="ghost small" id="wdToForm" title="Mettre cette mécanique dans la section « Retrait fictif des gains » du formulaire">Utiliser dans le formulaire</button></div>' +
-      '<div class="wd-fields"><label class="field">Type de retrait<select id="wdMode">' + opt(w.mode, [['threshold', 'Quand le gain atteint un seuil'], ['periodic', 'Régulier : chaque mois ou tous les X jours']]) + '</select></label>' +
-      (per ? '<label class="field">Fréquence<select id="wdEvery">' + opt(w.every, [['month', 'Chaque mois'], ['days', 'Tous les X jours']]) + '</select></label>' +
+      '<div class="wd-fields"><label class="field">Type de retrait<select id="wdMode">' + opt(w.mode, [['threshold', 'Quand le gain atteint un seuil'], ['periodic', 'Régulier : chaque mois ou tous les X jours'], ['none', 'Aucun retrait pendant la période']]) + '</select></label>' +
+      (w.mode === 'none' ? '' : per ? '<label class="field">Fréquence<select id="wdEvery">' + opt(w.every, [['month', 'Chaque mois'], ['days', 'Tous les X jours']]) + '</select></label>' +
         (w.every === 'days' ? '<label class="field">Tous les (jours, min. 15)<input id="wdDays" type="number" min="15" max="366" value="' + esc(w.days) + '"></label>' : '') +
         '<label class="field">Montant retiré<select id="wdType">' + opt(w.type, [['pct', '% du compte'], ['fixed', 'Somme fixe'], ['excess', '% de l\'excédent sur le capital de départ']]) + '</select></label>' +
         '<label class="field">' + (w.type === 'fixed' ? 'Somme' : 'Pourcentage (%)') + '<input id="wdValue" type="number" min="0" step="any" value="' + esc(w.value) + '"></label>'
         : '<label class="field">Seuil de gain (%)<input id="wdPct" type="number" min="1" max="1000" value="' + esc(w.pct) + '"></label><label class="field">Part du gain retirée (%)<input id="wdShare" type="number" min="1" max="100" value="' + esc(w.share) + '"></label>' +
         '<label class="field">Moment<select id="wdWhen">' + opt(w.when, [['immediate', 'Dès le seuil (position clôturée)'], ['close', 'À la clôture du trade']]) + '</select></label>') +
       '<button type="button" class="primary" id="wdRun"' + (st.status === 'run' || !n ? ' disabled' : '') + '>▶ Resimuler ' + (n > 1 ? 'les ' + n + ' simulations' : n ? 'la simulation' : '(choisissez des simulations)') + '</button></div>' +
-      '<p class="hint">Mécanique : <b>' + esc(wdDesc(w)) + '</b>. Comme chez un courtier, seule la marge libre peut être retirée : si une position bloque la marge, le retrait attend sa clôture.</p></div>';
+      '<p class="hint" id="wdMechHint">' + wdMechHint(w) + '</p></div>';
   }
   function renderWdModal() {
     const st = wdState, n = wdTargets().length;
@@ -3267,15 +3270,15 @@
   }
   // ----- Comparer deux mécaniques enregistrées sur les mêmes simulations -----
   function openWdCompare() {
-    const pres = wdPresets(), st = wdState;
-    if (pres.length < 2) return toast('Enregistrez au moins deux mécaniques de retrait (💾) pour les comparer.', false);
+    const pres = wdChoices(), st = wdState;
+    if (pres.length < 2) return toast('Enregistrez au moins une mécanique de retrait (💾) pour la comparer à « Sans retrait » ou à une autre.', false);
     if (!wdTargets().length) return toast('Choisissez au moins une simulation dans la liste.', false);
     st.view = 'compare';
     st.cmp = st.cmp && pres.some((p) => p.id === st.cmp.a) && pres.some((p) => p.id === st.cmp.b) ? st.cmp : { a: pres[0].id, b: pres[1].id };
     runWdCompare();
   }
   async function runWdCompare() {
-    const st = wdState, c = st.cmp, pres = wdPresets(), T = wdTargets();
+    const st = wdState, c = st.cmp, pres = wdChoices(), T = wdTargets();
     const A = pres.find((p) => p.id === c.a), B = pres.find((p) => p.id === c.b);
     if (!A || !B || A.id === B.id) { c.status = 'err'; c.msg = 'Choisissez deux mécaniques différentes.'; return renderWdModal(); }
     if (checkRunning) return;
@@ -3294,7 +3297,7 @@
   /** Indicateurs d'une mécanique sur un ensemble de simulations. */
   function wdAgg(R) { return F.fxcore.wdAgg(R); }
   function wdCompareHtml(st) {
-    const c = st.cmp, pres = wdPresets(), T = wdTargets();
+    const c = st.cmp, pres = wdChoices(), T = wdTargets();
     const sel = (id, cur) => '<select id="' + id + '">' + pres.map((p) => '<option value="' + esc(p.id) + '"' + (p.id === cur ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('') + '</select>';
     let h = '<section class="wd-cmp"><div class="wd-cmp-head"><h3>⚖️ Comparer deux mécaniques de retrait</h3><button type="button" class="secondary small" id="wdCmpBack">← Retour aux résultats</button></div>' +
       '<div class="wd-cmp-pick"><label class="field"><span><i class="wd-dot a"></i>Mécanique A</span>' + sel('wdCmpA', c.a) + '</label><span class="wd-vs">contre</span><label class="field"><span><i class="wd-dot b"></i>Mécanique B</span>' + sel('wdCmpB', c.b) + '</label>' +
@@ -3380,30 +3383,30 @@
   function fxPrinciple(strat, pair) { return F.fxcore.fxPrinciple(strat, pair); }
   /** Note de risque de 1 (très faible) à 7 (très élevé), d'après les pertes possibles et les baisses en cours de route. */
   function fxRiskNote(loss10, ddMed, worstLoss) { return F.fxcore.fxRiskNote(loss10, ddMed, worstLoss); }
-  /**
-   * FX (version 2) à partir de la comparaison : la mécanique de retrait gagnante et ses résultats sur les simulations
-   * comparées. Les montants sont rapportés à 10 000 investis pour que les plans se comparent entre eux.
-   */
-  function buildFx(c) {
-    const st = wdState, best = c.bestSide === 'b' ? 'b' : 'a';
-    const mech = best === 'a' ? c.A : c.B, other = best === 'a' ? c.B : c.A;
-    const R = best === 'a' ? st.cmpRows.RA : st.cmpRows.RB, sims = R.map((r) => evalList().find((e) => e.key === r.key));
-    const first = sims.find(Boolean) || {};
-    return fxFromRows(R, { name: first.name, strategy: first.strategy, config: first.config, pair: first.pair, leverage: first.leverage, dataLabel: first.data,
-      synthetic: sims.some((e) => e && /simul/i.test(e.data || '')), mech: mech, other: other, keys: R.map((r) => r.key) });
-  }
   /** FX à partir des simulations relancées avec une mécanique de retrait (rows : voir wdRow). */
   function fxFromRows(R, meta) { return F.fxcore.fxFromRows(R, meta); }
-  function saveFxFromCompare() {
-    const c = wdState.cmp;
-    if (!c || c.status !== 'done' || !wdState.cmpRows) return;
-    const fx = buildFx(c);
+  const NO_WD = 'pas de retrait partiel durant la période de trading';
+  const wdNone = (w) => !w || w.on === false || w.mode === 'none';
+  /** Enregistre un FX construit à partir de simulations relancées (rows) et d'une mécanique (sans retrait possible). */
+  function saveFxRows(R, mech, other) {
+    if (!R || !R.length) return toast('Aucune simulation calculée pour ce FX.', false);
+    const all = evalList(), sims = R.map((r) => all.find((e) => e.key === r.key)), first = sims.find(Boolean) || {};
+    const fx = fxFromRows(R, { name: first.name, strategy: first.strategy, config: first.config, pair: first.pair, leverage: first.leverage, dataLabel: first.data,
+      synthetic: sims.some((e) => e && /simul/i.test(e.data || '')), mech: mech, other: other || null, keys: R.map((r) => r.key) });
+    if (wdNone(mech.w)) { fx.income = Object.assign(fx.income, { desc: NO_WD, perMonthPct: 0, fixedPct: null, other: other ? other.name : null }); fx.name = 'FX ' + (first.name || 'stratégie') + ' · sans retrait'; }
+    else if (!other) fx.income.other = null;
     const name = (prompt('Nom du FX (plan d\'investissement) :', fx.name) || '').trim().slice(0, 80);
     if (!name) return;
     fx.name = name;
     setFxList(fxList().concat(fx));
     logEvent('fx.saved', 'FX enregistré : ' + name, { id: fx.id });
     toast('FX « ' + name + ' » enregistré : bouton « 💼 FX » en haut de la page.', false);
+  }
+  function saveFxFromCompare() {
+    const c = wdState.cmp;
+    if (!c || c.status !== 'done' || !wdState.cmpRows) return;
+    const best = c.bestSide === 'b' ? 'b' : 'a', mech = best === 'a' ? c.A : c.B, other = best === 'a' ? c.B : c.A;
+    saveFxRows(best === 'a' ? wdState.cmpRows.RA : wdState.cmpRows.RB, mech, other);
   }
   // ----- Fenêtre « FX » : les plans sous forme de cartes -----
   const stars = (score) => { const s = Math.round(score / 20 * 2) / 2; let h = ''; for (let i = 1; i <= 5; i++) h += '<span class="fx-star ' + (s >= i ? 'on' : s >= i - 0.5 ? 'half' : '') + '">★</span>'; return h; };
@@ -3522,9 +3525,10 @@
     const nm = fxScenarioName(q);
     return '<span class="fx-pick-name">' + nm.charAt(0).toUpperCase() + nm.slice(1) + '</span>' +
       '<span>Au bout de la durée (' + fx.duration.reco + ' mois) : <b class="' + (pt.b >= 100 ? 'pos' : 'neg') + '">' + fxMoney(pt.b) + '</b></span>' +
+      (wdNone(fx.income && fx.income.w) ? '<span>Au bout d\'un an : <b class="' + cls(pt.y1) + '">' + signed(pt.y1, num1) + ' %' + fxGainEur(pt.y1) + '</b>' + (pt.est ? ' <small>estimé</small>' : '') + '</span><span>Aucun retrait pendant la période : tout reste sur le compte.</span>' :
       '<span>Revenu : <b>≈ ' + fxMoney(pt.inc) + ' / mois</b>' + (pt.approx ? ' <small>(moyenne du plan)</small>' : '') + '</span>' +
       (pt.tot != null ? '<span>Revenus touchés au total : <b>' + fxMoney(pt.tot) + '</b></span><span>Reste sur le compte : <b class="' + (pt.acc >= 100 ? 'pos' : 'neg') + '">' + fxMoney(pt.acc) + '</b></span>' : '') +
-      '<span>Au bout d\'un an : <b class="' + cls(pt.y1) + '">' + signed(pt.y1, num1) + ' %' + fxGainEur(pt.y1) + '</b> avec retrait' + (pt.y1b != null ? ' · <b class="' + cls(pt.y1b) + '">' + signed(pt.y1b, num1) + ' %' + fxGainEur(pt.y1b) + '</b> sans retrait' : '') + (pt.est ? ' <small>estimé</small>' : '') + '</span>';
+      '<span>Au bout d\'un an : <b class="' + cls(pt.y1) + '">' + signed(pt.y1, num1) + ' %' + fxGainEur(pt.y1) + '</b> avec retrait' + (pt.y1b != null ? ' · <b class="' + cls(pt.y1b) + '">' + signed(pt.y1b, num1) + ' %' + fxGainEur(pt.y1b) + '</b> sans retrait' : '') + (pt.est ? ' <small>estimé</small>' : '') + '</span>');
   }
   /** Met à jour la carte quand on déplace le point (sans tout redessiner). */
   function fxSetQ(id, q) {
@@ -3538,7 +3542,7 @@
     const d = (k) => card.querySelector('[data-fx-d="' + k + '"]');
     if (d('y1')) d('y1').innerHTML = fxY1Html(pt);
     if (d('y1s')) d('y1s').innerHTML = fxY1Sub(pt);
-    if (d('inc')) d('inc').textContent = '≈ ' + fxMoney(pt.inc) + ' / mois';
+    if (d('inc') && !wdNone(fx.income && fx.income.w)) d('inc').textContent = '≈ ' + fxMoney(pt.inc) + ' / mois';
   }
   /** Évolution typique de 10 000 : fourchette (1 cas sur 10 fait pire / mieux), cas médian et revenus déjà touchés. */
   function fxPathSvg(path) {
@@ -3574,6 +3578,7 @@
     const sc = fx.scenarios, sol = fx.solidity, inc = fx.income, cd = fx.conditions;
     const kf = (k, v, sub, dk) => '<div class="fx-kf"><span>' + k + '</span><b' + (dk ? ' data-fx-d="' + dk + '"' : '') + '>' + v + '</b>' + (sub ? '<small' + (dk ? ' data-fx-d="' + dk + 's"' : '') + '>' + sub + '</small>' : '') + '</div>';
     const q0 = fxQ.has(fx.id) ? fxQ.get(fx.id) : 0.5, pt0 = fxPoint(fx, q0), y1v = (FX_BASE * pt0.y1) / 100;
+    const noWd = wdNone(inc.w);
     const incomeTxt = inc.w.mode === 'periodic' && inc.w.type === 'fixed' ? '≈ ' + fxMoney(inc.fixedPct) + ' / mois' : '≈ ' + fxMoney(inc.perMonthPct) + ' / mois en moyenne';
     const incomeSub = (inc.w.mode === 'periodic' && inc.w.type === 'excess' ? 'part des gains au-dessus du capital : variable, parfois nul' : inc.w.mode === 'periodic' && inc.w.type === 'fixed' ? 'somme fixe : ' + num1.format(inc.fixedPct) + ' % du capital par mois, soit ' + fxMoney(inc.fixedPct) + ' pour ' + money0.format(FX_BASE) : inc.desc) +
       ' · capital préservé ' + inc.kept + ' fois sur ' + fx.n;
@@ -3584,15 +3589,17 @@
       (sol.synthetic ? '<p class="fx-warn">⚠ Construit sur des données simulées : à refaire avec les cours réels (MT5) avant de le présenter à un client.</p>' : '') +
       '<p class="fx-principle"><b>Le principe :</b> ' + esc(fx.principle) + ' <small>(' + esc(fx.strategy.name) + ' · ' + esc(fx.strategy.pair) + ')</small></p>' +
       '<div class="fx-kfs">' + '<div class="fx-kf fx-invest"><span>Capital investi</span><label class="fx-inv"><input type="number" inputmode="numeric" data-fx-invest="' + esc(fx.id) + '" min="' + Math.ceil(fx.capital) + '" step="' + fxStep(fx.capital) + '" value="' + Math.round(FX_BASE) + '" aria-label="Capital investi (minimum ' + money0.format(fx.capital) + ')"><b>€</b></label><small>minimum ' + money0.format(fx.capital) + ' · modifiable</small></div>' + kf('Durée recommandée', durTxt2(fx.duration.reco), 'testé de ' + durTxt2(fx.duration.min) + ' à ' + durTxt2(fx.duration.max)) +
+        (noWd ? kf('Capital au bout d\'un an', fxY1Html(pt0), '', 'y1') + kf('Revenu régulier', 'Aucun', 'pas de retrait partiel : tout reste sur le compte jusqu\'à la fin') :
         kf('Capital au bout d\'un an, avec retrait', fxY1Html(pt0), fxY1Sub(pt0), 'y1') +
-        kf('Revenu régulier', fxSims(fx) ? '≈ ' + fxMoney(pt0.inc) + ' / mois' : incomeTxt, esc(fxMethodLabel(inc.w)), 'inc') + '</div>' +
+        kf('Revenu régulier', fxSims(fx) ? '≈ ' + fxMoney(pt0.inc) + ' / mois' : incomeTxt, esc(fxMethodLabel(inc.w)), 'inc')) + '</div>' +
       '<section class="fx-sec"><h5>Chances de gain</h5><div class="fx-ten-row">' + fxTenSvg(fx.winRate) + '<span><b>' + Math.round(fx.winRate / 10) + ' fois sur 10</b> le plan finit gagnant<small>' + Math.round((fx.winRate * fx.n) / 100) + ' essais gagnants sur ' + fx.n + ' faits sur des périodes passées</small></span></div></section>' +
       '<section class="fx-sec"><h5>Ce que vous récupérez au bout de la durée recommandée (' + fx.duration.reco + ' mois)</h5><p class="hint">Pour ' + money0.format(FX_BASE) + ' investis, compte + revenus déjà touchés.</p>' + fxScenarioSvg(sc, fx) + '</section>' +
       '<section class="fx-sec"><h5>Évolution typique</h5>' + fxPathSvg(fx.path) + '</section>' +
       '<section class="fx-sec fx-two"><div><h5>Risque</h5>' + fxRiskScale(fx.riskNote) + '<small>' + RISK_TXT[fx.riskNote] + ' · pire moment en cours de route : en général <b>−' + num1.format(fx.drawdown.med) + ' %</b>, au pire −' + num1.format(fx.drawdown.max) + ' %</small></div>' +
         (() => { const cf = fxConfidence(fx); return '<div class="fx-conf" tabindex="0" aria-describedby="fxTip-' + esc(fx.id) + '"><h5>Score de confiance <span class="fx-info" aria-hidden="true">ⓘ</span></h5><span class="fx-stars">' + stars(cf.score) + '</span> <b>' + cf.score + '/100</b><small>' + solTxt + (sol.synthetic ? ' · données simulées' : '') + '</small>' +
           '<div class="fx-tip" role="tooltip" id="fxTip-' + esc(fx.id) + '">' + fxConfidenceTip(fx, cf) + '</div></div>'; })() + '</section>' +
-      '<section class="fx-sec"><h5>Revenu régulier</h5><p class="fx-inc"><b>' + (inc.w.mode === 'periodic' && inc.w.type === 'fixed' ? fxMoney(inc.fixedPct) + ' chaque mois' + (inc.w.every === 'days' ? '' : '') : esc(inc.desc)) + '</b> — ' + incomeSub + '. <small>Choisi par comparaison : meilleur que « ' + esc(inc.other) + ' ».</small></p></section>' +
+      '<section class="fx-sec"><h5>Revenu régulier</h5><p class="fx-inc">' + (noWd ? '<b>' + esc(NO_WD.charAt(0).toUpperCase() + NO_WD.slice(1)) + '</b> — le capital et les gains restent sur le compte ; vous récupérez le tout à la fin (ou quand vous sortez).' :
+        '<b>' + (inc.w.mode === 'periodic' && inc.w.type === 'fixed' ? fxMoney(inc.fixedPct) + ' chaque mois' : esc(inc.desc)) + '</b> — ' + incomeSub + '.') + (inc.other && inc.other !== '—' ? ' <small>Choisi par comparaison : meilleur que « ' + esc(inc.other) + ' ».</small>' : '') + '</p></section>' +
       '<section class="fx-sec"><h5>Conditions</h5><p class="fx-cond">' + [cd.leverage ? 'Levier 1:' + cd.leverage : '', cd.spread != null ? 'spread ' + num1.format(cd.spread) + ' pip' + (cd.spread > 1 ? 's' : '') + ' par trade' : '', cd.commission ? 'commission ' + num1.format(cd.commission) + ' par lot' : 'sans commission', 'données : ' + (cd.source || '—'), 'sortie possible à tout moment (positions fermées au prix du marché)'].filter(Boolean).map(esc).join(' · ') + '</p></section>' +
       '<p class="fx-disclaimer">Résultats de simulations passées, sans garantie pour l\'avenir. Vous pouvez perdre tout ou partie du capital investi.</p>' +
       '<footer><span class="hint">créé le ' + new Date(fx.createdAt).toLocaleDateString('fr-FR') + '</span><span class="fx-acts">' + (fx.strategy.data ? '<button type="button" class="secondary small" data-fx-load="' + esc(fx.id) + '" title="Charger la stratégie et ouvrir les simulations de ce FX dans l\'évaluation (recalculées si besoin)">📂 Voir les simulations</button>' +
@@ -4112,7 +4119,9 @@
     const wdT = R.reduce((a, r) => a + r.w.wd, 0), months = R.reduce((a, r) => a + r.w.months, 0), avg = (f) => mean(R.map(f));
     const kept = R.filter((r) => r.w.final >= r.capital).length, withW = R.filter((r) => r.w.n > 0).length;
     const kpi = (label, value, sub, c) => '<div class="panel kpi"><div class="label">' + label + '</div><div class="value ' + (c || '') + '">' + value + '</div><div class="sub">' + (sub || '&nbsp;') + '</div></div>';
-    let h = '<h3 class="wd-h">Résultats avec « ' + esc(wdDesc(st.ran || st.w)) + ' »' + (n > 1 ? '' : ' · simulation #' + R[0].idx) + (st.cached ? ' <span class="ev-badge">déjà calculés</span>' : '') + '</h3><div class="kpis wd-kpis">' +
+    let h = '<h3 class="wd-h">Résultats avec « ' + esc(wdDesc(st.ran || st.w)) + ' »' + (n > 1 ? '' : ' · simulation #' + R[0].idx) + (st.cached ? ' <span class="ev-badge">déjà calculés</span>' : '') + '</h3>' +
+      '<div class="fx-save"><button type="button" class="primary small" id="wdFxSaveRun">💼 Enregistrer un FX</button><span class="hint">Plan d\'investissement avec ' + (wdNone(st.ran || st.w) ? '« ' + NO_WD + ' »' : 'ce retrait (« ' + esc(wdDesc(st.ran || st.w)) + ' »)') + ', sur ' + (n > 1 ? 'ces ' + n + ' simulations' : 'cette simulation') + '.</span></div>' +
+      '<div class="kpis wd-kpis">' +
       kpi('Total retiré', money.format(wdT), n > 1 ? 'sur ' + n + ' simulations' : 'en ' + R[0].w.n + ' retrait' + (R[0].w.n > 1 ? 's' : '')) +
       kpi('Retrait moyen par mois', money.format(wdT / Math.max(1, months)), n > 1 ? 'moyenne de toutes les simulations' : R[0].w.months + ' mois') +
       (n > 1 ? kpi('Simulations avec retrait', withW + ' / ' + n, Math.round((withW / n) * 100) + ' %') : '') +
@@ -4282,6 +4291,7 @@
     if (t.id === 'wdStop') { checkStop = true; return; }
     if (t.id === 'wdCmp') return openWdCompare();
     if (t.id === 'wdFxSave') return saveFxFromCompare();
+    if (t.id === 'wdFxSaveRun') { const st = wdState, w = st.ran || st.w; return saveFxRows(st.rows, wdNone(w) ? { name: 'Sans retrait', w: { on: false, mode: 'none' } } : { name: (wdPresets().find((p) => p.id === st.presetId) || {}).name || wdDesc(w), w: Object.assign({}, w) }, null); }
     if (t.id === 'wdCmpBack') { wdState.view = null; return wdShowCached(); }
     if (t.id === 'wdCmpRun') { wdState.cmp.a = $('wdCmpA').value; wdState.cmp.b = $('wdCmpB').value; return runWdCompare(); }
     if (t.id === 'wdFocusAll') { wdState.focus = null; mountWdCharts(wdState); return wdPaintRows(wdState); }
@@ -4318,6 +4328,13 @@
     // mécanique enregistrée rechoisie : ses résultats s'affichent (calculés au besoin)
     if (id === 'wdPreset') { const p = wdPresets().find((x) => x.id === ev.target.value); wdState.presetId = ev.target.value; if (p) { wdState.w = Object.assign({}, p.w); return wdShowCached(false); } return renderWdModal(); }
     if (['wdMode', 'wdEvery', 'wdType'].includes(id)) { wdReadForm(); wdState.presetId = ''; return wdShowCached(); }
+    // valeur saisie (montant, %, jours) : pas de redessin, sinon le clic qui suit (Resimuler, Enregistrer) serait perdu
+    if (['wdValue', 'wdPct', 'wdShare', 'wdDays'].includes(id)) {
+      wdReadForm(); wdState.presetId = '';
+      if ($('wdPreset')) $('wdPreset').value = '';
+      if ($('wdMechHint')) $('wdMechHint').innerHTML = wdMechHint(wdState.w);
+      return;
+    }
     if (id && id.startsWith('wd')) { wdReadForm(); wdState.presetId = ''; return wdShowCached(); }
   });
   function wdSelLabel() { const n = wdState.sel.length, a = wdState.all.length; return n === a ? 'tout le batch (' + a + ' simulations)' : n ? n + ' simulation' + (n > 1 ? 's' : '') + ' sur ' + a : 'aucune simulation'; }
@@ -4353,6 +4370,20 @@
   document.addEventListener('pointerup', () => { if (wdDrag) { wdDrag = null; wdCommitSel(); } });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('wdModal').hidden) closeWdModal(); });
   $('evalWdBtn').addEventListener('click', () => openWdModal());
+  // « Enregistrer un FX » depuis l'évaluation : simulations affichées (ou sélectionnées), sans préférence de retrait
+  $('evalFxBtn').addEventListener('click', async () => {
+    if (checkRunning || batchRunning) return toast('Un calcul est déjà en cours : attendez la fin ou arrêtez-le.', false);
+    const all = evalFiltered(evalList()).map((x) => x.e).filter((e) => e.strategy && e.config && !e.tag);
+    const sel = all.filter((e) => barSel.has(e.key)), T = sel.length ? sel : all;
+    if (T.length < 3) return toast('Il faut au moins 3 simulations affichées (ou sélectionnées) pour un FX.', false);
+    if (new Set(T.map((e) => e.name)).size > 1) return toast('Les simulations affichées mélangent plusieurs stratégies : choisissez-en une (filtre « Stratégie » ou un batch).', false);
+    const none = { on: false, mode: 'none' }, cache = wdResStore.get(), miss = T.filter((e) => !cache[wdKey(none) + '#' + e.key]).length;
+    if (miss > 60 && !confirm(miss + ' simulations à recalculer pour construire le FX. Continuer ?')) return;
+    const R = await wdCompute(none, T, (i, n) => { $('evalFxBtn').textContent = '💼 Calcul ' + (i + 1) + ' / ' + n + '…'; });
+    $('evalFxBtn').textContent = '💼 Enregistrer un FX';
+    if (R.length < 3) return toast('Simulations impossibles à relancer : ' + ($('formError').textContent || 'données indisponibles') + '.', false);
+    saveFxRows(R, { name: 'Sans retrait', w: none }, null);
+  });
 
   // ---------- Analyse temporelle (graphiques de l'évaluation) ----------
   const tDate = (d) => Date.parse(String(d).slice(0, 10) + 'T00:00:00Z');

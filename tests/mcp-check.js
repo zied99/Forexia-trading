@@ -201,7 +201,7 @@ const SYN = { pair: 'EUR/USD', source: 'synthetic', dateFrom: '2019-01-01', date
     const l = await call('list_fx', {}); ok(l.length === 1 && l[0].by === 'agent');
     const g = await call('get_fx', { id: FXID }); ok(g.strategyRules && g.strategyRules.longEntry && g.withdrawMechanic.type === 'excess');
     ok((await call('rename_fx', { id: FXID, name: 'Plan prudent' })).name === 'Plan prudent');
-    const nf = await call('build_fx', { id: B3, mechanic: 'none' }); ok(!nf.saved && nf.income.desc === 'sans retrait');
+    const nf = await call('build_fx', { id: B3, mechanic: 'none' }); ok(!nf.saved && nf.income.desc === 'pas de retrait partiel durant la période de trading');
   });
   await test('mine_fx (rapide, synthétique) + save_fx avec la stratégie créée', async () => {
     const r = await call('mine_fx', { budget: 5000, maxRisk: 5, minConf: 30, months: 9, maxLev: 20, pair: 'GBP/USD', source: 'synthetic', effort: 'fast' });

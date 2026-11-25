@@ -23,20 +23,20 @@
   function wdApply(se, w) {
     const s = Object.assign({}, se);
     for (const k of ['withdrawMode', 'withdrawEvery', 'withdrawDays', 'withdrawType', 'withdrawValue', 'withdrawPct', 'withdrawShare', 'withdrawWhen']) delete s[k];
-    if (w && w.on) {
+    if (w && w.on && w.mode !== 'none') {
       if (w.mode === 'periodic') Object.assign(s, { withdrawMode: 'periodic', withdrawEvery: w.every || 'month', withdrawDays: Math.max(15, Number(w.days) || 30), withdrawType: w.type || 'pct', withdrawValue: Number(w.value) || 0 });
       else Object.assign(s, { withdrawPct: Number(w.pct) || 0, withdrawShare: Number(w.share) || 100, withdrawWhen: w.when || 'close' });
     }
     return s;
   }
   /** Clé d'une mécanique (seuls les champs utiles) : sert à retrouver les résultats déjà calculés. */
-  const wdKey = (w) => (w.mode === 'periodic' ? ['p', w.every, w.every === 'days' ? Math.max(15, Number(w.days) || 30) : '', w.type, Number(w.value)] : ['t', Number(w.pct), Number(w.share), w.when]).join('|');
+  const wdKey = (w) => (!w || w.on === false || w.mode === 'none' ? ['none'] : w.mode === 'periodic' ? ['p', w.every, w.every === 'days' ? Math.max(15, Number(w.days) || 30) : '', w.type, Number(w.value)] : ['t', Number(w.pct), Number(w.share), w.when]).join('|');
   function withdrawLabel(se) {
     if (se.withdrawMode !== 'periodic') return 'seuil +' + se.withdrawPct + ' %, ' + (se.withdrawWhen === 'immediate' ? 'dès le seuil' : 'à la clôture');
     const v = se.withdrawType === 'fixed' ? money.format(se.withdrawValue) : se.withdrawValue + ' %' + (se.withdrawType === 'excess' ? ' de l\'excédent' : ' du compte');
     return v + (se.withdrawEvery === 'days' ? ' tous les ' + se.withdrawDays + ' jours' : ' chaque mois');
   }
-  const wdDesc = (w) => (w && w.on ? withdrawLabel(wdApply({}, w)) + (w.mode !== 'periodic' && Number(w.share) < 100 ? ', ' + w.share + ' % du gain retiré' : '') : 'sans retrait');
+  const wdDesc = (w) => (w && w.on && w.mode !== 'none' ? withdrawLabel(wdApply({}, w)) + (w.mode !== 'periodic' && Number(w.share) < 100 ? ', ' + w.share + ' % du gain retiré' : '') : 'sans retrait');
   /** Ligne d'une simulation relancée : e = {key, from, to}, base = résultat sans retrait, wd = avec retrait. */
   function wdRow(e, capital, base, wd) {
     const curve = [], dates = wd.dates || [], bDates = base.dates || [];
@@ -303,7 +303,7 @@
             synthetic: c.synthetic, mech: { name: m.name, w: m.w ? m.w : { on: false, mode: 'periodic', type: 'none', value: 0 } }, other: { name: mechs.length - 1 + ' autre' + (mechs.length > 2 ? 's' : '') + ' manière' + (mechs.length > 2 ? 's' : '') }, trials: 1, eras: c.eras });
           fx.name = 'FX ' + strat.name + ' · ' + pair + ' · 1:' + lev + ' · ' + m.name;
           fx._w = wn;
-          if (!m.w) fx.income = Object.assign(fx.income, { desc: 'sans retrait', perMonthPct: 0, fixedPct: null });
+          if (!m.w) fx.income = Object.assign(fx.income, { desc: 'pas de retrait partiel durant la période de trading', perMonthPct: 0, fixedPct: null });
           found.push(score(fx, o, wn));
         }
         await tick({ phase: 'search', done: done, combos: combos, strat: strat.name, lev: lev });
