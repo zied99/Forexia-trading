@@ -24,11 +24,39 @@
   const syncMeta = () => { try { return JSON.parse(localStorage.getItem(SYNC_META)) || {}; } catch (e) { return {}; } };
   let syncMuted = false, syncTimer = null, kvOldBridge = false;
   const syncDirty = new Set();
+  // Le navigateur n'est qu'une copie : chaque donnée de Forexia est gardée en mémoire pendant la session et envoyée à
+  // la base. Si le stockage du navigateur est plein, l'écriture n'échoue pas : la donnée reste en mémoire et dans la
+  // base, et sa vieille copie est retirée du navigateur (elle sera reprise de la base au prochain chargement).
+  const lsMem = new Map();
+  let lsFullKeys = new Set();
+  const isQuota = (e) => /quota|exceed|full/i.test((e && (e.name + ' ' + e.message)) || '');
   (function watchStorage() {
-    const P = Storage.prototype, set = P.setItem, rem = P.removeItem;
-    P.setItem = function (k, v) { set.call(this, k, v); if (!syncMuted && SYNC_KEYS.includes(k) && this === window.localStorage) kvDirty(k); };
-    P.removeItem = function (k) { rem.call(this, k); if (!syncMuted && SYNC_KEYS.includes(k) && this === window.localStorage) kvDirty(k); };
+    const P = Storage.prototype, set = P.setItem, get = P.getItem, rem = P.removeItem;
+    const ours = (st, k) => st === window.localStorage && String(k).startsWith('forexia.');
+    P.setItem = function (k, v) {
+      if (!ours(this, k)) return set.call(this, k, v);
+      v = String(v); lsMem.set(k, v);
+      try { set.call(this, k, v); lsFullKeys.delete(k); }
+      catch (e) {
+        if (!isQuota(e)) throw e;
+        try { rem.call(this, k); } catch (x) { /* ignoré */ }
+        lsFullKeys.add(k); storageFullNotice();
+      }
+      if (!syncMuted && SYNC_KEYS.includes(k)) kvDirty(k);
+    };
+    P.getItem = function (k) { return ours(this, k) && lsMem.has(k) ? lsMem.get(k) : get.call(this, k); };
+    P.removeItem = function (k) { if (ours(this, k)) { lsMem.delete(k); lsFullKeys.delete(k); } rem.call(this, k); if (!syncMuted && SYNC_KEYS.includes(k) && this === window.localStorage) kvDirty(k); };
   })();
+  /** Stockage du navigateur plein : sans base connectée, les nouvelles données seraient perdues au rechargement. */
+  let storageNoticeAt = 0;
+  function storageFullNotice() {
+    setTimeout(() => {
+      if (typeof dbOn !== 'undefined' && (dbOn || cloudOn())) return; // tout est dans la base : rien à signaler
+      if (Date.now() - storageNoticeAt < 60000) return;
+      storageNoticeAt = Date.now();
+      toast('Stockage du navigateur plein et aucune base connectée : vos dernières données ne sont gardées que jusqu\'à la fermeture de la page. Connectez la base (bouton « Base de données » : passerelle MT5, ou compte en ligne) pour tout y garder.', false);
+    }, 2500); // après le message de l'action en cours
+  }
   function kvDirty(k) {
     const m = syncMeta(); m[k] = new Date().toISOString();
     try { localStorage.setItem(SYNC_META, JSON.stringify(m)); } catch (e) { /* ignoré */ }
@@ -84,7 +112,7 @@
         const d = l == null ? r.data : kvUnion(l, r.data);
         kvWrite(k, d, r.updatedAt || new Date().toISOString()); changed = true;
         if (JSON.stringify(d) !== JSON.stringify(r.data)) { const at = new Date().toISOString(); kvWrite(k, d, at); out.push({ key: k, data: d, updatedAt: at }); }
-      } else if ((r.updatedAt || '') > lAt) { kvWrite(k, r.data, r.updatedAt); changed = true; }
+      } else if ((r.updatedAt || '') > lAt || (l == null && r.data != null)) { kvWrite(k, r.data, r.updatedAt); changed = true; }
       else if (lAt > (r.updatedAt || '')) out.push({ key: k, data: l, updatedAt: lAt });
     }
     if (out.length) await push(out);
@@ -109,25 +137,9 @@
     await kvSync(Object.keys(kv).map((k) => ({ key: k, data: kv[k].data, updatedAt: kv[k].updatedAt })), kvToCloud);
   }
 
-  /** Écrit dans le stockage du navigateur. Stockage plein : on libère d'abord ce qui se recalcule (résultats de
-   *  retrait gardés), puis on réessaie. Renvoie false si l'écriture est impossible. */
-  function lsSet(key, text) {
-    try { localStorage.setItem(key, text); return true; } catch (e) {
-      if (!/quota|exceed|full/i.test((e && (e.name + ' ' + e.message)) || '')) return false;
-      for (const k of ['forexia.wdResults', 'forexia.lastRun']) {
-        if (k === key) continue;
-        try { localStorage.removeItem(k); } catch (x) { /* ignoré */ }
-        try { localStorage.setItem(key, text); console.warn('Stockage plein : « ' + k + ' » vidé pour enregistrer « ' + key + ' ».'); return true; } catch (x) { /* on continue */ }
-      }
-      return false;
-    }
-  }
-  let lsFullWarned = 0;
-  function lsFullToast(what) {
-    if (Date.now() - lsFullWarned < 15000) return;
-    lsFullWarned = Date.now();
-    toast('Stockage du navigateur plein : ' + what + ' n\'a pas pu être enregistré. Supprimez d\'anciens batchs (Évaluation › Batchs) ou des simulations, ou connectez la passerelle (Base de données) pour garder tout dans la base.', false);
-  }
+  /** Écrit une donnée de Forexia (mémoire + navigateur si possible + base) : réussit toujours. */
+  function lsSet(key, text) { localStorage.setItem(key, text); return true; }
+  function lsFullToast() { storageFullNotice(); }
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const frDate = (d) => { const m = /^(\d{4})-(\d{2})-(\d{2})(.*)$/.exec(d); return m ? m[3] + '/' + m[2] + '/' + m[1] + m[4] : d; };
   const shortDate = (d) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d); return m ? ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'][+m[2] - 1] + ' ' + m[1].slice(2) : d; };
@@ -2910,7 +2922,7 @@
   const EVAL_KEY = 'forexia.evaluations';
   const evalStore = {
     get() { try { return JSON.parse(localStorage.getItem(EVAL_KEY)) || []; } catch (e) { return []; } },
-    set(list) { if (!lsSet(EVAL_KEY, JSON.stringify(list.slice(-500)))) lsFullToast('la simulation'); },
+    set(list) { lsSet(EVAL_KEY, JSON.stringify(list.slice(-5000))); },
   };
   let evalMemory = null; // repli si le stockage du navigateur est indisponible
   function evalList() { const l = evalStore.get(); return l.length || !evalMemory ? l : evalMemory; }

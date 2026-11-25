@@ -77,6 +77,11 @@ type de donnée) et dans le compte en ligne : FX, batchs, époques, événements
 de retrait et leurs résultats, tracés sur les graphiques, dernière simulation. Chaque changement est envoyé dans la
 seconde ; à la connexion, la version la plus récente l'emporte (et, sur un appareil jamais synchronisé, les listes
 sont réunies).
+**La base est la référence, le navigateur n'est qu'une copie.** Pendant la session, chaque donnée est gardée en
+mémoire et envoyée à la base ; le navigateur en garde une copie s'il a de la place. S'il est plein, rien n'échoue et
+rien n'est à supprimer : la donnée reste dans la base et revient à l'ouverture suivante. Sans base connectée, un
+message prévient que les dernières données ne seraient pas gardées après la fermeture de la page. L'historique des
+simulations n'est plus limité à 500 (5 000 dans la page, tout dans la base).
 
 **Retrait fictif des gains** (section Marché et capital) : quand le compte atteint « capital × (1 + seuil %) », une part
 du gain (100 % par défaut) est retirée et mise à l'abri, soit **dès que le seuil est atteint** (la position est clôturée à ce
