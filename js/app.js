@@ -933,9 +933,10 @@
     $('batchCount').value = n;
     batchRunning = true; batchStop = false;
     $('batchRun').textContent = 'Arrêter';
-    const res = [], lot = startLotBatch(n);
-    let fails = 0;
-    let attempts = 0;
+    const res = [];
+    let lot = null, fails = 0, attempts = 0;
+    try {
+    lot = startLotBatch(n);
     for (let k = 0; k < n && !batchStop && attempts++ < n * 3; k++) {
       $('batchStatus').textContent = 'Test ' + (k + 1) + ' sur ' + n + '…';
       setRunLabel('Test ' + (k + 1) + ' / ' + n);
@@ -948,10 +949,14 @@
       else { console.warn('Test du lot ignoré :', $('formError').textContent); k--; } // période inutilisable : on en tire une autre
       await new Promise((r) => setTimeout(r, 30)); // laisse la page se redessiner
     }
-    batchRunning = false;
-    setRunLabel('');
-    $('batchRun').textContent = 'Lancer le lot';
-    if (!res.length) dropLotBatch(lot);
+    } catch (err) {
+      console.error(err); $('batchStatus').textContent = 'Lot interrompu par une erreur : ' + err.message;
+    } finally {
+      batchRunning = false;
+      setRunLabel('');
+      $('batchRun').textContent = 'Lancer le lot';
+    }
+    if (!res.length) { if (lot) dropLotBatch(lot); return; }
     if (res.length) {
       const pos = res.filter((v) => v > 0).length, avg = res.reduce((a, b) => a + b, 0) / res.length;
       $('batchStatus').innerHTML = '<b>' + res.length + ' test' + (res.length > 1 ? 's' : '') + ' enregistré' + (res.length > 1 ? 's' : '') + '</b> dans « Évaluation » : ' +
@@ -1157,7 +1162,15 @@
   }
 
   // ---------- Lancement ----------
-  $('form').addEventListener('submit', (e) => { e.preventDefault(); if (!batchRunning) runFromForm(); });
+  $('form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (batchRunning) return toast('Un lot de tests est en cours : attendez la fin ou cliquez sur « Arrêter » à côté de « Lancer le lot ».', false);
+    runFromForm().catch((err) => { console.error(err); $('formError').textContent = 'Erreur : ' + err.message; });
+  });
+  // toute erreur inattendue est affichée (au lieu d'un bouton qui semble ne rien faire)
+  let lastErrAt = 0;
+  window.addEventListener('error', (ev) => { if (Date.now() - lastErrAt < 5000 || !ev.message) return; lastErrAt = Date.now(); try { toast('Erreur dans la page : ' + ev.message + ' — rechargez la page ; si ça revient, envoyez une capture.', false); } catch (e) { /* ignoré */ } });
+  window.addEventListener('unhandledrejection', (ev) => { const m = ev.reason && (ev.reason.message || String(ev.reason)); if (!m || Date.now() - lastErrAt < 5000) return; lastErrAt = Date.now(); try { toast('Erreur : ' + m, false); } catch (e) { /* ignoré */ } });
   // Compteur affiché dans le bouton pendant un lot ou une vérification (« Test 3 / 10 »)
   let runLabel = '';
   let runBarSpot = null;
