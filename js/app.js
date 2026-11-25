@@ -3464,14 +3464,15 @@
   const NO_WD = 'pas de retrait partiel durant la période de trading';
   const wdNone = (w) => !w || w.on === false || w.mode === 'none';
   /** Enregistre un FX construit à partir de simulations relancées (rows) et d'une mécanique (sans retrait possible). */
-  function saveFxRows(R, mech, other) {
+  function saveFxRows(R, mech, other, extra) {
     if (!R || !R.length) return toast('Aucune simulation calculée pour ce FX.', false);
     const all = evalList(), sims = R.map((r) => all.find((e) => e.key === r.key)), first = sims.find(Boolean) || {};
     const fx = fxFromRows(R, { name: first.name, strategy: first.strategy, config: first.config, pair: first.pair, leverage: first.leverage, dataLabel: first.data,
       synthetic: sims.some((e) => e && /simul/i.test(e.data || '')), mech: mech, other: other || null, keys: R.map((r) => r.key) });
     if (wdNone(mech.w)) { fx.income = Object.assign(fx.income, { desc: NO_WD, perMonthPct: 0, fixedPct: null, other: other ? other.name : null }); fx.name = 'FX ' + (first.name || 'stratégie') + ' · sans retrait'; }
     else if (!other) fx.income.other = null;
-    const name = (prompt('Nom du FX (plan d\'investissement) :', fx.name) || '').trim().slice(0, 80);
+    if (extra && extra.batch) fx.batch = extra.batch;
+    const name = (prompt('Nom du FX (plan d\'investissement) :', (extra && extra.name) || fx.name) || '').trim().slice(0, 80);
     if (!name) return;
     fx.name = name;
     if (!setFxList(fxList().concat(fx)) || !fxList().some((x) => x.id === fx.id)) return;
@@ -4451,21 +4452,31 @@
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('wdModal').hidden) closeWdModal(); });
   $('evalWdBtn').addEventListener('click', () => openWdModal());
   // « Enregistrer un FX » depuis l'évaluation : simulations affichées (ou sélectionnées), sans préférence de retrait
-  $('evalFxBtn').addEventListener('click', async () => {
-    if (checkRunning || batchRunning) return toast('Un calcul est déjà en cours : attendez la fin ou arrêtez-le.', false);
+  $('evalFxBtn').addEventListener('click', () => {
     const all = evalFiltered(evalList()).map((x) => x.e).filter((e) => e.strategy && e.config && !e.tag);
-    const sel = all.filter((e) => barSel.has(e.key)), T = sel.length ? sel : all;
-    if (T.length < 3) return toast('Il faut au moins 3 simulations affichées (ou sélectionnées) pour un FX.', false);
-    if (new Set(T.map((e) => e.name)).size > 1) return toast('Les simulations affichées mélangent plusieurs stratégies : choisissez-en une (filtre « Stratégie » ou un batch).', false);
+    const sel = all.filter((e) => barSel.has(e.key));
+    const b = evalBatch && batchStore.get().find((x) => x.id === evalBatch.id);
+    return fxFromSims(sel.length ? sel : all, { btn: $('evalFxBtn'), batch: !sel.length && b && all.length === b.entries.length ? b : null });
+  });
+  /** FX sans retrait à partir de simulations (affichées, sélectionnées, ou celles d'un batch). opt = {btn, batch} */
+  async function fxFromSims(T, opt) {
+    opt = opt || {};
+    if (checkRunning || batchRunning) return toast('Un calcul est déjà en cours : attendez la fin ou arrêtez-le.', false);
+    if (T.length < 3) return toast('Il faut au moins 3 simulations pour un FX.', false);
+    if (new Set(T.map((e) => e.name)).size > 1) return toast('Ces simulations mélangent plusieurs stratégies : choisissez-en une (filtre « Stratégie » ou un batch).', false);
+    // simulations d'un batch effacées de l'historique : elles y reviennent (comme « Recharger »)
+    const have = new Set(evalList().map((e) => e.key)), missing = T.filter((e) => !have.has(e.key));
+    if (missing.length) evalSave(evalList().concat(missing.map((e) => Object.assign({}, e))));
     const none = { on: false, mode: 'none' }, cache = wdResStore.get(), miss = T.filter((e) => !cache[wdKey(none) + '#' + e.key]).length;
     if (miss > 60 && !confirm(miss + ' simulations à recalculer pour construire le FX. Continuer ?')) return;
     if (miss) toast('Construction du FX : ' + miss + ' simulation' + (miss > 1 ? 's' : '') + ' à recalculer, patientez…', false);
+    const btn = opt.btn, label = btn ? btn.textContent : '';
     let R = [];
-    try { R = await wdCompute(none, T, (i, n) => { $('evalFxBtn').textContent = '💼 Calcul ' + (i + 1) + ' / ' + n + '…'; }); }
-    finally { $('evalFxBtn').textContent = '💼 Enregistrer un FX'; }
+    try { R = await wdCompute(none, T, (i, n) => { if (btn) btn.textContent = '💼 Calcul ' + (i + 1) + ' / ' + n + '…'; }); }
+    finally { if (btn && btn.isConnected) btn.textContent = label; }
     if (R.length < 3) return toast('Simulations impossibles à relancer : ' + ($('formError').textContent || 'données indisponibles') + '.', false);
-    try { saveFxRows(R, { name: 'Sans retrait', w: none }, null); } catch (e) { console.error(e); toast('FX impossible à construire : ' + e.message, false); }
-  });
+    try { saveFxRows(R, { name: 'Sans retrait', w: none }, null, opt.batch ? { name: 'FX ' + opt.batch.name, batch: opt.batch.id } : null); } catch (e) { console.error(e); toast('FX impossible à construire : ' + e.message, false); }
+  }
 
   // ---------- Analyse temporelle (graphiques de l'évaluation) ----------
   const tDate = (d) => Date.parse(String(d).slice(0, 10) + 'T00:00:00Z');
@@ -4688,20 +4699,21 @@
     const rows = list.map((b, k) => {
       const i = shownB[k].i, s = batchStats(b.entries);
       return '<tr><td class="l name" title="' + esc(b.name) + '"><b>' + esc(b.name) + '</b><small class="eval-tag">' + (s.strategies.length > 1 || b.name.indexOf(s.strategies[0]) < 0 ? esc(s.strategies.join(', ')) + ' · ' : '') + 'enregistré le ' +
-        new Date(b.at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) + '</small></td>' +
+        new Date(b.at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) + '</small>' +
+        '<div class="batch-acts"><button type="button" class="reload" data-batch-load="' + i + '">Recharger</button>' +
+        '<button type="button" class="reload batch-fx" data-batch-fx="' + i + '" title="Créer un FX (plan d\'investissement) avec les simulations de ce batch seulement">💼 Créer un FX</button>' +
+        '<button type="button" class="ghost small" data-batch-ren="' + i + '" title="Renommer" aria-label="Renommer le batch">✏️</button>' +
+        '<button type="button" class="ghost small" data-batch-del="' + i + '" title="Supprimer" aria-label="Supprimer le batch">🗑</button></div></td>' +
         '<td class="l">' + esc(s.pairs) + '</td><td class="l">' + esc(s.span) + '<small class="eval-tag">' + frDate(s.from) + ' → ' + frDate(s.to) + '</small></td>' +
         '<td>' + s.n + '</td><td title="Moyenne des résultats de chaque simulation (rendement global : ' + signed(s.globalReturn, num1) + ' %)">' + p(s.avgReturn) + '</td>' +
         '<td><span class="batch-rate ' + (s.winRate >= 50 ? 'pos' : 'neg') + '">' + Math.round(s.winRate) + ' %</span></td>' +
         '<td title="Capital de départ moyen : ' + money.format(s.avgStart) + '">' + money.format(s.avgFinal) + '<small class="eval-tag">départ ' + money.format(s.avgStart) + '</small></td>' +
-        '<td>−' + num1.format(s.avgDD) + ' %</td><td class="l">' + (b.entries.length ? batchDotsSvg(b.entries, gy0, gy1) : '') + '</td>' +
-        '<td class="batch-acts"><button type="button" class="reload" data-batch-load="' + i + '">Recharger</button>' +
-        '<button type="button" class="ghost small" data-batch-ren="' + i + '" title="Renommer" aria-label="Renommer le batch">✏️</button>' +
-        '<button type="button" class="ghost small" data-batch-del="' + i + '" title="Supprimer" aria-label="Supprimer le batch">🗑</button></td></tr>';
+        '<td>−' + num1.format(s.avgDD) + ' %</td><td class="l">' + (b.entries.length ? batchDotsSvg(b.entries, gy0, gy1) : '') + '</td></tr>';
     }).join('');
     $('evalBody').innerHTML = '<p class="hint">Un batch est un lot de simulations enregistré ensemble (par exemple un lot de tests aléatoires). « Recharger » remet la stratégie dans le formulaire ' +
       'et affiche les simulations du batch dans les graphiques (avec l\'analyse temporelle), où vous pouvez les prolonger, les améliorer, etc.</p>' +
       '<div class="table-wrap"><table class="eval batch-table"><thead><tr><th class="l">Batch</th><th class="l">Devise</th><th class="l">Période des simulations</th><th>Simulations</th>' +
-      '<th>Rendement moyen</th><th>Probabilité de gain</th><th>Capital moyen (final)</th><th>Drawdown moyen</th><th class="l" title="Un point par simulation, placé à l\'année du milieu de sa période (même échelle pour tous les batchs) ; en haut vert = gagnante, en bas rouge = perdante">Dans le temps</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+      '<th>Rendement moyen</th><th>Probabilité de gain</th><th>Capital moyen (final)</th><th>Drawdown moyen</th><th class="l" title="Un point par simulation, placé à l\'année du milieu de sa période (même échelle pour tous les batchs) ; en haut vert = gagnante, en bas rouge = perdante">Dans le temps</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
   }
   function loadBatch(b) {
     // les simulations du batch retournent dans l'historique si elles en ont été effacées
@@ -4729,13 +4741,16 @@
     if (!b) { evalBatch = null; return ''; }
     return '<div class="banner info batch-banner"><span>Batch <b>« ' + esc(b.name) + ' »</b> : seules ses ' + evalBatch.keys.size + ' simulations sont affichées.</span>' +
       '<span class="row buttons"><button type="button" class="secondary small" id="batchUpdate" title="Enregistrer dans ce batch l\'état actuel de ses simulations (prolongées, améliorées…)">Mettre à jour le batch</button>' +
+      '<button type="button" class="primary small" id="batchFx" title="Créer un FX avec les simulations de ce batch seulement">💼 Créer un FX de ce batch</button>' +
       '<button type="button" class="secondary small" id="batchLeave">Voir toutes les simulations</button></span></div>';
   }
   $('evalModal').addEventListener('click', (e) => {
-    const t = e.target.closest('[data-batch-load],[data-batch-ren],[data-batch-del],#batchUpdate,#batchLeave,.batch-save');
+    const t = e.target.closest('[data-batch-load],[data-batch-ren],[data-batch-del],[data-batch-fx],#batchUpdate,#batchLeave,#batchFx,.batch-save');
     if (!t) return;
     const list = batchStore.get();
     if (t.dataset.batchLoad != null) return loadBatch(list[+t.dataset.batchLoad]);
+    if (t.dataset.batchFx != null) { const b = list[+t.dataset.batchFx]; return b && fxFromSims(b.entries.filter((x) => x.strategy && x.config && !x.tag), { btn: t, batch: b }); }
+    if (t.id === 'batchFx' && evalBatch) { const b = list.find((x) => x.id === evalBatch.id); return b && fxFromSims(b.entries.filter((x) => x.strategy && x.config && !x.tag), { btn: t, batch: b }); }
     if (t.dataset.batchRen != null) {
       const b = list[+t.dataset.batchRen], nm = (prompt('Nouveau nom du batch :', b.name) || '').trim().slice(0, 100);
       if (nm) { b.name = nm; batchStore.set(list); renderEvaluation(); }

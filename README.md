@@ -262,6 +262,10 @@ choisit un scénario (du pire au meilleur cas testé) : le gain au bout d'un an 
 
 Un FX construit sur des données simulées est signalé (« à refaire avec les cours réels MT5 avant de le présenter »).
 
+**FX d'un batch** : « 💼 Créer un FX » sur chaque batch (Évaluation › Batchs) ou « 💼 Créer un FX de ce batch » dans le
+bandeau d'un batch rechargé : le FX est construit avec les simulations de ce batch seulement (et « 📂 Voir les
+simulations » rouvre ce batch). « Enregistrer un FX » de l'Évaluation, lui, prend toutes les simulations affichées.
+
 **Sans retrait** : un FX peut ne prévoir **aucun retrait partiel durant la période de trading** (le capital et les
 gains restent sur le compte jusqu'à la fin). Trois façons de l'enregistrer :
 - **Évaluation › 💼 Enregistrer un FX** : à partir des simulations affichées (ou sélectionnées), sans préférence de

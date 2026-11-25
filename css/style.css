@@ -609,6 +609,9 @@ button.analyze svg { width: 16px; height: 16px; fill: none; stroke: currentColor
 .batch-rate { font-weight: 700; font-size: 15px; }
 .batch-acts { white-space: nowrap; }
 .batch-acts button { margin-left: 4px; }
+.batch-table td.name { min-width: 170px; max-width: 240px; white-space: normal; }
+.batch-table td.name .batch-acts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; white-space: normal; }
+.batch-table td.name .batch-acts button { margin: 0; width: auto; padding: 3px 8px; font-size: 12px; }
 @media (max-width: 600px) { .runs-side { align-items: flex-start; } }
 table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-width: 160px; overflow: visible; }
 #anaModal { z-index: 60; }
@@ -1015,3 +1018,5 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 
 .filter-chip { align-self: end; border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent); border-radius: 999px; padding: 6px 12px; font-weight: 600; font-size: 13px; cursor: pointer; width: auto; }
 .bar-panel .bp-head .bp-filter { margin-left: auto; width: auto; }
+
+.batch-acts .batch-fx { white-space: nowrap; }
