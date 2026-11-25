@@ -304,6 +304,10 @@ Une simulation compte selon l'année du milieu de sa période, comme l'analyse t
 Graphiques, Recommandations, Analyse temporelle (batchs compris), écart entre simulations, Resimuler, Resimuler avec un
 retrait, Enregistrer un FX. Il s'applique aussi à un batch rechargé.
 
+**Filtre à la souris** : dans les Graphiques, glissez la souris sur les barres (ou Ctrl+clic), puis **🔍 Filtrer sur ces
+simulations** : seules celles-là restent affichées partout (comme les autres filtres, et combinable avec eux). La
+pastille « 🔍 N simulations choisies à la souris ✕ » dans la barre des filtres retire ce filtre.
+
 ## Écart entre les simulations
 
 En haut du Tableau et des Graphiques de l'Évaluation : **⏱ Écart entre deux simulations** — les dates de début rangées

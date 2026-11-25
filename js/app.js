@@ -4717,6 +4717,7 @@
     });
     evalBatch = { id: b.id, keys: new Set(b.entries.map((e) => e.key)) };
     activeBatchId = b.id;
+    evalSelFilter = null;
     evalScope = 'current';
     evalView = 'charts';
     document.querySelectorAll('.eval-views [data-view]').forEach((x) => x.setAttribute('aria-selected', x.dataset.view === 'charts'));
@@ -4754,7 +4755,7 @@
       if (b && cur.length) { b.entries = cur.map((x) => Object.assign({}, x)); b.updatedAt = new Date().toISOString(); batchStore.set(list); toast('Batch « ' + b.name + ' » mis à jour.', false); }
       return;
     }
-    if (t.id === 'batchLeave') { evalBatch = null; activeBatchId = ''; return renderEvaluation(); }
+    if (t.id === 'batchLeave') { evalBatch = null; activeBatchId = ''; evalSelFilter = null; return renderEvaluation(); }
     if (t.classList.contains('batch-save')) {
       const shown = evalFiltered(evalList()).map((x) => x.e);
       if (saveBatch(shown) && evalScope === 'batch') renderEvaluation();
@@ -4859,8 +4860,9 @@
       return (!er || (m >= er.fromD && m <= er.toD)) && (!y0 || y >= y0) && (!y1 || y <= y1);
     };
   }
+  let evalSelFilter = null; // simulations choisies à la souris (« 🔍 Filtrer sur cette sélection »)
   function evalFiltered(list) {
-    const tf = timeFilterFn();
+    const tf0 = timeFilterFn(), tf = evalSelFilter ? (e) => evalSelFilter.has(e.key) && (!tf0 || tf0(e)) : tf0;
     if (evalBatch) return list.map((e, i) => ({ e: e, i: i })).filter(({ e }) => evalBatch.keys.has(e.key) && (!tf || tf(e)));
     const fs = evalScope === 'current' ? currentStratName() : $('evalFStrat').value;
     const q = evalScope === 'current' ? '' : $('evalFSearch').value.trim().toLowerCase(), fp = $('evalFPair').value, fd = $('evalFData').value, fr = $('evalFResult').value;
@@ -4871,7 +4873,9 @@
   let evalYearTimer = null;
   ['evalFY0', 'evalFY1'].forEach((id) => $(id).addEventListener('input', () => { clearTimeout(evalYearTimer); evalYearTimer = setTimeout(() => { const v = $(id).value; if (!v || (v.length === 4 && +v >= 1971 && +v <= 2100)) renderEvaluation(); }, 350); }));
   $('evalFSearch').addEventListener('input', () => renderEvaluation());
+  $('evalSelChip').addEventListener('click', () => { evalSelFilter = null; renderEvaluation(); });
   $('evalFReset').addEventListener('click', () => {
+    evalSelFilter = null;
     ['evalFStrat', 'evalFPair', 'evalFData', 'evalFResult', 'evalFEra', 'evalFY0', 'evalFY1'].forEach((id) => { $(id).value = ''; });
     $('evalFSearch').value = '';
     renderEvaluation();
@@ -4908,6 +4912,8 @@
     $('evalResetAll').hidden = !!evalBatch;
     $('evalClear').disabled = $('evalResetAll').disabled = !all.length;
     $('evalFReset').hidden = !['evalFStrat', 'evalFPair', 'evalFData', 'evalFResult', 'evalFEra', 'evalFY0', 'evalFY1'].some((id) => $(id).value) && !$('evalFSearch').value;
+    $('evalSelChip').hidden = !evalSelFilter; if (evalSelFilter) $('evalSelChip').textContent = '🔍 ' + evalSelFilter.size + ' simulation' + (evalSelFilter.size > 1 ? 's' : '') + ' choisie' + (evalSelFilter.size > 1 ? 's' : '') + ' à la souris ✕';
+    if (evalSelFilter) $('evalFReset').hidden = false;
     if (!all.length) { $('evalExport').disabled = true; $('evalBody').innerHTML = '<p class="eval-empty">Aucune simulation pour l\'instant : lancez un backtest, il s\'ajoutera ici.</p>'; return; }
     const shown = evalFiltered(all);
     $('evalExport').disabled = !shown.length;
@@ -4920,7 +4926,7 @@
       return;
     }
     const list = shown.map((x) => x.e);
-    const filt = shown.length < all.length && (!evalBatch || !!timeFilterFn());
+    const filt = shown.length < all.length && (!evalBatch || !!timeFilterFn() || !!evalSelFilter);
     if (evalView === 'charts') { renderEvalCharts(list, filt); wireTimeline(); return addBatchBanner(); }
     if (evalView === 'reco') { renderEvalReco(list, filt); return addBatchBanner(); }
     if (evalView === 'time') { renderEvalTime(list, filt); wireTimeline(); return addBatchBanner(); }
@@ -5396,6 +5402,7 @@
       : '<b>#' + idx + '</b> ' + esc(e.name) + ' · ' + esc(e.pair) + ' · ' + frDate(e.from) + ' → ' + frDate(e.to) + ' (' + m + ' mois) · capital ' + money.format(e.capital) +
         ' · <span class="' + cls(e.returnPct) + '">' + signed(e.returnPct, num1) + ' %</span>' + (e.extended ? ' <small class="eval-tag">' + esc(changeLabel(e)) + '</small>' : '');
     return '<div class="bar-panel" id="barPanel"><div class="bp-head">' + head +
+      '<button type="button" class="secondary small bp-filter" id="bpFilter" title="N\'afficher que ces simulations partout (tableau, graphiques, analyse temporelle, FX, retraits…)">🔍 Filtrer sur ' + (many ? 'ces ' + chosen.length + ' simulations' : 'cette simulation') + '</button>' +
       '<button type="button" class="ghost bp-close" id="bpClose" aria-label="Fermer">✕</button></div>' +
       '<div class="bp-row"><b>Durée</b><select id="bpDurDir">' + [['none', 'ne pas changer'], ['longer', 'prolonger de'], ['shorter', 'raccourcir de']].map(([v, l]) => '<option value="' + v + '"' + (barOpt.durDir === v ? ' selected' : '') + '>' + l + '</option>').join('') + '</select>' +
       (barOpt.durDir === 'none' ? '' : durSel + '<button type="button" class="secondary small" id="bpDurRun"' + (busy ? ' disabled' : '') + '>' + (barOpt.durDir === 'shorter' ? 'Raccourcir' : 'Prolonger') + ' et simuler</button>') + '</div>' +
@@ -5447,6 +5454,7 @@
   $('evalBody').addEventListener('click', (ev) => {
     const id = ev.target.id;
     if (id === 'bpClose') { barSel = new Set(); renderEvaluation(); }
+    if (id === 'bpFilter') { evalSelFilter = new Set(barSel); barSel = new Set(); renderEvaluation(); }
     if (id === 'bpDurRun') runChecks('ext', { keys: [...barSel], months: +barOpt.dur, sign: barOpt.durDir === 'shorter' ? -1 : 1 });
     if (id === 'bpCap') runChecks('cap', { keys: [...barSel], capMode: barOpt.capMode, capVal: barOpt.capValue });
     if (id === 'bpImprove') improveSelection([...barSel]);

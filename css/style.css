@@ -1012,3 +1012,6 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 .yr-range { display: flex; align-items: center; gap: 6px; }
 .yr-range input { width: 100%; min-width: 0; }
 .yr-range span { color: var(--muted); }
+
+.filter-chip { align-self: end; border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent); border-radius: 999px; padding: 6px 12px; font-weight: 600; font-size: 13px; cursor: pointer; width: auto; }
+.bar-panel .bp-head .bp-filter { margin-left: auto; width: auto; }
