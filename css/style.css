@@ -979,3 +979,12 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 @media (max-width: 700px) { .topbar { flex-wrap: wrap; gap: 8px; } .top-actions { flex-wrap: wrap; gap: 6px; justify-content: flex-end; min-width: 0; } }
 
 .fx-card.fx-new { box-shadow: 0 0 0 3px var(--accent); transition: box-shadow .4s; }
+
+/* Analyse temporelle : batchs époque par époque */
+.time-batch-table td.tb-cell { text-align: center; }
+.time-batch-table td.tb-cell b { display: block; }
+.time-batch-table td.tb-cell small { color: var(--muted); font-size: 11px; }
+.time-batch-table td.tb-cell.good { background: var(--up-soft); }
+.time-batch-table td.tb-cell.bad { background: var(--down-soft); }
+.time-batch-table td.tb-empty { text-align: center; color: var(--muted); }
+.time-batch-verdict { margin-top: 8px; }

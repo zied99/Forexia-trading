@@ -4860,6 +4860,7 @@
     const filt = shown.length < all.length && !evalBatch;
     if (evalView === 'charts') { renderEvalCharts(list, filt); wireTimeline(); return addBatchBanner(); }
     if (evalView === 'reco') { renderEvalReco(list, filt); return addBatchBanner(); }
+    if (evalView === 'time') { renderEvalTime(list, filt); wireTimeline(); return addBatchBanner(); }
     const p = (v) => '<span class="' + cls(v) + '">' + signed(v, num2) + ' %</span>';
     const rows = shown.map(({ e, i }) => '<tr>' +
       '<td>' + (i + 1) + '</td><td class="l">' + new Date(e.at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) + '</td>' +
@@ -4882,6 +4883,40 @@
       '<th class="l">Période testée</th><th class="l">Durée</th><th class="l">Données</th><th>Levier</th><th>Capital</th><th>Résultat</th><th class="avg-col">Gain moyen</th><th>Par mois</th><th>Retiré</th>' +
       '<th>Trades</th><th>Gagnants</th><th>Drawdown</th><th></th><th></th></tr></thead><tbody>' + rows + '</tbody><tfoot>' + foot + '</tfoot></table></div>';
     addBatchBanner();
+  }
+  /** Vue « Analyse temporelle » : les simulations affichées dans le temps (années, époques, événements), puis les
+   *  batchs de la stratégie choisie, époque par époque. */
+  function renderEvalTime(list, filt) {
+    const eras = F.advisor.normEras(activeEras()), inEra = (e, er) => { const m = F.advisor.midDate(e); return m >= er.fromD && m <= er.toD; };
+    const pair = $('evalFPair').value, data = $('evalFData').value;
+    const B = batchesShown().map((x) => ({ b: x.b, i: x.i, L: x.b.entries.filter((e) => e.from && e.to && (!pair || e.pair === pair) && (!data || e.data === data)) })).filter((x) => x.L.length);
+    const med = (a) => { const v = a.filter(Number.isFinite).sort((x, y) => x - y); return v.length ? (v.length % 2 ? v[v.length >> 1] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2) : NaN; };
+    const cell = (L) => {
+      if (!L.length) return '<td class="tb-empty">—</td>';
+      const m = med(L.map((e) => e.returnPct)), w = (L.filter((e) => e.returnPct > 0).length / L.length) * 100;
+      return '<td class="tb-cell ' + (m > 0 ? 'good' : 'bad') + '" title="' + L.length + ' simulation' + (L.length > 1 ? 's' : '') + ' · ' + Math.round(w) + ' % gagnantes · médiane ' + signed(m, num1) + ' %"><b class="' + cls(m) + '">' + signed(m, num1) + ' %</b><small>' + Math.round(w) + ' % · ' + L.length + '</small></td>';
+    };
+    const usedEras = eras.filter((er) => B.some((x) => x.L.some((e) => inEra(e, er))));
+    const allE = B.flatMap((x) => x.L), y0 = allE.length ? Math.min(...allE.map((e) => +e.from.slice(0, 4))) : 0, y1 = allE.length ? Math.max(...allE.map((e) => +e.to.slice(0, 4))) : 0;
+    const st = $('evalFStrat').value;
+    let h = (filt ? '<p class="eval-count">Analyse temporelle des ' + list.length + ' simulations affichées (filtres appliqués).</p>' : '') + spacingHtml(list) +
+      (timeSectionHtml(list) || '<p class="eval-empty">Il faut au moins deux simulations pour l\'analyse temporelle.</p>');
+    h += '<section class="eval-chart time-batches"><h4>🗂 Les batchs dans le temps' + (st ? ' — « ' + esc(st) + ' »' : '') + '</h4>' +
+      '<p class="hint">Pour chaque batch' + (st ? ' de cette stratégie' : '') + (pair || data ? ' (simulations ' + [pair, data].filter(Boolean).join(', ') + ')' : '') + ' : résultat médian dans chaque époque, part des simulations gagnantes et nombre de simulations. Vert : l\'époque gagne ; rouge : elle perd. « Recharger » ouvre le batch.</p>';
+    if (!B.length) h += '<p class="eval-empty">Aucun batch' + (st ? ' pour « ' + esc(st) + ' »' : '') + '. Enregistrez les simulations affichées (💾 Enregistrer un batch) ou lancez un lot.</p>';
+    else {
+      h += '<div class="table-wrap"><table class="eval time-batch-table"><thead><tr><th class="l">Batch</th><th>Ensemble</th>' + usedEras.map((er) => '<th title="' + esc(er.fromD.startsWith('0000') ? '… ' : er.fromD + ' ') + '→ ' + esc(er.toD.startsWith('9999') ? '…' : er.toD) + '">' + esc(er.label) + '</th>').join('') +
+        '<th class="l">Dans le temps</th><th></th></tr></thead><tbody>' +
+        B.map((x) => '<tr><td class="l name" title="' + esc(x.b.name) + '"><b>' + esc(x.b.name) + '</b><small class="eval-tag">' + x.L.length + ' simulations · ' + frDate(x.L.map((e) => e.from).sort()[0]) + ' → ' + frDate(x.L.map((e) => e.to).sort().pop()) + '</small></td>' +
+          cell(x.L) + usedEras.map((er) => cell(x.L.filter((e) => inEra(e, er)))).join('') +
+          '<td class="l">' + batchDotsSvg(x.L, y0, y1) + '</td><td><button type="button" class="reload" data-batch-load="' + x.i + '">Recharger</button></td></tr>').join('') +
+        '</tbody></table></div>';
+      // lecture : époques où tous les batchs gagnent / perdent
+      const verdict = usedEras.map((er) => { const r = B.map((x) => x.L.filter((e) => inEra(e, er))).filter((L) => L.length).map((L) => med(L.map((e) => e.returnPct))); return { er: er, n: r.length, win: r.filter((v) => v > 0).length }; }).filter((v) => v.n >= 2);
+      const allWin = verdict.filter((v) => v.win === v.n).map((v) => v.er.label), allLose = verdict.filter((v) => v.win === 0).map((v) => v.er.label);
+      if (allWin.length || allLose.length) h += '<p class="hint time-batch-verdict">' + (allWin.length ? '✅ Tous les batchs gagnent en <b>' + allWin.map(esc).join('</b>, <b>') + '</b>. ' : '') + (allLose.length ? '⚠️ Tous les batchs perdent en <b>' + allLose.map(esc).join('</b>, <b>') + '</b> : piste pour l\'Analyseur d\'époque.' : '') + '</p>';
+    }
+    $('evalBody').innerHTML = h + '</section>';
   }
   function addBatchBanner() { const h = batchBanner(); if (h) $('evalBody').insertAdjacentHTML('afterbegin', h); }
   // ---------- Graphiques et recommandations (sur les simulations affichées) ----------

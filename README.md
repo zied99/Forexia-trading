@@ -276,6 +276,12 @@ manuel), à tester d'abord en compte démo.
 **Batchs de la stratégie choisie** : l'onglet « Batchs » de l'Évaluation (et son compteur) ne montre que les batchs de
 la stratégie choisie dans le filtre « Stratégie » ; « Toutes » (ou « Effacer les filtres ») les montre tous.
 
+**📅 Analyse temporelle** (bouton à côté de Tableau / Graphiques / Recommandations) : l'analyse temporelle des
+simulations affichées (années, époques, événements, rupture, lots proposés), puis **les batchs dans le temps** : pour
+chaque batch de la stratégie choisie (et de la paire / des données filtrées), le résultat médian dans chaque époque
+(vert : gagne, rouge : perd), la part gagnante, le nombre de simulations, ses simulations placées sur les années et
+« Recharger ». Les époques où tous les batchs gagnent, ou perdent, sont signalées.
+
 ## Écart entre les simulations
 
 En haut du Tableau et des Graphiques de l'Évaluation : **⏱ Écart entre deux simulations** — les dates de début rangées
