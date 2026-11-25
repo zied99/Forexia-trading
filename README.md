@@ -273,7 +273,7 @@ l'intérieur de cette période (« 6 années gagnantes sur 7 (dans votre périod
 testées.
 
 **FX d'un batch** : « 💼 Créer un FX » sur chaque batch (Évaluation › Batchs) ou « 💼 Créer un FX de ce batch » dans le
-bandeau d'un batch rechargé : le FX est construit avec les simulations de ce batch seulement (et « 📂 Voir les
+bandeau d'un batch rechargé : le FX est construit avec les simulations de ce batch seulement, avec tous les filtres en cours (paire, données, résultat, époque, années, sélection à la souris) (et « 📂 Voir les
 simulations » rouvre ce batch). « Enregistrer un FX » de l'Évaluation, lui, prend toutes les simulations affichées.
 
 **Sans retrait** : un FX peut ne prévoir **aucun retrait partiel durant la période de trading** (le capital et les

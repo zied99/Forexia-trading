@@ -4482,6 +4482,17 @@
     const curve = r.curve.map((pt, k) => Object.assign({}, pt, { acc: Math.round(fix(pt.acc + pt.wd, k) * 10) / 10 - pt.wd, b: pt.b == null ? null : Math.round(fix(pt.b, k) * 10) / 10 }));
     return Object.assign({}, r, { curve: curve, b: { ret: target, dd: e.maxDrawdownPct }, w: Object.assign({}, r.w, { ret: target, dd: e.maxDrawdownPct, final: r.capital * (1 + target / 100) - (r.w.wd || 0) }) });
   }
+  /** Filtres de l'évaluation appliqués à une liste de simulations (paire, données, résultat, époque, années, sélection à la souris). */
+  function applyEvalFilters(L) {
+    const fp = $('evalFPair').value, fd = $('evalFData').value, fr = $('evalFResult').value, tf = timeFilterFn();
+    return L.filter((e) => (!fp || e.pair === fp) && (!fd || e.data === fd) && (!fr || (fr === 'win' ? e.returnPct > 0 : e.returnPct <= 0)) && (!tf || tf(e)) && (!evalSelFilter || evalSelFilter.has(e.key)));
+  }
+  /** FX d'un batch : ses simulations, avec tous les filtres en cours. */
+  function fxFromBatch(b, btn) {
+    const L = b.entries.filter((x) => x.strategy && x.config && !x.tag), F2 = applyEvalFilters(L);
+    if (F2.length < L.length) toast('FX du batch « ' + b.name + ' » sur ' + F2.length + ' simulation' + (F2.length > 1 ? 's' : '') + ' sur ' + L.length + ' (filtres appliqués).', false);
+    return fxFromSims(F2, { btn: btn, batch: b, partial: F2.length < L.length });
+  }
   /** FX sans retrait à partir de simulations (affichées, sélectionnées, ou celles d'un batch). opt = {btn, batch} */
   async function fxFromSims(T, opt) {
     opt = opt || {};
@@ -4521,7 +4532,7 @@
     // stratégie du FX : la version la plus utilisée par ces simulations (la version actuelle après mise à jour)
     const cnt = new Map(); T.forEach((e) => { if (e.strategy) { const k = rulesSig(e.strategy); cnt.set(k, (cnt.get(k) || { n: 0, s: e.strategy })); cnt.get(k).n++; } });
     const main = [...cnt.values()].sort((a, b) => b.n - a.n)[0];
-    try { saveFxRows(R, { name: 'Sans retrait', w: none }, null, Object.assign(opt.batch ? { name: 'FX ' + opt.batch.name, batch: opt.batch.id } : {}, main ? { strategy: main.s } : {})); } catch (e) { console.error(e); toast('FX impossible à construire : ' + e.message, false); }
+    try { saveFxRows(R, { name: 'Sans retrait', w: none }, null, Object.assign(opt.batch ? { name: 'FX ' + opt.batch.name + (opt.partial ? ' (filtré)' : ''), batch: opt.partial ? undefined : opt.batch.id } : {}, main ? { strategy: main.s } : {})); } catch (e) { console.error(e); toast('FX impossible à construire : ' + e.message, false); }
   }
 
   // ---------- Analyse temporelle (graphiques de l'évaluation) ----------
@@ -4795,8 +4806,8 @@
     if (!t) return;
     const list = batchStore.get();
     if (t.dataset.batchLoad != null) return loadBatch(list[+t.dataset.batchLoad]);
-    if (t.dataset.batchFx != null) { const b = list[+t.dataset.batchFx]; return b && fxFromSims(b.entries.filter((x) => x.strategy && x.config && !x.tag), { btn: t, batch: b }); }
-    if (t.id === 'batchFx' && evalBatch) { const b = list.find((x) => x.id === evalBatch.id); return b && fxFromSims(b.entries.filter((x) => x.strategy && x.config && !x.tag), { btn: t, batch: b }); }
+    if (t.dataset.batchFx != null) { const b = list[+t.dataset.batchFx]; return b && fxFromBatch(b, t); }
+    if (t.id === 'batchFx' && evalBatch) { const b = list.find((x) => x.id === evalBatch.id); return b && fxFromBatch(b, t); }
     if (t.dataset.batchRen != null) {
       const b = list[+t.dataset.batchRen], nm = (prompt('Nouveau nom du batch :', b.name) || '').trim().slice(0, 100);
       if (nm) { b.name = nm; batchStore.set(list); renderEvaluation(); }
