@@ -1007,3 +1007,8 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 .ver-stats { margin: 6px 0 0; font-size: 13px; }
 .ver-acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .ver-acts button { width: auto; padding: 8px 14px; font-size: 14px; line-height: 1.2; }
+
+/* Filtre temporel de l'évaluation */
+.yr-range { display: flex; align-items: center; gap: 6px; }
+.yr-range input { width: 100%; min-width: 0; }
+.yr-range span { color: var(--muted); }

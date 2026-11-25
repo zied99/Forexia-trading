@@ -299,6 +299,11 @@ part gagnante). **↩ Revenir à cette version** remet ses règles (et la strat�
 resimuler** relance aussitôt les simulations affichées avec elle, puis propose Garder / Revenir. Les versions viennent
 du journal des versions (gardé dans la base), des simulations et des copies gardées dans les batchs.
 
+**Filtre temporel** (Évaluation, avec Paire / Données / Résultat) : **Époque** (vos époques) et / ou **Années** (de … à …).
+Une simulation compte selon l'année du milieu de sa période, comme l'analyse temporelle. Tout suit : Tableau,
+Graphiques, Recommandations, Analyse temporelle (batchs compris), écart entre simulations, Resimuler, Resimuler avec un
+retrait, Enregistrer un FX. Il s'applique aussi à un batch rechargé.
+
 ## Écart entre les simulations
 
 En haut du Tableau et des Graphiques de l'Évaluation : **⏱ Écart entre deux simulations** — les dates de début rangées

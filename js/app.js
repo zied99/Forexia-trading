@@ -4848,17 +4848,31 @@
     sel.innerHTML = first + values.map((v) => '<option value="' + esc(v) + '">' + esc(v) + '</option>').join('');
     sel.value = values.includes(cur) ? cur : '';
   }
+  /** Filtre temporel (époque et / ou années) : une simulation compte selon le milieu de sa période, comme l'analyse temporelle. */
+  function timeFilterFn() {
+    const era = $('evalFEra').value, y0 = Number($('evalFY0').value) || 0, y1 = Number($('evalFY1').value) || 0;
+    if (!era && !y0 && !y1) return null;
+    const er = era ? F.advisor.normEras(activeEras()).find((x) => x.label === era) : null;
+    return (e) => {
+      if (!e.from || !e.to) return false;
+      const m = F.advisor.midDate(e), y = +m.slice(0, 4);
+      return (!er || (m >= er.fromD && m <= er.toD)) && (!y0 || y >= y0) && (!y1 || y <= y1);
+    };
+  }
   function evalFiltered(list) {
-    if (evalBatch) return list.map((e, i) => ({ e: e, i: i })).filter(({ e }) => evalBatch.keys.has(e.key));
+    const tf = timeFilterFn();
+    if (evalBatch) return list.map((e, i) => ({ e: e, i: i })).filter(({ e }) => evalBatch.keys.has(e.key) && (!tf || tf(e)));
     const fs = evalScope === 'current' ? currentStratName() : $('evalFStrat').value;
     const q = evalScope === 'current' ? '' : $('evalFSearch').value.trim().toLowerCase(), fp = $('evalFPair').value, fd = $('evalFData').value, fr = $('evalFResult').value;
     return list.map((e, i) => ({ e: e, i: i })).filter(({ e }) => (!fs || e.name === fs) && (!q || e.name.toLowerCase().includes(q)) &&
-      (!fp || e.pair === fp) && (!fd || e.data === fd) && (!fr || (fr === 'win' ? e.returnPct > 0 : e.returnPct <= 0)));
+      (!fp || e.pair === fp) && (!fd || e.data === fd) && (!fr || (fr === 'win' ? e.returnPct > 0 : e.returnPct <= 0)) && (!tf || tf(e)));
   }
-  ['evalFStrat', 'evalFPair', 'evalFData', 'evalFResult'].forEach((id) => $(id).addEventListener('change', () => renderEvaluation()));
+  ['evalFStrat', 'evalFPair', 'evalFData', 'evalFResult', 'evalFEra'].forEach((id) => $(id).addEventListener('change', () => renderEvaluation()));
+  let evalYearTimer = null;
+  ['evalFY0', 'evalFY1'].forEach((id) => $(id).addEventListener('input', () => { clearTimeout(evalYearTimer); evalYearTimer = setTimeout(() => { const v = $(id).value; if (!v || (v.length === 4 && +v >= 1971 && +v <= 2100)) renderEvaluation(); }, 350); }));
   $('evalFSearch').addEventListener('input', () => renderEvaluation());
   $('evalFReset').addEventListener('click', () => {
-    ['evalFStrat', 'evalFPair', 'evalFData', 'evalFResult'].forEach((id) => { $(id).value = ''; });
+    ['evalFStrat', 'evalFPair', 'evalFData', 'evalFResult', 'evalFEra', 'evalFY0', 'evalFY1'].forEach((id) => { $(id).value = ''; });
     $('evalFSearch').value = '';
     renderEvaluation();
   });
@@ -4866,6 +4880,9 @@
     const all = evalList();
     const uniq = (f) => [...new Set(all.map(f))].sort((a, b) => a.localeCompare(b, 'fr'));
     fillFilter('evalFStrat', [...new Set(all.map((e) => e.name).concat(batchStore.get().flatMap((b) => b.entries.map((e) => e.name))))].filter(Boolean).sort((a, b) => a.localeCompare(b, 'fr'))); fillFilter('evalFPair', uniq((e) => e.pair)); fillFilter('evalFData', uniq((e) => e.data));
+    { const sel = $('evalFEra'), cur = sel.value, labels = F.advisor.normEras(activeEras()).map((x) => x.label);
+      sel.innerHTML = '<option value="">Toutes</option>' + labels.map((l) => '<option value="' + esc(l) + '">' + esc(l) + '</option>').join('');
+      sel.value = labels.includes(cur) ? cur : ''; }
     const name = currentStratName(), mineN = all.filter((e) => e.name === name).length;
     $('evalScopeCurrentN').textContent = mineN; $('evalScopeAllN').textContent = all.length;
     updateBatchCount();
@@ -4875,7 +4892,7 @@
     $('evalClear').hidden = $('evalExport').hidden = isBatch;
     if (evalBatch) { $('evalScopeCurrent').setAttribute('aria-selected', 'false'); $('evalScopeAll').setAttribute('aria-selected', 'false'); $('evalScopeBatch').setAttribute('aria-selected', 'true'); }
     // filtres : dans l'onglet Batchs, seul le choix de la stratégie compte
-    $('evalFilters').querySelectorAll(':scope > .field').forEach((f) => { f.hidden = isBatch && f.id !== 'evalFStratField'; });
+    $('evalFilters').querySelectorAll(':scope > .field').forEach((f) => { f.hidden = isBatch ? f.id !== 'evalFStratField' : !!evalBatch && !f.classList.contains('time-field'); });
     if (isBatch) {
       const st = $('evalFStrat').value;
       $('evalTitle').textContent = st ? 'Batchs de « ' + st + ' »' : 'Batchs enregistrés';
@@ -4887,9 +4904,10 @@
     // dans l'onglet « Stratégie en cours », le choix de stratégie et la recherche n'ont pas lieu d'être
     $('evalFStratField').hidden = evalScope === 'current';
     $('evalFSearch').closest('label').hidden = evalScope === 'current';
-    $('evalFilters').hidden = !all.length || !!evalBatch;
+    $('evalFilters').hidden = !all.length;
+    $('evalResetAll').hidden = !!evalBatch;
     $('evalClear').disabled = $('evalResetAll').disabled = !all.length;
-    $('evalFReset').hidden = !['evalFStrat', 'evalFPair', 'evalFData', 'evalFResult'].some((id) => $(id).value) && !$('evalFSearch').value;
+    $('evalFReset').hidden = !['evalFStrat', 'evalFPair', 'evalFData', 'evalFResult', 'evalFEra', 'evalFY0', 'evalFY1'].some((id) => $(id).value) && !$('evalFSearch').value;
     if (!all.length) { $('evalExport').disabled = true; $('evalBody').innerHTML = '<p class="eval-empty">Aucune simulation pour l\'instant : lancez un backtest, il s\'ajoutera ici.</p>'; return; }
     const shown = evalFiltered(all);
     $('evalExport').disabled = !shown.length;
@@ -4902,7 +4920,7 @@
       return;
     }
     const list = shown.map((x) => x.e);
-    const filt = shown.length < all.length && !evalBatch;
+    const filt = shown.length < all.length && (!evalBatch || !!timeFilterFn());
     if (evalView === 'charts') { renderEvalCharts(list, filt); wireTimeline(); return addBatchBanner(); }
     if (evalView === 'reco') { renderEvalReco(list, filt); return addBatchBanner(); }
     if (evalView === 'time') { renderEvalTime(list, filt); wireTimeline(); return addBatchBanner(); }
@@ -4935,7 +4953,8 @@
   function renderEvalTime(list, filt) {
     const eras = F.advisor.normEras(activeEras()), inEra = (e, er) => { const m = F.advisor.midDate(e); return m >= er.fromD && m <= er.toD; };
     const pair = $('evalFPair').value, data = $('evalFData').value;
-    const B = batchesShown().map((x) => ({ b: x.b, i: x.i, L: x.b.entries.filter((e) => e.from && e.to && (!pair || e.pair === pair) && (!data || e.data === data)) })).filter((x) => x.L.length);
+    const tf = timeFilterFn();
+    const B = batchesShown().map((x) => ({ b: x.b, i: x.i, L: x.b.entries.filter((e) => e.from && e.to && (!pair || e.pair === pair) && (!data || e.data === data) && (!tf || tf(e))) })).filter((x) => x.L.length);
     const med = (a) => { const v = a.filter(Number.isFinite).sort((x, y) => x - y); return v.length ? (v.length % 2 ? v[v.length >> 1] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2) : NaN; };
     const cell = (L) => {
       if (!L.length) return '<td class="tb-empty">—</td>';
