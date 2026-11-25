@@ -669,6 +669,7 @@ module.exports = function fxTools(ctx) {
         const b = getBatch(a.id), w = normW(a.mechanic), L = pickEntries(b, a.indexes, a), R = await wdRows(L, w);
         if (R.length < 3) fail('Il faut au moins 3 simulations relancées (batch plus grand).');
         const e0 = L[0], nameW = a.mechanic === 'none' || !w ? 'Sans retrait' : wName(a.mechanic, w);
+        const savedS = store.strategies().find((x) => x.name === e0.name), outdated = savedS ? L.filter((e) => e.strategy && verSig(e.strategy) !== verSig(savedS)).length : 0;
         const fx = FC.fxFromRows(R, { name: e0.name, strategy: e0.strategy, config: e0.config, pair: e0.pair, leverage: e0.leverage, dataLabel: e0.data, synthetic: L.some((e) => /simul/i.test(e.data || '')),
           mech: { name: nameW, w: w || { on: false, mode: 'periodic', type: 'none', value: 0 } }, other: { name: '—' }, trials: a.trials || trialsFor(e0.name, batches.get().length), eras: eraStore.get().length ? eraStore.get() : undefined });
         if (!w) fx.income = Object.assign(fx.income, { desc: 'pas de retrait partiel durant la période de trading', perMonthPct: 0, fixedPct: null });
@@ -676,7 +677,7 @@ module.exports = function fxTools(ctx) {
         fx.batch = b.id; fx.keys = R.map((r) => r.key);
         const capital = Math.max(fx.capital, Number(a.capital) || fx.capital);
         if (a.save) saveFx(fx);
-        return Object.assign({ saved: !!a.save }, fxView(fx, capital, true));
+        return Object.assign({ saved: !!a.save, strategyOutdated: outdated ? { simulations: outdated + ' / ' + L.length, changes: versionDiff(L.find((e) => e.strategy && verSig(e.strategy) !== verSig(savedS)).strategy, savedS).map((d) => d.t + ' ' + d.txt), hint: 'Ces simulations utilisent une ancienne version de la stratégie : demander à l\'utilisateur, puis resimulate_batch replace=true avant build_fx.' } : undefined }, fxView(fx, capital, true));
       },
     },
     {
@@ -888,15 +889,20 @@ module.exports = function fxTools(ctx) {
     {
       name: 'fx_ea',
       description: '« ⬇ EA (.mq5) » d\'un FX : l\'Expert Advisor MetaTrader 5 du plan (stratégie, paire, levier, capital ; taille des positions comme le backtest). Le retrait n\'est pas dans l\'EA : il se fait à la main.',
-      inputSchema: obj({ id: { type: 'string' }, timeframe: { type: 'string', enum: ['M15', 'M30', 'H1', 'H4', 'D1'] }, maxLots: { type: 'number' }, outputPath: { type: 'string' }, includeCode: { type: 'boolean' } }, ['id']),
+      inputSchema: obj({ id: { type: 'string' }, latest: { type: 'boolean', description: 'défaut true : EA avec la dernière version enregistrée de la stratégie ; false : version du FX' }, timeframe: { type: 'string', enum: ['M15', 'M30', 'H1', 'H4', 'D1'] }, maxLots: { type: 'number' }, outputPath: { type: 'string' }, includeCode: { type: 'boolean' } }, ['id']),
       handler: async (a) => {
         const fx = getFx(a.id);
         if (!fx.strategy.data) fail('Ce FX n\'a pas gardé sa stratégie.');
         const c = fx.strategy.config || {}, br = c.broker || {};
-        const r = await callTool('generate_ea', { strategy: Object.assign(strategyView(fx.strategy.data), { name: fx.strategy.data.name || fx.strategy.name }), pair: fx.strategy.pair || c.pair || 'EUR/USD',
+        // l'EA suit la dernière version enregistrée de la stratégie (latest=false : version du FX)
+        const savedS = store.strategies().find((x) => x.name === fx.strategy.name), newer = savedS && verSig(savedS) !== verSig(fx.strategy.data);
+        const useS = newer && a.latest !== false ? savedS : fx.strategy.data;
+        const r = await callTool('generate_ea', { strategy: Object.assign(strategyView(useS), { name: fx.strategy.name }), pair: fx.strategy.pair || c.pair || 'EUR/USD',
           timeframe: a.timeframe || br.tf || 'D1', sizing: 'backtest', leverage: Number(fx.strategy.leverage || c.leverage) || 10, exposurePct: Number(c.exposurePct) || 100, maxLots: a.maxLots || Number(br.maxLots) || 10,
           outputPath: a.outputPath, includeCode: a.includeCode });
-        return Object.assign({ fx: fx.name, capital: Math.round(fx.capital), withdrawal: fx.income.desc + ' (à faire à la main)' }, r);
+        return Object.assign({ fx: fx.name, capital: Math.round(fx.capital), withdrawal: fx.income.desc + ' (à faire à la main)',
+          strategyVersion: newer ? (a.latest !== false ? 'version actuelle (plus récente que le FX : à signaler à l\'utilisateur, et refaire le FX pour qu\'il corresponde)' : 'version du FX (une version plus récente existe)') : 'version du FX (à jour)',
+          changesSinceFx: newer ? versionDiff(fx.strategy.data, savedS).map((d) => d.t + ' ' + d.txt) : undefined }, r);
       },
     },
     {

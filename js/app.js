@@ -3467,7 +3467,7 @@
   function saveFxRows(R, mech, other, extra) {
     if (!R || !R.length) return toast('Aucune simulation calculée pour ce FX.', false);
     const all = evalList(), sims = R.map((r) => all.find((e) => e.key === r.key)), first = sims.find(Boolean) || {};
-    const fx = fxFromRows(R, { name: first.name, strategy: first.strategy, config: first.config, pair: first.pair, leverage: first.leverage, dataLabel: first.data,
+    const fx = fxFromRows(R, { name: first.name, strategy: (extra && extra.strategy) || first.strategy, config: first.config, pair: first.pair, leverage: first.leverage, dataLabel: first.data,
       synthetic: sims.some((e) => e && /simul/i.test(e.data || '')), mech: mech, other: other || null, keys: R.map((r) => r.key) });
     if (wdNone(mech.w)) { fx.income = Object.assign(fx.income, { desc: NO_WD, perMonthPct: 0, fixedPct: null, other: other ? other.name : null }); fx.name = 'FX ' + (first.name || 'stratégie') + ' · sans retrait'; }
     else if (!other) fx.income.other = null;
@@ -3779,8 +3779,15 @@
   function downloadFxEa(fx) {
     if (!fx.strategy.data) return toast('Ce FX n\'a pas gardé sa stratégie : EA impossible à générer.', false);
     const c = fx.strategy.config || {}, br = c.broker || {};
+    // l'EA suit la dernière version de la stratégie ; si le FX a été fait avec une version plus ancienne, vous validez
+    let strat = fx.strategy.data, upToDate = true;
+    const latest = latestStrategyOf(fx.strategy.name);
+    if (latest && rulesSig(latest) !== rulesSig(fx.strategy.data)) {
+      const ch = versionDiff(fx.strategy.data, latest).slice(0, 6).map((d) => '  ' + d.t + ' ' + d.txt).join('\n') || '  réglages différents';
+      if (confirm('La stratégie « ' + fx.strategy.name + ' » a changé depuis ce FX :\n' + ch + '\n\nOK : EA avec la version ACTUELLE (recréez ensuite le FX pour que ses chiffres correspondent à cette version).\nAnnuler : EA avec la version du FX.')) { strat = latest; upToDate = false; }
+    }
     try {
-      const ea = F.mql5.generate(Object.assign({}, fx.strategy.data, { name: fx.strategy.data.name || fx.strategy.name }), {
+      const ea = F.mql5.generate(Object.assign({}, strat, { name: fx.strategy.name }), {
         pair: fx.strategy.pair || c.pair || 'EUR/USD', leverage: Number(fx.strategy.leverage || c.leverage) || 10, exposurePct: Number(c.exposurePct) || 100, capital: fx.capital,
         periodLabel: 'FX « ' + fx.name + ' »', stats: null, timeframe: 'PERIOD_' + (br.tf || 'D1'), sizing: 'backtest', fixedLots: Number(br.lots) || 0.01, riskPct: Number(br.risk) || 1,
         maxLots: Number(br.maxLots) || 10, maxSpreadPips: br.maxSpread != null && br.maxSpread !== '' ? Number(br.maxSpread) : 5,
@@ -3789,7 +3796,7 @@
       const blob = new Blob(['\ufeff' + ea.code.replace(/\n/g, '\r\n')], { type: 'text/plain;charset=utf-8' }), a = document.createElement('a');
       a.href = URL.createObjectURL(blob); a.download = ea.fileName; document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-      toast('EA « ' + ea.fileName + ' » téléchargé (le retrait du FX se fait à la main : l\'EA ne retire pas d\'argent). Testez-le d\'abord en compte démo.', false);
+      toast('EA « ' + ea.fileName + ' » téléchargé' + (upToDate ? '' : ' avec la version actuelle de la stratégie : recréez le FX (« 💼 Créer un FX » sur son batch) pour qu\'il corresponde') + '. Le retrait du FX se fait à la main (l\'EA ne retire pas d\'argent). Testez-le d\'abord en compte démo.', false);
       logEvent('ea.downloaded', 'EA du FX « ' + fx.name + ' » téléchargé : ' + ea.fileName, { fx: fx.id });
     } catch (e) { toast('EA impossible à générer : ' + e.message, false); }
   }
@@ -4458,6 +4465,23 @@
     const b = evalBatch && batchStore.get().find((x) => x.id === evalBatch.id);
     return fxFromSims(sel.length ? sel : all, { btn: $('evalFxBtn'), batch: !sel.length && b && all.length === b.entries.length ? b : null });
   });
+  /** Version actuelle d'une stratégie : celle enregistrée, sinon celle du formulaire, sinon la dernière du journal des versions. */
+  function latestStrategyOf(name) {
+    const saved = storage.get().find((x) => x.name === name);
+    if (saved) return saved;
+    const cur = currentStrategy();
+    if (cur.name === name && (cur.longEntry || cur.shortEntry)) return cur;
+    const v = verList().filter((x) => x.name === name).pop();
+    return v ? Object.assign({ name: name }, v.strat) : null;
+  }
+  /** Ligne de FX recalée sur le résultat actuel du tableau : résultat et baisse maximale du tableau, courbe mensuelle ajustée. */
+  function fxRowFromTable(r, e) {
+    if (!e || Math.abs(r.b.ret - e.returnPct) <= 0.5) return r;
+    const L = r.curve.length, last = L ? r.curve[L - 1].acc + r.curve[L - 1].wd - 100 : 0, target = e.returnPct, f = Math.abs(last) > 1 ? target / last : null;
+    const fix = (v, k) => (v == null ? v : f != null ? 100 + (v - 100) * f : v + (target - last) * ((k + 1) / Math.max(1, L)));
+    const curve = r.curve.map((pt, k) => Object.assign({}, pt, { acc: Math.round(fix(pt.acc + pt.wd, k) * 10) / 10 - pt.wd, b: pt.b == null ? null : Math.round(fix(pt.b, k) * 10) / 10 }));
+    return Object.assign({}, r, { curve: curve, b: { ret: target, dd: e.maxDrawdownPct }, w: Object.assign({}, r.w, { ret: target, dd: e.maxDrawdownPct, final: r.capital * (1 + target / 100) - (r.w.wd || 0) }) });
+  }
   /** FX sans retrait à partir de simulations (affichées, sélectionnées, ou celles d'un batch). opt = {btn, batch} */
   async function fxFromSims(T, opt) {
     opt = opt || {};
@@ -4467,6 +4491,22 @@
     // simulations d'un batch effacées de l'historique : elles y reviennent (comme « Recharger »)
     const have = new Set(evalList().map((e) => e.key)), missing = T.filter((e) => !have.has(e.key));
     if (missing.length) evalSave(evalList().concat(missing.map((e) => Object.assign({}, e))));
+    // le FX doit correspondre à la version actuelle de la stratégie : sinon on le dit, et on met à jour si vous validez
+    const latest = latestStrategyOf(T[0].name);
+    if (latest) {
+      const sig = rulesSig(latest), old = T.filter((e) => e.strategy && rulesSig(e.strategy) !== sig);
+      if (old.length) {
+        const ch = versionDiff(old[0].strategy, latest).slice(0, 6).map((d) => '  ' + d.t + ' ' + d.txt).join('\n') || '  réglages différents';
+        if (confirm(old.length + ' simulation' + (old.length > 1 ? 's' : '') + ' sur ' + T.length + ' ont été faites avec une ancienne version de « ' + T[0].name + ' ».\n\nVersion actuelle, par rapport à la leur :\n' + ch +
+          '\n\nOK : les mettre à jour (les resimuler avec la version actuelle, mêmes dates), puis créer le FX.\nAnnuler : créer le FX avec leurs résultats actuels, sans mise à jour.')) {
+          await rerunWithStrategy(old.map((e) => e.key), Object.assign({}, latest));
+          const fresh = new Map(evalList().map((e) => [e.key, e]));
+          T = T.map((e) => fresh.get(e.key) || e);
+          if (opt.batch) { const l = batchStore.get(), b = l.find((x) => x.id === opt.batch.id); if (b) { b.entries = b.entries.map((e) => Object.assign({}, fresh.get(e.key) || e)); b.updatedAt = new Date().toISOString(); batchStore.set(l); opt.batch = b; } }
+          if (!$('evalModal').hidden) renderEvaluation();
+        }
+      }
+    }
     const none = { on: false, mode: 'none' }, cache = wdResStore.get(), miss = T.filter((e) => !cache[wdKey(none) + '#' + e.key]).length;
     if (miss > 60 && !confirm(miss + ' simulations à recalculer pour construire le FX. Continuer ?')) return;
     if (miss) toast('Construction du FX : ' + miss + ' simulation' + (miss > 1 ? 's' : '') + ' à recalculer, patientez…', false);
@@ -4475,7 +4515,13 @@
     try { R = await wdCompute(none, T, (i, n) => { if (btn) btn.textContent = '💼 Calcul ' + (i + 1) + ' / ' + n + '…'; }); }
     finally { if (btn && btn.isConnected) btn.textContent = label; }
     if (R.length < 3) return toast('Simulations impossibles à relancer : ' + ($('formError').textContent || 'données indisponibles') + '.', false);
-    try { saveFxRows(R, { name: 'Sans retrait', w: none }, null, opt.batch ? { name: 'FX ' + opt.batch.name, batch: opt.batch.id } : null); } catch (e) { console.error(e); toast('FX impossible à construire : ' + e.message, false); }
+    // résultats actuels du tableau (si une simulation relancée diffère, ex. données du courtier mises à jour, le tableau fait foi)
+    const byKey = new Map(T.map((e) => [e.key, e]));
+    R = R.map((r) => fxRowFromTable(r, byKey.get(r.key)));
+    // stratégie du FX : la version la plus utilisée par ces simulations (la version actuelle après mise à jour)
+    const cnt = new Map(); T.forEach((e) => { if (e.strategy) { const k = rulesSig(e.strategy); cnt.set(k, (cnt.get(k) || { n: 0, s: e.strategy })); cnt.get(k).n++; } });
+    const main = [...cnt.values()].sort((a, b) => b.n - a.n)[0];
+    try { saveFxRows(R, { name: 'Sans retrait', w: none }, null, Object.assign(opt.batch ? { name: 'FX ' + opt.batch.name, batch: opt.batch.id } : {}, main ? { strategy: main.s } : {})); } catch (e) { console.error(e); toast('FX impossible à construire : ' + e.message, false); }
   }
 
   // ---------- Analyse temporelle (graphiques de l'évaluation) ----------

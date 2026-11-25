@@ -262,6 +262,11 @@ choisit un scénario (du pire au meilleur cas testé) : le gain au bout d'un an 
 
 Un FX construit sur des données simulées est signalé (« à refaire avec les cours réels MT5 avant de le présenter »).
 
+**FX et EA à jour** : un FX se base sur les résultats actuels de ses simulations (ceux du tableau). Si certaines ont été
+faites avec une ancienne version de la stratégie, la page l'indique (avec les changements) et propose de les mettre à
+jour (resimulées avec la version actuelle, mêmes dates, batch mis à jour) avant de créer le FX. « ⬇ EA » d'un FX utilise
+la dernière version de la stratégie ; si elle a changé depuis le FX, la page l'indique et vous choisissez la version.
+
 **FX d'un batch** : « 💼 Créer un FX » sur chaque batch (Évaluation › Batchs) ou « 💼 Créer un FX de ce batch » dans le
 bandeau d'un batch rechargé : le FX est construit avec les simulations de ce batch seulement (et « 📂 Voir les
 simulations » rouvre ce batch). « Enregistrer un FX » de l'Évaluation, lui, prend toutes les simulations affichées.
