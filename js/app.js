@@ -4450,16 +4450,6 @@
   document.addEventListener('pointerup', () => { if (wdDrag) { wdDrag = null; wdCommitSel(); } });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('wdModal').hidden) closeWdModal(); });
   $('evalWdBtn').addEventListener('click', () => openWdModal());
-  /** Ligne de FX recalée sur le résultat du tableau : résultat et baisse maximale du tableau, courbe mensuelle ajustée
-   *  (écarts au capital mis à l'échelle, ou décalage progressif si la simulation relancée finit à plat). */
-  function fxRowFromTable(r, e) {
-    if (!e || Math.abs(r.b.ret - e.returnPct) <= 0.5) return r;
-    const L = r.curve.length, last = L ? r.curve[L - 1].acc + r.curve[L - 1].wd - 100 : 0, target = e.returnPct, f = Math.abs(last) > 1 ? target / last : null;
-    const fix = (v, k) => (v == null ? v : f != null ? 100 + (v - 100) * f : v + (target - last) * ((k + 1) / Math.max(1, L)));
-    const curve = r.curve.map((pt, k) => Object.assign({}, pt, { acc: Math.round(fix(pt.acc + pt.wd, k) * 10) / 10 - pt.wd, b: pt.b == null ? null : Math.round(fix(pt.b, k) * 10) / 10 }));
-    return Object.assign({}, r, { curve: curve, fromTable: true,
-      b: { ret: target, dd: e.maxDrawdownPct }, w: Object.assign({}, r.w, { ret: target, dd: e.maxDrawdownPct, final: r.capital * (1 + target / 100) - (r.w.wd || 0) }) });
-  }
   // « Enregistrer un FX » depuis l'évaluation : simulations affichées (ou sélectionnées), sans préférence de retrait
   $('evalFxBtn').addEventListener('click', async () => {
     if (checkRunning || batchRunning) return toast('Un calcul est déjà en cours : attendez la fin ou arrêtez-le.', false);
@@ -4474,17 +4464,7 @@
     try { R = await wdCompute(none, T, (i, n) => { $('evalFxBtn').textContent = '💼 Calcul ' + (i + 1) + ' / ' + n + '…'; }); }
     finally { $('evalFxBtn').textContent = '💼 Enregistrer un FX'; }
     if (R.length < 3) return toast('Simulations impossibles à relancer : ' + ($('formError').textContent || 'données indisponibles') + '.', false);
-    // les simulations relancées redonnent-elles les résultats du tableau ?
-    const byKey = new Map(T.map((e) => [e.key, e])), allE = evalList();
-    const diffs = R.map((r) => ({ r: r, e: byKey.get(r.key) })).filter((x) => x.e && Math.abs(x.r.b.ret - x.e.returnPct) > 0.5);
-    let rows = R;
-    if (diffs.length) {
-      const wd = diffs.filter((x) => (x.e.withdrawn || 0) > 0).length, ex = diffs.slice(0, 3).map((x) => '#' + (allE.findIndex((y) => y.key === x.e.key) + 1) + ' : ' + signed(x.e.returnPct, num1) + ' % dans le tableau, ' + signed(x.r.b.ret, num1) + ' % relancée').join('\n');
-      const why = (wd ? wd + ' ont été faites avec un retrait fictif (retiré ici). ' : '') + (diffs.length - wd ? (diffs.length - wd) + ' donnent un autre résultat en les relançant aujourd\'hui (données du courtier mises à jour, autre version de Forexia…). ' : '');
-      if (confirm(diffs.length + ' simulation' + (diffs.length > 1 ? 's' : '') + ' sur ' + R.length + ' ne redonnent pas le résultat du tableau :\n' + ex + '\n\n' + why +
-        '\n\nOK : construire le FX avec les résultats du TABLEAU (courbes mois par mois ajustées).\nAnnuler : construire le FX avec les simulations RELANCÉES aujourd\'hui (puis « 🔄 Resimuler » pour mettre le tableau à jour).')) rows = R.map((r) => fxRowFromTable(r, byKey.get(r.key)));
-    }
-    try { saveFxRows(rows, { name: 'Sans retrait', w: none }, null); } catch (e) { console.error(e); toast('FX impossible à construire : ' + e.message, false); }
+    try { saveFxRows(R, { name: 'Sans retrait', w: none }, null); } catch (e) { console.error(e); toast('FX impossible à construire : ' + e.message, false); }
   });
 
   // ---------- Analyse temporelle (graphiques de l'évaluation) ----------
