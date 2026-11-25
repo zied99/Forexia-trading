@@ -207,6 +207,15 @@ Le dossier [`agent/`](../agent/README.md) contient un projet complet pour un age
 
 Restent propres à la page : compte cloud (connexion), export CSV / JSON, annuler (Ctrl+Z), affichage.
 
+### Ce que l'agent sait des réglages de l'utilisateur
+
+`fx_method` renvoie une rubrique `notions` (aussi dans `CLAUDE.md` et la Démarche Forexia) : seul le résultat actuel
+d'une simulation compte ; versions de stratégie et retour (`strategy_versions`, `revert_strategy`, `resimulate_batch`) ;
+mise à jour des simulations d'une ancienne version seulement avec l'accord de l'utilisateur (`strategyOutdated`) ; EA
+d'un FX avec la dernière version (`fx_ea`, `changesSinceFx`) ; FX sur les résultats actuels, depuis un batch avec les
+mêmes filtres que la page ; calcul du risque (baisses en cours de route) et de la confiance (régularité année par année
+si une seule époque est choisie) ; respect des époques de l'utilisateur ; écart entre simulations.
+
 ### Guide de recherche (bouton « 🧭 Guide agent » de la page)
 
 Dans la page, le bouton **🧭 Guide agent** ouvre la fenêtre des guides : vous pouvez en écrire plusieurs, mais **un

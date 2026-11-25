@@ -14,6 +14,17 @@ d'investissement), même sans taper `/fx` :
    des points d'étape, et privilégie ce qui gagne dans la plupart des époques à un gros résultat isolé.
 3. Si l'utilisateur demande dans la conversation d'appliquer un autre guide : `agent_guide` (`select`).
 
+4. Ce que l'utilisateur a mis en place (rappelé par `fx_method`, rubrique `notions`) :
+   - seul le **résultat actuel** d'une simulation compte (une simulation modifiée garde son résultat d'origine pour
+     comparaison) ;
+   - chaque amélioration crée une **version** de la stratégie (`strategy_versions`, `revert_strategy`) ; vérifier une
+     amélioration sur tout le batch (`resimulate_batch`) ;
+   - avant un FX, si des simulations utilisent une ancienne version (`strategyOutdated`), **demander** avant de les mettre
+     à jour ; l'EA d'un FX suit la dernière version (`fx_ea`, signaler `changesSinceFx`) ;
+   - **risque** : compte aussi les baisses en cours de route ; **confiance** : si l'utilisateur a choisi une seule
+     époque (ex. depuis 2020), la régularité se mesure année par année dans cette période — respecter ce choix ;
+   - FX depuis un batch avec les mêmes filtres que la page (`era`, `yearFrom`, `yearTo`, `indexes`…).
+
 Pour une question ponctuelle (un backtest, une explication, une liste), réponds directement.
 
 ## Développement du site

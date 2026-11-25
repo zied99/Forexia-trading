@@ -314,6 +314,14 @@ const SYN = { pair: 'EUR/USD', source: 'synthetic', dateFrom: '2019-01-01', date
       ok(kv.items.find((x) => x.key === 'forexia.fx').data.length >= 1 && kv.items.find((x) => x.key === 'forexia.agentGuide').data.active === 'g1');
     } finally { br.kill(); }
   });
+  await test('build_fx sans retrait : résultats actuels enregistrés (comme la page) + notions de fx_method', async () => {
+    const r = await call('run_batch', { strategy: { preset: 'rsi' }, market: MK, n: 6, months: 12, seed: 21 });
+    const f = path.join(dataDir, 'batches.json'), all = JSON.parse(fs.readFileSync(f, 'utf8')), b = all.find((x) => x.id === r.batch.id);
+    b.entries[0].returnPct = 66.6; b.entries[0].maxDrawdownPct = 4; fs.writeFileSync(f, JSON.stringify(all));
+    const fx = await call('build_fx', { id: r.batch.id, mechanic: 'none' });
+    ok(fx.scenarios.some((x) => Math.abs(x.backPct - 66.6) < 0.05) || Math.abs(fx.backAtEndPct.good - 66.6) < 30, JSON.stringify(fx.backAtEndPct));
+    const m = await call('fx_method', {}); ok(m.notions.length >= 8 && m.notions.some((n) => /RÉSULTAT ACTUEL/.test(n)));
+  });
   await test('note_add / note_list', async () => {
     await call('note_add', { text: 'Levier 20 : plus de pertes que levier 10 sur les mêmes périodes', tags: ['levier'], refs: [B1, B2] });
     await call('note_add', { text: 'Le filtre EMA 200 aide surtout avant 2008', tags: ['époques'] });

@@ -103,6 +103,15 @@ Avec `vary_batch` sur le batch de référence (mêmes périodes), un élément �
 4. `vary_batch` avec `param: "withdraw"` pour voir l'effet du retrait sur le batch entier ; `save_withdraw_mechanic`
    pour la mécanique retenue.
 
+## À savoir (réglages de l'utilisateur)
+
+- Seul le résultat **actuel** d'une simulation compte ; une simulation modifiée garde son résultat d'origine pour comparaison.
+- Si l'utilisateur a choisi une période (ex. « depuis 2020 »), travailler dans cette période : la régularité du FX se mesure
+  alors année par année.
+- Le risque compte les baisses en cours de route, pas seulement le résultat final.
+- Avant un FX, des simulations faites avec une ancienne version de la stratégie se mettent à jour **avec l'accord** de
+  l'utilisateur ; l'EA suit la dernière version.
+
 ## Phase 5 — Construire et contrôler le FX
 
 1. `build_fx` (batch retenu + mécanique, `capital` de l'utilisateur) ; `fx_projection` pour les scénarios

@@ -4474,17 +4474,7 @@
     const v = verList().filter((x) => x.name === name).pop();
     return v ? Object.assign({ name: name }, v.strat) : null;
   }
-  /** Ligne de FX recalée sur le résultat actuel du tableau : résultat et baisse maximale du tableau, courbe mensuelle ajustée. */
-  function fxRowFromTable(r, e) {
-    if (!e || Math.abs(r.b.ret - e.returnPct) <= 0.5) return r;
-    // ajustement progressif et proportionnel : chaque mois reçoit la même part de l'écart (la forme de la courbe est gardée,
-    // sans amplifier les va-et-vient)
-    const L = r.curve.length, last = L ? r.curve[L - 1].acc + r.curve[L - 1].wd - 100 : 0, target = e.returnPct;
-    const g = Math.max(1e-6, 100 + target) / Math.max(1e-6, 100 + last);
-    const fix = (v, k) => (v == null ? v : Math.max(0, v) * Math.pow(g, (k + 1) / Math.max(1, L)));
-    const curve = r.curve.map((pt, k) => Object.assign({}, pt, { acc: Math.round(fix(pt.acc + pt.wd, k) * 10) / 10 - pt.wd, b: pt.b == null ? null : Math.round(fix(pt.b, k) * 10) / 10 }));
-    return Object.assign({}, r, { curve: curve, b: { ret: target, dd: e.maxDrawdownPct }, w: Object.assign({}, r.w, { ret: target, dd: e.maxDrawdownPct, final: r.capital * (1 + target / 100) - (r.w.wd || 0) }) });
-  }
+  function fxRowFromTable(r, e) { return F.fxcore.fxRowFromRecord(r, e); }
   /** Filtres de l'évaluation appliqués à une liste de simulations (paire, données, résultat, époque, années, sélection à la souris). */
   function applyEvalFilters(L) {
     const fp = $('evalFPair').value, fd = $('evalFData').value, fr = $('evalFResult').value, tf = timeFilterFn();

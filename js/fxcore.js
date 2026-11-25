@@ -77,6 +77,19 @@
     return o;
   }
 
+  /** Ligne recalée sur le résultat enregistré (« résultat actuel » du tableau) quand la simulation relancée diffère
+   *  (données du courtier mises à jour, autre version…) : résultat et baisse maximale enregistrés, courbe mensuelle ajustée
+   *  progressivement (chaque mois reçoit la même part de l'écart, la forme de la courbe est gardée). */
+  function fxRowFromRecord(r, e) {
+    if (!e || !Number.isFinite(e.returnPct) || Math.abs(r.b.ret - e.returnPct) <= 0.5) return r;
+    const L = r.curve.length, last = L ? r.curve[L - 1].acc + r.curve[L - 1].wd - 100 : 0, target = e.returnPct;
+    const g = Math.max(1e-6, 100 + target) / Math.max(1e-6, 100 + last);
+    const fix = (v, k) => (v == null ? v : Math.max(0, v) * Math.pow(g, (k + 1) / Math.max(1, L)));
+    const curve = r.curve.map((pt, k) => Object.assign({}, pt, { acc: Math.round(fix(pt.acc + pt.wd, k) * 10) / 10 - pt.wd, b: pt.b == null ? null : Math.round(fix(pt.b, k) * 10) / 10 }));
+    const dd = Number.isFinite(e.maxDrawdownPct) ? e.maxDrawdownPct : r.w.dd;
+    return Object.assign({}, r, { curve: curve, b: { ret: target, dd: dd }, w: Object.assign({}, r.w, { ret: target, dd: dd, final: r.capital * (1 + target / 100) - (r.w.wd || 0) }) });
+  }
+
   // ---------- FX ----------
   function fxPrinciple(strat, pair) {
     const [a, b] = String(pair || '').toUpperCase().split('/'), na = CUR_NAME[a] || a, nb = CUR_NAME[b] || b;
@@ -337,7 +350,7 @@
 
   F.fxcore = {
     pctile, mean, median, durationDays, CUR_NAME, RISK_TXT, MINER_LEV,
-    wdApply, wdKey, wdDesc, withdrawLabel, wdRow, wdDerive, wdAgg,
+    wdApply, wdKey, wdDesc, withdrawLabel, wdRow, wdDerive, wdAgg, fxRowFromRecord,
     fxPrinciple, fxRiskNote, fxSimsFromRows, fxFromRows, simsOf, fxPoint, fxConfidence, fxProjection,
     minerMechs, minerScore, minePair, minerPick,
   };

@@ -388,6 +388,20 @@ module.exports = function fxTools(ctx) {
   const idOf = (x) => (x && (x.id || x.key || x.name)) || JSON.stringify(x);
   function union(a, b) { const map = new Map(); (a || []).forEach((x) => map.set(idOf(x), x)); (b || []).forEach((x) => map.set(idOf(x), x)); return [...map.values()]; }
 
+  // Ce que l'utilisateur a mis en place dans la page et attend aussi de l'agent (rappelé par fx_method)
+  const NOTIONS = [
+    'Résultat actuel / d\'origine : une simulation modifiée (prolongée, raccourcie, capital changé, améliorée, resimulée) garde son résultat d\'origine (champ « extended », barre pleine dans la page) ; seul le RÉSULTAT ACTUEL compte partout (statistiques, FX, risque, confiance). Quand l\'utilisateur parle de « résultats », ce sont les résultats actuels.',
+    'Versions de stratégie : chaque amélioration ajoutée crée une version (strategy_versions, journal partagé avec la page). Une amélioration se vérifie sur tout le batch (resimulate_batch) ; si elle n\'aide pas l\'ensemble : revert_strategy, et le noter.',
+    'Avant un FX : si build_fx renvoie strategyOutdated (simulations faites avec une ancienne version), le dire à l\'utilisateur avec les changements, et ne mettre à jour (resimulate_batch replace=true) qu\'après son accord.',
+    'FX : construit sur les résultats actuels de ses simulations. Depuis un batch, avec les mêmes filtres que la page (era, yearFrom, yearTo, minReturn, maxReturn, indexes) ; un FX « sans retrait » (mechanic "none") = « pas de retrait partiel durant la période de trading ».',
+    'EA d\'un FX : fx_ea utilise la dernière version enregistrée de la stratégie ; s\'il renvoie changesSinceFx, le signaler à l\'utilisateur et proposer de refaire le FX pour qu\'il corresponde. Le retrait n\'est jamais dans l\'EA (manuel).',
+    'Risque (1 à 7) = la plus forte de : perte dans 1 cas sur 10 à la fin, 0,7 × baisse médiane EN COURS DE ROUTE (drawdown), 0,5 × pire perte. Un plan 100 % gagnant peut donc être « moyen » si le compte passe par des creux ; pour le baisser : levier plus faible, stop-loss ou stop suiveur.',
+    'Confiance = moyenne géométrique de 3 probabilités : Sharpe « dégonflé » (corrigé du nombre de versions / variantes essayées), Student sur le résultat à un an, régularité entre époques. Si toutes les simulations sont dans UNE époque choisie par l\'utilisateur (ex. « depuis 2020 »), la régularité se mesure année par année dans cette période : ne pas pousser l\'utilisateur vers des époques qu\'il a écartées. Les périodes qui se chevauchent comptent une seule fois (mois distincts) ; données simulées × 0,4.',
+    'Époques : celles de l\'utilisateur (get_eras) priment ; s\'il a choisi une période (ex. depuis 2020), travailler dans cette période (yearFrom, era) sauf demande contraire.',
+    'Écart entre simulations (gapBetweenSimulations dans les chiffres d\'un batch) : un écart faible avec chevauchement = mêmes mois regardés plusieurs fois ; pour plus de confiance, des périodes réparties (n plus grand, autre seed) plutôt que des périodes collées.',
+    'Guide de recherche : celui choisi par l\'utilisateur (fx_method) ; en liberté, la Démarche Forexia reste une bonne base.',
+  ];
+
   const strategyArg = strategySchema, marketArg = marketSchema;
   const wArg = { description: 'Mécanique de retrait : nom ou id enregistré (list_withdraw_mechanics), ou {mode:"periodic", every:"month"|"days", days, type:"excess"|"fixed"|"pct", value} (excess = % du gain du mois au-dessus du capital, fixed = somme en €, pct = % du compte), ou {pct, share, when} (au seuil de gain), ou "none".' };
   const idx = { type: 'array', items: { type: 'number' }, description: 'Index des simulations du batch (défaut : toutes).' };
@@ -410,6 +424,7 @@ module.exports = function fxTools(ctx) {
           guide: g.text,
           source: g.source,
           goal: 'Un FX = stratégie + paire + levier + capital + durée de placement (mois) + manière de retirer, testé sur de nombreuses périodes passées. Il donne ce que le client récupère au bout de la durée (pire cas, mauvais, le plus souvent, bon), le revenu mensuel, le risque (1 à 7) et un score de confiance statistique (DSR, Student, époques, corrigé du nombre d\'essais).',
+          notions: NOTIONS,
           cautions: [
             'N\'invente aucun chiffre : cite les sorties des outils.',
             'Plus on essaie de combinaisons, plus un bon résultat peut venir du hasard : le score de confiance en tient compte.',
@@ -666,7 +681,10 @@ module.exports = function fxTools(ctx) {
       inputSchema: obj(Object.assign({ id: { type: 'string' }, mechanic: wArg, indexes: idx, capital: { type: 'number', description: 'capital du client (€) pour les montants (≥ capital des simulations)' }, name: { type: 'string' }, save: { type: 'boolean' },
         trials: { type: 'number', description: 'nombre d\'essais à déclarer pour la confiance (défaut : variantes de la stratégie dans l\'historique × 2 + batchs comparés)' } }, FILT), ['id', 'mechanic']),
       handler: async (a) => {
-        const b = getBatch(a.id), w = normW(a.mechanic), L = pickEntries(b, a.indexes, a), R = await wdRows(L, w);
+        const b = getBatch(a.id), w = normW(a.mechanic), L = pickEntries(b, a.indexes, a);
+        let R = await wdRows(L, w);
+        // sans retrait : le FX reprend les résultats actuels enregistrés (comme « Créer un FX » dans la page)
+        if (!w) { const byE = new Map(L.map((e) => [e.key, e])); R = R.map((r) => FC.fxRowFromRecord(r, byE.get(r.key))); }
         if (R.length < 3) fail('Il faut au moins 3 simulations relancées (batch plus grand).');
         const e0 = L[0], nameW = a.mechanic === 'none' || !w ? 'Sans retrait' : wName(a.mechanic, w);
         const savedS = store.strategies().find((x) => x.name === e0.name), outdated = savedS ? L.filter((e) => e.strategy && verSig(e.strategy) !== verSig(savedS)).length : 0;

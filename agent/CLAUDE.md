@@ -177,6 +177,11 @@ pareil, méthodiquement. Lis `fx_method` au début.
 8. **Mémoire.** `note_add` après chaque conclusion (avec les ids de batchs) ; `build_fx save=true` ou `save_fx` ;
    `forexia_sync` (push) pour que l'utilisateur voie le plan dans la page.
 
+Lis aussi la rubrique `notions` de `fx_method` : résultats actuels / d'origine, versions de stratégie
+(`strategy_versions`, `revert_strategy`, `resimulate_batch`), mise à jour des simulations seulement avec l'accord de
+l'utilisateur, EA suivant la dernière version (`fx_ea`), calcul du risque (baisses en cours de route) et de la confiance
+(régularité année par année si l'utilisateur a choisi une seule époque), filtres d'un FX (`era`, `yearFrom`…).
+
 Un FX recommandé doit gagner dans la plupart des époques, avoir un risque conforme à la demande et un score de
 confiance d'au moins 50 sur cours réels. Sinon, dis-le et montre le plus proche avec ce qui manque.
 
