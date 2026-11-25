@@ -268,6 +268,14 @@ La mécanique de retrait du FX est ajoutée aux mécaniques enregistrées (« �
 **⬇ EA (.mq5)** : télécharge l'Expert Advisor MetaTrader 5 du FX (stratégie, paire, levier, capital ; le retrait reste
 manuel), à tester d'abord en compte démo.
 
+## Écart entre les simulations
+
+En haut du Tableau et des Graphiques de l'Évaluation : **⏱ Écart entre deux simulations** — les dates de début rangées
+dans l'ordre du temps, l'écart moyen entre une simulation et la suivante, son **écart type** (faible : simulations
+régulièrement réparties ; élevé : regroupées par endroits avec des trous), l'écart le plus court et le plus long, la
+part des simulations qui chevauchent la suivante, et la plage couverte. L'agent le reçoit aussi dans les chiffres de
+chaque batch (`gapBetweenSimulations`).
+
 ## Guide de l'agent IA
 
 Bouton **🧭 Guide agent** (en haut) : la méthode que suit l'agent IA (serveur MCP) pour chercher vos FX. Un seul

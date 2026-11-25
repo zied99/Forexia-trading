@@ -4848,7 +4848,7 @@
       '<td>' + p(mean(list.map((e) => e.returnPct))) + '</td><td class="avg-col" title="Moyenne des gains moyens">' + p(mean(list.map((e) => e.avgGainPct))) + '</td><td>' + signed(mean(list.filter((e) => e.monthlyGain != null).map((e) => e.monthlyGain)), money) + '</td><td>' + money.format(mean(list.map((e) => e.withdrawn || 0))) + '</td>' +
       '<td>' + num1.format(mean(list.map((e) => e.trades))) + '</td><td>' + num1.format(mean(list.map((e) => e.winRate))) + ' %</td>' +
       '<td>−' + num1.format(mean(list.map((e) => e.maxDrawdownPct))) + ' %</td><td></td><td></td></tr>';
-    $('evalBody').innerHTML = (filtered ? '<p class="eval-count">' + shown.length + ' simulation(s) affichée(s) sur ' + all.length + '</p>' : '') + '<div class="table-wrap"><table class="eval"><thead><tr><th>#</th><th class="l">Date</th><th class="l">Stratégie</th><th class="l">Paire</th>' +
+    $('evalBody').innerHTML = (filtered ? '<p class="eval-count">' + shown.length + ' simulation(s) affichée(s) sur ' + all.length + '</p>' : '') + spacingHtml(list) + '<div class="table-wrap"><table class="eval"><thead><tr><th>#</th><th class="l">Date</th><th class="l">Stratégie</th><th class="l">Paire</th>' +
       '<th class="l">Période testée</th><th class="l">Durée</th><th class="l">Données</th><th>Levier</th><th>Capital</th><th>Résultat</th><th class="avg-col">Gain moyen</th><th>Par mois</th><th>Retiré</th>' +
       '<th>Trades</th><th>Gagnants</th><th>Drawdown</th><th></th><th></th></tr></thead><tbody>' + rows + '</tbody><tfoot>' + foot + '</tfoot></table></div>';
     addBatchBanner();
@@ -4905,9 +4905,28 @@
       '<span class="donut-avg">Gain moyen : <b class="' + cls(avg) + '">' + big(avg) + '</b></span>' +
       (pv ? '<span class="hint donut-before">Avant l\'amélioration : ' + before.rate + ' % de réussite, gain moyen ' + big(before.avg) + '</span>' : '') + '</div></div>';
   }
+  /** Écart dans le temps entre deux simulations (dates de début rangées dans l'ordre) : moyenne, écart type, extrêmes,
+   *  et part des simulations qui chevauchent la suivante. */
+  function spacingStats(list) {
+    const L = list.filter((e) => e.from && e.to).slice().sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0));
+    if (L.length < 3) return null;
+    const d = [];
+    let over = 0;
+    for (let i = 1; i < L.length; i++) { d.push(durationDays(L[i - 1].from, L[i].from)); if (L[i].from <= L[i - 1].to) over++; }
+    const m = mean(d), sd = Math.sqrt(d.reduce((a, v) => a + (v - m) * (v - m), 0) / Math.max(1, d.length - 1));
+    return { n: L.length, mean: m, sd: sd, min: Math.min(...d), max: Math.max(...d), overlap: (over / d.length) * 100, from: L[0].from, to: L[L.length - 1].to };
+  }
+  const spanTxt = (days) => (days < 60 ? Math.round(days) + ' j' : num1.format(days / 30.4375) + ' mois');
+  function spacingHtml(list) {
+    const g = spacingStats(list);
+    if (!g) return '';
+    return '<p class="eval-count eval-spacing" title="Dates de début des simulations rangées dans l\'ordre du temps ; écart entre chacune et la suivante. Un écart type faible = simulations régulièrement réparties ; élevé = regroupées par endroits avec des trous.">' +
+      '⏱ Écart entre deux simulations : <b>' + spanTxt(g.mean) + '</b> en moyenne, écart type <b>' + spanTxt(g.sd) + '</b> (de ' + spanTxt(g.min) + ' à ' + spanTxt(g.max) + ') · ' +
+      Math.round(g.overlap) + ' % chevauchent la suivante · du ' + frDate(g.from) + ' au ' + frDate(g.to) + '</p>';
+  }
   function renderEvalCharts(list, filtered) {
     const A = F.advisor.analyze(list), G = A.groups;
-    $('evalBody').innerHTML = (filtered ? '<p class="eval-count">Graphiques sur les ' + list.length + ' simulations affichées (filtres appliqués).</p>' : '') +
+    $('evalBody').innerHTML = (filtered ? '<p class="eval-count">Graphiques sur les ' + list.length + ' simulations affichées (filtres appliqués).</p>' : '') + spacingHtml(list) +
       '<section class="eval-chart"><div class="runs-head"><div><h4>Résultat de chaque simulation</h4><p class="hint">Dans l\'ordre où elles ont été lancées ; survolez une barre pour le détail.</p></div><div class="runs-side">' + winDonut(list) + (evalBatch ? '' : batchSaveButton('chartSaveBatch')) + '</div></div><div id="evalRunsChart"></div>' +
       checkToolsHtml(list) + '</section>' + timeSectionHtml(list) +
       '<p class="hint">Les barres ci-dessous montrent le résultat <b>médian</b> (la moitié des simulations fait mieux, l\'autre moins bien) : un résultat extrême ne fausse pas la comparaison. La moyenne est dans l\'info-bulle.</p>' +

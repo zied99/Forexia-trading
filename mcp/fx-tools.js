@@ -169,6 +169,7 @@ module.exports = function fxTools(ctx) {
       winRatePct: r2(n ? (L.filter((e) => e.returnPct > 0).length / n) * 100 : 0), medianReturnPct: r2(median(ret)), meanReturnPct: r2(mean(ret)),
       worstReturnPct: r2(Math.min(...ret)), bestReturnPct: r2(Math.max(...ret)), p10ReturnPct: r2(FC.pctile(ret, 0.1)), p90ReturnPct: r2(FC.pctile(ret, 0.9)),
       medianMonthlyPct: r2(median(L.map((e, i) => e.returnPct / months[i]))), meanMaxDrawdownPct: r2(mean(L.map((e) => e.maxDrawdownPct || 0))), worstMaxDrawdownPct: r2(Math.max(...L.map((e) => e.maxDrawdownPct || 0))),
+      gapBetweenSimulations: (() => { const S = L.map((e) => e.from).sort(), d = S.slice(1).map((f, i) => FC.durationDays(S[i], f)); if (!d.length) return null; const m = mean(d), sd = Math.sqrt(d.reduce((a, v) => a + (v - m) ** 2, 0) / Math.max(1, d.length - 1)); return { meanDays: r2(m), stdDays: r2(sd), minDays: Math.min(...d), maxDays: Math.max(...d) }; })(),
       avgStartCapital: r2(mean(L.map((e) => e.capital || 0))), avgFinalCapital: r2(mean(finals)), meanTrades: r2(mean(L.map((e) => e.trades || 0))), totalWithdrawn: r2(L.reduce((a, e) => a + (e.withdrawn || 0), 0)),
     };
   }
