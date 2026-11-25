@@ -273,6 +273,9 @@ La mécanique de retrait du FX est ajoutée aux mécaniques enregistrées (« �
 **⬇ EA (.mq5)** : télécharge l'Expert Advisor MetaTrader 5 du FX (stratégie, paire, levier, capital ; le retrait reste
 manuel), à tester d'abord en compte démo.
 
+**Batchs de la stratégie choisie** : l'onglet « Batchs » de l'Évaluation (et son compteur) ne montre que les batchs de
+la stratégie choisie dans le filtre « Stratégie » ; « Toutes » (ou « Effacer les filtres ») les montre tous.
+
 ## Écart entre les simulations
 
 En haut du Tableau et des Graphiques de l'Évaluation : **⏱ Écart entre deux simulations** — les dates de début rangées

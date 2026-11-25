@@ -4615,10 +4615,24 @@
     if (evalBatch && evalBatch.id === lot.id) evalBatch = null;
     updateBatchCount();
   }
-  function updateBatchCount() { const n = batchStore.get().length; if ($('evalScopeBatchN')) $('evalScopeBatchN').textContent = n; }
+  /** Batchs de la stratégie choisie dans le filtre « Stratégie » (tous si aucune), avec leur position dans la liste. */
+  function batchesShown() {
+    const st = $('evalFStrat') ? $('evalFStrat').value : '';
+    return batchStore.get().map((b, i) => ({ b: b, i: i })).filter((x) => !st || x.b.entries.some((e) => e.name === st));
+  }
+  function updateBatchCount() {
+    if (!$('evalScopeBatchN')) return;
+    const n = batchesShown().length, tot = batchStore.get().length, st = $('evalFStrat').value;
+    $('evalScopeBatchN').textContent = n;
+    $('evalScopeBatch').title = st ? n + ' batch' + (n > 1 ? 's' : '') + ' de « ' + st + ' » (sur ' + tot + ')' : tot + ' batch' + (tot > 1 ? 's' : '');
+  }
   function batchSaveButton(id) { return '<button type="button" class="secondary small batch-save" id="' + id + '" title="Enregistrer les simulations affichées comme un lot (Batch) que vous pourrez recharger">💾 Enregistrer un batch</button>'; }
   function renderBatches() {
-    const list = batchStore.get();
+    const shownB = batchesShown(), list = shownB.map((x) => x.b), st = $('evalFStrat').value;
+    if (!list.length && st && batchStore.get().length) {
+      $('evalBody').innerHTML = '<p class="eval-empty">Aucun batch pour « ' + esc(st) + ' ». Choisissez « Toutes » dans le filtre Stratégie pour voir les ' + batchStore.get().length + ' batchs.</p>';
+      return;
+    }
     if (!list.length) {
       $('evalBody').innerHTML = '<p class="eval-empty">Aucun batch enregistré. Lancez un lot de tests (section « Période de backtesting »), puis « 💾 Enregistrer un batch » ' +
         'dans les onglets « Stratégie en cours » ou « Historique complet ».</p>';
@@ -4626,8 +4640,8 @@
     }
     const p = (v) => '<span class="' + cls(v) + '">' + signed(v, num1) + ' %</span>';
     const allE = list.flatMap((b) => b.entries), gy0 = Math.min(...allE.map((e) => +e.from.slice(0, 4))), gy1 = Math.max(...allE.map((e) => +e.to.slice(0, 4)));
-    const rows = list.map((b, i) => {
-      const s = batchStats(b.entries);
+    const rows = list.map((b, k) => {
+      const i = shownB[k].i, s = batchStats(b.entries);
       return '<tr><td class="l name" title="' + esc(b.name) + '"><b>' + esc(b.name) + '</b><small class="eval-tag">' + (s.strategies.length > 1 || b.name.indexOf(s.strategies[0]) < 0 ? esc(s.strategies.join(', ')) + ' · ' : '') + 'enregistré le ' +
         new Date(b.at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) + '</small></td>' +
         '<td class="l">' + esc(s.pairs) + '</td><td class="l">' + esc(s.span) + '<small class="eval-tag">' + frDate(s.from) + ' → ' + frDate(s.to) + '</small></td>' +
@@ -4806,7 +4820,7 @@
   function renderEvaluation() {
     const all = evalList();
     const uniq = (f) => [...new Set(all.map(f))].sort((a, b) => a.localeCompare(b, 'fr'));
-    fillFilter('evalFStrat', uniq((e) => e.name)); fillFilter('evalFPair', uniq((e) => e.pair)); fillFilter('evalFData', uniq((e) => e.data));
+    fillFilter('evalFStrat', [...new Set(all.map((e) => e.name).concat(batchStore.get().flatMap((b) => b.entries.map((e) => e.name))))].filter(Boolean).sort((a, b) => a.localeCompare(b, 'fr'))); fillFilter('evalFPair', uniq((e) => e.pair)); fillFilter('evalFData', uniq((e) => e.data));
     const name = currentStratName(), mineN = all.filter((e) => e.name === name).length;
     $('evalScopeCurrentN').textContent = mineN; $('evalScopeAllN').textContent = all.length;
     updateBatchCount();
@@ -4815,9 +4829,13 @@
     $('evalSaveBatch').hidden = isBatch || !!evalBatch;
     $('evalClear').hidden = $('evalExport').hidden = isBatch;
     if (evalBatch) { $('evalScopeCurrent').setAttribute('aria-selected', 'false'); $('evalScopeAll').setAttribute('aria-selected', 'false'); $('evalScopeBatch').setAttribute('aria-selected', 'true'); }
+    // filtres : dans l'onglet Batchs, seul le choix de la stratégie compte
+    $('evalFilters').querySelectorAll(':scope > .field').forEach((f) => { f.hidden = isBatch && f.id !== 'evalFStratField'; });
     if (isBatch) {
-      $('evalTitle').textContent = 'Batchs enregistrés';
-      $('evalFilters').hidden = true; $('evalExport').disabled = true;
+      const st = $('evalFStrat').value;
+      $('evalTitle').textContent = st ? 'Batchs de « ' + st + ' »' : 'Batchs enregistrés';
+      $('evalFilters').hidden = false; $('evalFStratField').hidden = false; $('evalExport').disabled = true;
+      $('evalFReset').hidden = !st;
       return renderBatches();
     }
     $('evalTitle').textContent = evalBatch ? 'Batch « ' + ((batchStore.get().find((x) => x.id === evalBatch.id) || {}).name || '') + ' »' : evalScope === 'current' ? 'Évaluation de « ' + name + ' »' : 'Historique des simulations';
