@@ -2273,8 +2273,8 @@
     improveHtml = '<div class="imp-proposal"><p><b>Correction de l\'analyseur :</b> ' + esc(text) + (lev ? ' (levier 1:' + lev + ')' : '') + '</p>' +
       '<p class="val ' + (better * 2 >= after.length ? 'ok' : 'ko') + '">' + better + ' simulation' + (better > 1 ? 's' : '') + ' sur ' + after.length + ' meilleure' + (better > 1 ? 's' : '') + ' :</p><ul class="imp-list">' + after.map(row).join('') + '</ul>' +
       '<p>Ajouter cette correction à la stratégie ?</p>' +
-      '<div class="row buttons"><button type="button" class="primary small" id="manToCurrent">Ajouter à la stratégie en cours</button><button type="button" class="secondary small" id="manAsNew">Créer une nouvelle stratégie</button></div>' +
-      '<p class="hint">Les barres montrent le résultat d\'origine en plein et le nouveau en pointillé. Ctrl+Z pour revenir aux résultats d\'avant.</p></div>';
+      '<div class="row buttons"><button type="button" class="primary small" id="manToCurrent">Ajouter à la stratégie en cours</button><button type="button" class="secondary small" id="manAsNew">Créer une nouvelle stratégie</button><button type="button" class="ghost small imp-cancel" id="manCancel" title="Revenir aux résultats d\'avant et fermer cette proposition">Annuler</button></div>' +
+      '<p class="hint">Les barres montrent le résultat d\'origine en plein et le nouveau en pointillé. « Annuler » (ou Ctrl+Z) pour revenir aux résultats d\'avant.</p></div>';
     renderEvaluation();
     if ($('improveOut')) $('improveOut').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
@@ -5118,8 +5118,8 @@
     improveCtx = { kind: 'manual', strat: improved, base: base, text: text };
     improveHtml = '<div class="imp-proposal"><p><b>Votre amélioration :</b> ' + esc(fake.detail) + '</p>' + (fake.notes && fake.notes.length ? '<p class="hint">' + esc(fake.notes.join(' ')) + '</p>' : '') +
       '<p class="val ' + (better * 2 >= after.length ? 'ok' : 'ko') + '">' + better + ' simulation' + (better > 1 ? 's' : '') + ' sur ' + after.length + ' meilleure' + (better > 1 ? 's' : '') + ' :</p><ul class="imp-list">' + after.map(row).join('') + '</ul>' +
-      '<div class="row buttons"><button type="button" class="primary small" id="manToCurrent">Ajouter à la stratégie en cours</button><button type="button" class="secondary small" id="manAsNew">Créer une nouvelle stratégie</button></div>' +
-      '<p class="hint">Les barres montrent le résultat d\'origine en plein et le nouveau en pointillé. Ctrl+Z pour revenir aux résultats d\'avant.</p></div>';
+      '<div class="row buttons"><button type="button" class="primary small" id="manToCurrent">Ajouter à la stratégie en cours</button><button type="button" class="secondary small" id="manAsNew">Créer une nouvelle stratégie</button><button type="button" class="ghost small imp-cancel" id="manCancel" title="Revenir aux résultats d\'avant et fermer cette proposition">Annuler</button></div>' +
+      '<p class="hint">Les barres montrent le résultat d\'origine en plein et le nouveau en pointillé. « Annuler » (ou Ctrl+Z) pour revenir aux résultats d\'avant.</p></div>';
     renderEvaluation();
   }
   function saveManual(asNew) {
@@ -5580,8 +5580,8 @@
     const pos = after.filter((e) => e.returnPct > 0).length;
     impSec.lastStrat = strat; impSec.lastPick = pick;
     impSec.done = '<div class="imp-proposal"><p class="val ' + (pos * 2 >= after.length ? 'ok' : 'ko') + '">Resimulées avec ' + esc(pick.map((x) => x.title).join(' + ')) + ' : ' + pos + ' gagnante' + (pos > 1 ? 's' : '') + ' sur ' + after.length + '.</p>' +
-      '<div class="row buttons"><button type="button" class="primary small" id="isToCurrent">Ajouter à la stratégie en cours</button><button type="button" class="secondary small" id="isAsNew">Créer une nouvelle stratégie</button></div>' +
-      '<p class="hint">Les barres montrent le résultat d\'origine en plein et le nouveau en pointillé. Ctrl+Z pour revenir aux résultats d\'avant.</p></div>';
+      '<div class="row buttons"><button type="button" class="primary small" id="isToCurrent">Ajouter à la stratégie en cours</button><button type="button" class="secondary small" id="isAsNew">Créer une nouvelle stratégie</button><button type="button" class="ghost small imp-cancel" id="isCancel" title="Revenir aux résultats d\'avant et fermer cette proposition">Annuler</button></div>' +
+      '<p class="hint">Les barres montrent le résultat d\'origine en plein et le nouveau en pointillé. « Annuler » (ou Ctrl+Z) pour revenir aux résultats d\'avant.</p></div>';
     renderEvaluation();
   }
   function saveSectionStrategy(asNew) {
@@ -5619,6 +5619,7 @@
     if (t.id === 'isResim') return resimWithChosen();
     if (t.id === 'isToCurrent') return saveSectionStrategy(false);
     if (t.id === 'isAsNew') return saveSectionStrategy(true);
+    if (t.id === 'isCancel') { impSec.done = ''; impSec.lastStrat = null; return cancelResim(); }
   });
 
   // ---------- « ✨ Améliorer » depuis la sélection du graphique ----------
@@ -5849,6 +5850,7 @@
     if (ev.target.id === 'impApplyCurrent') return applyToCurrent();
     if (ev.target.id === 'manToCurrent') return saveManual(false);
     if (ev.target.id === 'manAsNew') return saveManual(true);
+    if (ev.target.id === 'manCancel') { improveHtml = ''; improveCtx = null; return cancelResim(); }
     if (ev.target.id === 'impRerunOthers') {
       const keys = ev.target.dataset.keys.split('\n');
       pushUndo('Simulations relancées avec la version améliorée');
@@ -6064,6 +6066,11 @@
       updateWithdrawUI();
       syncFormState();
     } finally { restoring = false; }
+  }
+  /** « Annuler » sur une proposition : remet les simulations comme avant la nouvelle simulation (même chose que Ctrl+Z). */
+  function cancelResim() {
+    if (undoStack.length) { const snap = undoStack.pop(); redoStack.push(capture(snap.label)); restore(snap); toast('Annulé : résultats d\'avant remis — Ctrl+Y pour rétablir.', false); }
+    renderEvaluation();
   }
   function undo() {
     const snap = undoStack.pop();
