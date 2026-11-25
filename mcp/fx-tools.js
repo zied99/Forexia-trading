@@ -25,6 +25,14 @@ module.exports = function fxTools(ctx) {
   const TM = ['stopAtr', 'takeAtr', 'atrPeriod', 'trailPips', 'trailAtr', 'breakevenPips', 'breakevenAtr', 'maxBars', 'pauseLosses', 'pauseBars'];
   const median = FC.median, mean = FC.mean;
 
+  /** Démarche de recherche : .claude/commands/fx.md (sans l'en-tête), une seule source pour /fx et pour l'outil fx_method. */
+  function methodText() {
+    try {
+      const t = require('fs').readFileSync(path.join(__dirname, '..', '.claude', 'commands', 'fx.md'), 'utf8');
+      return t.replace(/^---[\s\S]*?---\s*/, '').replace('Critères de l\'utilisateur : $ARGUMENTS', 'Critères de l\'utilisateur : ceux donnés dans la conversation.');
+    } catch (e) { return null; }
+  }
+
   // ---------------------------------------------------------------- historique complet d'une paire (chargé une fois)
   const hcache = new Map();
   async function history(m) {
@@ -318,9 +326,12 @@ module.exports = function fxTools(ctx) {
   return [
     {
       name: 'fx_method',
-      description: 'Méthode pour trouver un FX (plan d\'investissement) comme le ferait un humain dans Forexia : batchs, comparaisons temporelles, époques, retraits, capital, durée. À lire avant de commencer la recherche d\'un FX.',
+      description: 'À APPELER EN PREMIER pour toute recherche de stratégie ou de FX : la démarche obligatoire (phases, règles, critères de passage), à suivre pas à pas. Méthode pour trouver un FX (plan d\'investissement) comme le ferait un humain dans Forexia : batchs, comparaisons temporelles, époques, retraits, capital, durée. À lire avant de commencer la recherche d\'un FX.',
       inputSchema: obj({}),
       handler: async () => ({
+        // la démarche complète (même texte que la commande /fx de Claude Code) : à suivre pour toute recherche
+        demarche: methodText(),
+        rule: 'Toute recherche de stratégie ou de FX suit cette démarche, phase par phase. Tu restes libre du choix de chaque essai, à condition qu\'il parte d\'un constat et soit comparé sur les mêmes périodes.',
         goal: 'Un FX = stratégie + paire + levier + capital + durée de placement + manière de retirer, testé sur de nombreuses périodes passées. Il donne ce que le client récupère au bout de la durée (pire cas, mauvais, le plus souvent, bon), le revenu mensuel, le risque (1 à 7) et un score de confiance statistique (DSR, Student, époques).',
         steps: [
           '1. Choisir la stratégie : list_presets, list_strategies, frenchText ou règles. Premier run_batch de 20 à 40 périodes de la durée visée (months) sur tout l\'historique (cours online).',

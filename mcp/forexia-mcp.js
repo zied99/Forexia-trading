@@ -713,7 +713,7 @@ const TOOLS = [
 TOOLS.push(...require('./fx-tools')({ callTool: (n, x) => TOOLS.find((t) => t.name === n).handler(x), DATA_DIR, F, D, E, readJson, writeJson, store, resolveStrategy, strategyView, statsView, settingsOf, fail, r2, iso, today, onlineHistory, csvHistory, bridge, bridgeTerminal, toBar, subBars, obj, strategySchema, marketSchema }));
 
 // ---------------------------------------------------------------- protocole MCP (JSON-RPC 2.0)
-const INSTRUCTIONS = 'Forexia : backtests de stratégies Forex. Commencez par forexia_help. Une stratégie se donne en règles techniques, en français (frenchText), ' +
+const INSTRUCTIONS = 'Forexia : backtests de stratégies Forex. IMPORTANT : pour toute recherche de stratégie ou de FX, appelez d\'abord fx_method et suivez sa démarche phase par phase (une variable à la fois, mêmes périodes, confirmation sur des périodes neuves, carnet note_add, point d\'étape à chaque phase). Commencez par forexia_help. Une stratégie se donne en règles techniques, en français (frenchText), ' +
   'par un modèle (preset) ou par une stratégie enregistrée (saved). Utilisez random_batch pour juger la robustesse avant de conclure, et méfiez-vous de la sur-optimisation. ' +
   'Pour chercher un FX (plan d\'investissement : stratégie, capital, durée, retrait), lisez fx_method : batchs sur les mêmes périodes (run_batch sameAs), compare_batches, time_analysis, era_analysis, compare_withdrawals, build_fx, mine_fx, note_add.';
 async function handle(msg) {
