@@ -109,6 +109,25 @@
     await kvSync(Object.keys(kv).map((k) => ({ key: k, data: kv[k].data, updatedAt: kv[k].updatedAt })), kvToCloud);
   }
 
+  /** Écrit dans le stockage du navigateur. Stockage plein : on libère d'abord ce qui se recalcule (résultats de
+   *  retrait gardés), puis on réessaie. Renvoie false si l'écriture est impossible. */
+  function lsSet(key, text) {
+    try { localStorage.setItem(key, text); return true; } catch (e) {
+      if (!/quota|exceed|full/i.test((e && (e.name + ' ' + e.message)) || '')) return false;
+      for (const k of ['forexia.wdResults', 'forexia.lastRun']) {
+        if (k === key) continue;
+        try { localStorage.removeItem(k); } catch (x) { /* ignoré */ }
+        try { localStorage.setItem(key, text); console.warn('Stockage plein : « ' + k + ' » vidé pour enregistrer « ' + key + ' ».'); return true; } catch (x) { /* on continue */ }
+      }
+      return false;
+    }
+  }
+  let lsFullWarned = 0;
+  function lsFullToast(what) {
+    if (Date.now() - lsFullWarned < 15000) return;
+    lsFullWarned = Date.now();
+    toast('Stockage du navigateur plein : ' + what + ' n\'a pas pu être enregistré. Supprimez d\'anciens batchs (Évaluation › Batchs) ou des simulations, ou connectez la passerelle (Base de données) pour garder tout dans la base.', false);
+  }
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const frDate = (d) => { const m = /^(\d{4})-(\d{2})-(\d{2})(.*)$/.exec(d); return m ? m[3] + '/' + m[2] + '/' + m[1] + m[4] : d; };
   const shortDate = (d) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d); return m ? ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'][+m[2] - 1] + ' ' + m[1].slice(2) : d; };
@@ -2891,7 +2910,7 @@
   const EVAL_KEY = 'forexia.evaluations';
   const evalStore = {
     get() { try { return JSON.parse(localStorage.getItem(EVAL_KEY)) || []; } catch (e) { return []; } },
-    set(list) { try { localStorage.setItem(EVAL_KEY, JSON.stringify(list.slice(-500))); } catch (e) { /* ignoré */ } },
+    set(list) { if (!lsSet(EVAL_KEY, JSON.stringify(list.slice(-500)))) lsFullToast('la simulation'); },
   };
   let evalMemory = null; // repli si le stockage du navigateur est indisponible
   function evalList() { const l = evalStore.get(); return l.length || !evalMemory ? l : evalMemory; }
@@ -3132,7 +3151,7 @@
   let wdPresetMem = null, wdResMem = {};
   /** Mécaniques proposées à la comparaison : les mécaniques enregistrées + « Sans retrait ». */
   const wdChoices = () => wdPresets().concat({ id: 'none', name: 'Sans retrait', w: { on: false, mode: 'none' } });
-  function setWdPresets(l) { wdPresetMem = l; try { localStorage.setItem(WD_KEY, JSON.stringify(l)); } catch (e) { /* ignoré */ } refreshWdPresetPick(); }
+  function setWdPresets(l) { wdPresetMem = l; if (!lsSet(WD_KEY, JSON.stringify(l))) lsFullToast('la mécanique de retrait'); refreshWdPresetPick(); }
   /** Réglages de simulation avec la mécanique de retrait w ({on, mode, pct, share, when, every, days, type, value}). */
   function wdApply(se, w) { return F.fxcore.wdApply(se, w); }
   const wdDesc = (w) => F.fxcore.wdDesc(w);
@@ -3375,7 +3394,7 @@
   const FX_KEY = 'forexia.fx';
   let fxMem = null;
   const fxList = () => { try { const l = JSON.parse(localStorage.getItem(FX_KEY)); return Array.isArray(l) ? l : []; } catch (e) { return fxMem || []; } };
-  function setFxList(l) { fxMem = l; try { localStorage.setItem(FX_KEY, JSON.stringify(l)); } catch (e) { /* ignoré */ } updateFxCount(); }
+  function setFxList(l) { fxMem = l; const ok = lsSet(FX_KEY, JSON.stringify(l)); if (!ok) lsFullToast('le FX'); updateFxCount(); return ok; }
   function updateFxCount() { if ($('fxCount')) $('fxCount').textContent = fxList().length; }
   const pctile = (a, q) => { const v = a.filter(Number.isFinite).sort((x, y) => x - y); if (!v.length) return NaN; const k = (v.length - 1) * q, lo = Math.floor(k), hi = Math.ceil(k); return v[lo] + (v[hi] - v[lo]) * (k - lo); };
   // Nom des devises pour la phrase « Le principe »
@@ -3398,9 +3417,13 @@
     const name = (prompt('Nom du FX (plan d\'investissement) :', fx.name) || '').trim().slice(0, 80);
     if (!name) return;
     fx.name = name;
-    setFxList(fxList().concat(fx));
+    if (!setFxList(fxList().concat(fx)) || !fxList().some((x) => x.id === fx.id)) return;
     logEvent('fx.saved', 'FX enregistré : ' + name, { id: fx.id });
-    toast('FX « ' + name + ' » enregistré : bouton « 💼 FX » en haut de la page.', false);
+    toast('FX « ' + name + ' » enregistré.', false);
+    // la liste des FX s'ouvre sur le nouveau plan
+    openFx();
+    const card = $('fxBody').querySelector('.fx-card[data-fx="' + fx.id + '"]');
+    if (card) { card.classList.add('fx-new'); card.scrollIntoView({ block: 'start' }); setTimeout(() => card.classList.remove('fx-new'), 2500); }
   }
   function saveFxFromCompare() {
     const c = wdState.cmp;
@@ -4011,7 +4034,7 @@
   }
   function agSet(v) {
     v.updatedAt = new Date().toISOString(); agMem = v;
-    try { localStorage.setItem(AG_KEY, JSON.stringify(v)); } catch (e) { /* ignoré */ }
+    if (!lsSet(AG_KEY, JSON.stringify(v))) lsFullToast('le guide');
     updateAgBtn();
   }
   function agActiveName(g) {
@@ -4379,10 +4402,12 @@
     if (new Set(T.map((e) => e.name)).size > 1) return toast('Les simulations affichées mélangent plusieurs stratégies : choisissez-en une (filtre « Stratégie » ou un batch).', false);
     const none = { on: false, mode: 'none' }, cache = wdResStore.get(), miss = T.filter((e) => !cache[wdKey(none) + '#' + e.key]).length;
     if (miss > 60 && !confirm(miss + ' simulations à recalculer pour construire le FX. Continuer ?')) return;
-    const R = await wdCompute(none, T, (i, n) => { $('evalFxBtn').textContent = '💼 Calcul ' + (i + 1) + ' / ' + n + '…'; });
-    $('evalFxBtn').textContent = '💼 Enregistrer un FX';
+    if (miss) toast('Construction du FX : ' + miss + ' simulation' + (miss > 1 ? 's' : '') + ' à recalculer, patientez…', false);
+    let R = [];
+    try { R = await wdCompute(none, T, (i, n) => { $('evalFxBtn').textContent = '💼 Calcul ' + (i + 1) + ' / ' + n + '…'; }); }
+    finally { $('evalFxBtn').textContent = '💼 Enregistrer un FX'; }
     if (R.length < 3) return toast('Simulations impossibles à relancer : ' + ($('formError').textContent || 'données indisponibles') + '.', false);
-    saveFxRows(R, { name: 'Sans retrait', w: none }, null);
+    try { saveFxRows(R, { name: 'Sans retrait', w: none }, null); } catch (e) { console.error(e); toast('FX impossible à construire : ' + e.message, false); }
   });
 
   // ---------- Analyse temporelle (graphiques de l'évaluation) ----------
@@ -4517,7 +4542,7 @@
   const BATCH_KEY = 'forexia.batches';
   const batchStore = {
     get() { try { return JSON.parse(localStorage.getItem(BATCH_KEY)) || []; } catch (e) { return batchMemory || []; } },
-    set(list) { batchMemory = list; try { localStorage.setItem(BATCH_KEY, JSON.stringify(list)); } catch (e) { /* ignoré */ } },
+    set(list) { batchMemory = list; if (!lsSet(BATCH_KEY, JSON.stringify(list))) lsFullToast('le batch'); },
   };
   let batchMemory = null;
   let evalBatch = null; // batch rechargé : { id, keys:Set } — le tableau et les graphiques ne montrent que ses simulations

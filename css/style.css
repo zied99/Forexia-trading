@@ -977,3 +977,5 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 #agStatus { max-width: 560px; }
 @media (max-width: 700px) { #agBtn { font-size: 0; gap: 4px; padding: 6px 8px; } #agBtn .ag-now { font-size: 11px; } #agBtn .ag-ico { font-size: 15px; } .ag-opt .hint, .ag-view { margin-left: 0; } }
 @media (max-width: 700px) { .topbar { flex-wrap: wrap; gap: 8px; } .top-actions { flex-wrap: wrap; gap: 6px; justify-content: flex-end; min-width: 0; } }
+
+.fx-card.fx-new { box-shadow: 0 0 0 3px var(--accent); transition: box-shadow .4s; }
