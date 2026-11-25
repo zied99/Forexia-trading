@@ -77,6 +77,10 @@ type de donnée) et dans le compte en ligne : FX, batchs, époques, événements
 de retrait et leurs résultats, tracés sur les graphiques, dernière simulation. Chaque changement est envoyé dans la
 seconde ; à la connexion, la version la plus récente l'emporte (et, sur un appareil jamais synchronisé, les listes
 sont réunies).
+**Compte en ligne économe** (Supabase) : les données sont regroupées et envoyées au plus une fois par minute (et quand la
+page passe en arrière-plan ou se ferme), rien n'est renvoyé s'il n'a pas changé, le cache des résultats de retrait
+(recalculable) n'y est pas gardé, les simulations y sont envoyées sans leur liste de trades (gardée dans la base de la
+passerelle), et la synchronisation complète n'a lieu qu'à l'ouverture, à la connexion, ou au plus toutes les 10 minutes.
 **La base est la référence, le navigateur n'est qu'une copie.** Pendant la session, chaque donnée est gardée en
 mémoire et envoyée à la base ; le navigateur en garde une copie s'il a de la place. S'il est plein, rien n'échoue et
 rien n'est à supprimer : la donnée reste dans la base et revient à l'ouverture suivante. Sans base connectée, un

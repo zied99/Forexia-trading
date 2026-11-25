@@ -133,7 +133,8 @@
     },
     async putSimulations(items) {
       for (let i = 0; i < items.length; i += 200) {
-        const part = items.slice(i, i + 200).map((e) => ({ key: e.key, at: e.at, name: e.name, pair: e.pair, data: e }));
+        // sans la liste des trades (gardée dans la base de la passerelle) : beaucoup moins d'écritures disque
+        const part = items.slice(i, i + 200).map((e) => { const d = Object.assign({}, e); delete d.tradeList; return { key: e.key, at: e.at, name: e.name, pair: e.pair, data: d }; });
         await rest('POST', 'simulations?on_conflict=user_id,key', part, 'resolution=merge-duplicates,return=minimal');
       }
     },

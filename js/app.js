@@ -78,21 +78,43 @@
       catch (e) { if (/Inconnu/.test(e.message)) { kvOldBridge = true; toast('Mettez à jour la passerelle MT5 (version 1.6) pour enregistrer aussi les FX, batchs, époques… dans la base.', false); } return; }
     }
   }
+  // Compte en ligne (Supabase) : économe en écritures disque. Les caches recalculables n'y vont pas, les envois sont
+  // regroupés (au plus une écriture par minute, et à la fermeture de la page), et rien n'est renvoyé s'il n'a pas changé.
+  const CLOUD_SKIP = ['forexia.wdResults'];
+  const CLOUD_EVERY = 60000;
+  const cloudQueue = new Map(), cloudSent = new Map();
+  let cloudTimer = null, cloudLastWrite = 0;
   async function kvToCloud(items) {
     if (!cloudOn()) return;
+    items = items.filter((it) => !CLOUD_SKIP.includes(it.key) && JSON.stringify(it.data) !== cloudSent.get(it.key));
+    if (!items.length) return;
     const st = await C.getSettings();
     st.kv = st.kv || {};
+    for (const k of CLOUD_SKIP) delete st.kv[k]; // les anciens caches quittent la ligne du compte
     for (const it of items) st.kv[it.key] = { data: it.data, updatedAt: it.updatedAt };
     await C.putSettings(st);
+    for (const it of items) cloudSent.set(it.key, JSON.stringify(it.data));
+    cloudLastWrite = Date.now();
+  }
+  function cloudFlushNow() {
+    clearTimeout(cloudTimer); cloudTimer = null;
+    if (!cloudQueue.size || !cloudOn()) return;
+    const items = [...cloudQueue.values()]; cloudQueue.clear();
+    cloudPush(() => kvToCloud(items));
+  }
+  function cloudSchedule() {
+    if (cloudTimer) return;
+    cloudTimer = setTimeout(cloudFlushNow, Math.max(2000, CLOUD_EVERY - (Date.now() - cloudLastWrite)));
   }
   async function kvFlush() {
     const keys = [...syncDirty]; syncDirty.clear();
     if (!keys.length) return;
     const m = syncMeta(), items = keys.map((k) => ({ key: k, data: kvRead(k), updatedAt: m[k] || new Date().toISOString() }));
     await kvToBridge(items);
-    if (cloudOn()) cloudPush(() => kvToCloud(items));
+    if (cloudOn()) { for (const it of items) if (!CLOUD_SKIP.includes(it.key)) cloudQueue.set(it.key, it); cloudSchedule(); }
   }
-  window.addEventListener('beforeunload', () => { if (syncDirty.size) kvFlush(); });
+  window.addEventListener('beforeunload', () => { if (syncDirty.size) kvFlush(); cloudFlushNow(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { if (syncDirty.size) kvFlush(); cloudFlushNow(); } });
   // listes d'objets identifiés (FX, batchs, époques, mécaniques…) : réunion des deux côtés
   function kvUnion(local, remote) {
     if (!Array.isArray(local) || !Array.isArray(remote)) return remote;
@@ -134,7 +156,8 @@
   async function kvSyncCloud() {
     if (!cloudOn()) return;
     const st = await C.getSettings(), kv = st.kv || {};
-    await kvSync(Object.keys(kv).map((k) => ({ key: k, data: kv[k].data, updatedAt: kv[k].updatedAt })), kvToCloud);
+    for (const k of Object.keys(kv)) if (!CLOUD_SKIP.includes(k)) cloudSent.set(k, JSON.stringify(kv[k].data));
+    await kvSync(Object.keys(kv).filter((k) => !CLOUD_SKIP.includes(k)).map((k) => ({ key: k, data: kv[k].data, updatedAt: kv[k].updatedAt })), kvToCloud);
   }
 
   /** Écrit une donnée de Forexia (mémoire + navigateur si possible + base) : réussit toujours. */
@@ -1295,7 +1318,6 @@
       // Filet de sécurité : la dernière stratégie simulée est gardée, même non enregistrée.
       const lastRunRec = { at: new Date().toISOString(), strategy: strat, config: config };
       try { localStorage.setItem('forexia.lastRun', JSON.stringify(lastRunRec)); } catch (e) { /* ignoré */ }
-      cloudPush(async () => { const st = await C.getSettings(); await C.putSettings(Object.assign({}, st, { lastRun: lastRunRec })); }); // garde les autres données du compte
       refreshPresetSelect($('preset').value);
       return true;
     } catch (err) {
@@ -2598,8 +2620,15 @@
     fn().then(() => setSync('ok')).catch(cloudFail);
   }
   // Fusion appareil <-> compte : union des deux côtés, la version la plus récente l'emporte.
-  async function cloudSync() {
+  let cloudSyncAt = 0, cloudSyncing = null;
+  async function cloudSync(force) {
     if (!cloudOn()) return;
+    if (cloudSyncing) return cloudSyncing;
+    if (!force && Date.now() - cloudSyncAt < 10 * 60000) { cloudFlushNow(); return; }
+    cloudSyncing = cloudSyncFull().finally(() => { cloudSyncing = null; cloudSyncAt = Date.now(); });
+    return cloudSyncing;
+  }
+  async function cloudSyncFull() {
     setSync('run');
     const remote = await C.listStrategies(), local = storage.get();
     const byName = new Map(local.map((s) => [s.name, s]));
@@ -2651,7 +2680,7 @@
     $('retryCloud').disabled = true;
     $('cloudBannerMsg').textContent = '';
     try {
-      await cloudSync();
+      await cloudSync(true);
       $('cloudBanner').hidden = true;
       toast('Compte en ligne prêt : vos données sont synchronisées.');
     } catch (e) {
@@ -2704,7 +2733,7 @@
       $('authPassword').value = $('authConfirm').value = '';
       $('authGate').hidden = true;
       renderUser();
-      await cloudSync().catch(cloudFail);
+      await cloudSync(true).catch(cloudFail);
       logEvent('auth.login', (authMode === 'signup' ? 'Compte créé et connexion : ' : 'Connexion : ') + C.user.name + ' (' + navigator.platform + ')');
     } catch (err) {
       $('authError').textContent = err.message;
@@ -2714,7 +2743,8 @@
   });
   $('logoutBtn').addEventListener('click', async () => {
     // On envoie ce qui reste, puis on retire de cet appareil les données du compte.
-    await cloudSync().catch(() => {});
+    cloudFlushNow();
+    await cloudSync(true).catch(() => {});
     logEvent('auth.logout', 'Déconnexion : ' + C.user.name);
     await C.signOut();
     for (const k of ['forexia.strategies', 'forexia.evaluations', 'forexia.lastRun', 'forexia.batches']) { try { localStorage.removeItem(k); } catch (e) { /* ignoré */ } }
