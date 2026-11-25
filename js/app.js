@@ -19,7 +19,7 @@
   // ---------- Toutes les données dans la base : passerelle (base SQLite sur votre PC) et compte en ligne ----------
   // Chaque donnée gardée dans le navigateur est aussi enregistrée dans la base dès qu'elle change, et récupérée
   // à la connexion (la version la plus récente l'emporte ; à la première connexion d'un appareil, les listes sont réunies).
-  const SYNC_KEYS = ['forexia.fx', 'forexia.batches', 'forexia.eras', 'forexia.events', 'forexia.wdPresets', 'forexia.wdResults', 'forexia.drawings', 'forexia.lastRun'];
+  const SYNC_KEYS = ['forexia.agentGuide', 'forexia.fx', 'forexia.batches', 'forexia.eras', 'forexia.events', 'forexia.wdPresets', 'forexia.wdResults', 'forexia.drawings', 'forexia.lastRun'];
   const SYNC_META = 'forexia.syncMeta';
   const syncMeta = () => { try { return JSON.parse(localStorage.getItem(SYNC_META)) || {}; } catch (e) { return {}; } };
   let syncMuted = false, syncTimer = null, kvOldBridge = false;
@@ -91,7 +91,8 @@
     if (changed) kvRefreshUi();
   }
   function kvRefreshUi() {
-    try { updateFxCount(); refreshWdPresetPick(); updateBatchCount(); } catch (e) { /* ignoré */ }
+    try { updateFxCount(); refreshWdPresetPick(); updateBatchCount(); updateAgBtn(); } catch (e) { /* ignoré */ }
+    if (!$('agModal').hidden && !$('agModal').contains(document.activeElement)) openAgent();
     if (!$('fxModal').hidden) openFx();
     if (!$('evalModal').hidden) renderEvaluation();
   }
@@ -3389,7 +3390,7 @@
     const R = best === 'a' ? st.cmpRows.RA : st.cmpRows.RB, sims = R.map((r) => evalList().find((e) => e.key === r.key));
     const first = sims.find(Boolean) || {};
     return fxFromRows(R, { name: first.name, strategy: first.strategy, config: first.config, pair: first.pair, leverage: first.leverage, dataLabel: first.data,
-      synthetic: sims.some((e) => e && /simul/i.test(e.data || '')), mech: mech, other: other });
+      synthetic: sims.some((e) => e && /simul/i.test(e.data || '')), mech: mech, other: other, keys: R.map((r) => r.key) });
   }
   /** FX à partir des simulations relancées avec une mécanique de retrait (rows : voir wdRow). */
   function fxFromRows(R, meta) { return F.fxcore.fxFromRows(R, meta); }
@@ -3424,7 +3425,8 @@
       row('Durée recommandée', '<b>' + durTxt(fx.duration.reco) + '</b>', 'testé de ' + durTxt(fx.duration.min) + ' à ' + durTxt(fx.duration.max)) +
       row('Retrait type', '<b>' + esc(fx.withdraw.desc) + '</b>', 'rente ≈ ' + num1.format(fx.withdraw.yearly) + ' % du capital par an · ≈ ' + money.format(fx.withdraw.perMonth) + ' / mois · meilleure que « ' + esc(fx.withdraw.other) + ' »') +
       '<footer><span class="hint">' + fx.n + ' simulations · ' + fx.years[0] + '–' + fx.years[1] + ' · ' + esc(fx.strategy.dataLabel || '') + ' · créé le ' + new Date(fx.createdAt).toLocaleDateString('fr-FR') + '</span>' +
-      '<span class="fx-acts">' + (fx.strategy.data ? '<button type="button" class="secondary small" data-fx-load="' + esc(fx.id) + '" title="Remettre la stratégie, son capital et ce retrait dans le formulaire">Charger</button>' : '') +
+      '<span class="fx-acts">' + (fx.strategy.data ? '<button type="button" class="secondary small" data-fx-load="' + esc(fx.id) + '" title="Charger la stratégie et ouvrir les simulations de ce FX dans l\'évaluation (recalculées si besoin)">📂 Voir les simulations</button>' +
+        '<button type="button" class="secondary small" data-fx-ea="' + esc(fx.id) + '" title="Télécharger l\'Expert Advisor MetaTrader 5 de ce FX (stratégie, paire, levier, capital)">⬇ EA (.mq5)</button>' : '') +
       '<button type="button" class="ghost small" data-fx-del="' + esc(fx.id) + '" title="Supprimer ce FX" aria-label="Supprimer">🗑</button></span></footer></article>';
   }
   let FX_BASE = 10000; // capital du FX en cours d'affichage (les montants sont calculés pour ce capital)
@@ -3593,7 +3595,8 @@
       '<section class="fx-sec"><h5>Revenu régulier</h5><p class="fx-inc"><b>' + (inc.w.mode === 'periodic' && inc.w.type === 'fixed' ? fxMoney(inc.fixedPct) + ' chaque mois' + (inc.w.every === 'days' ? '' : '') : esc(inc.desc)) + '</b> — ' + incomeSub + '. <small>Choisi par comparaison : meilleur que « ' + esc(inc.other) + ' ».</small></p></section>' +
       '<section class="fx-sec"><h5>Conditions</h5><p class="fx-cond">' + [cd.leverage ? 'Levier 1:' + cd.leverage : '', cd.spread != null ? 'spread ' + num1.format(cd.spread) + ' pip' + (cd.spread > 1 ? 's' : '') + ' par trade' : '', cd.commission ? 'commission ' + num1.format(cd.commission) + ' par lot' : 'sans commission', 'données : ' + (cd.source || '—'), 'sortie possible à tout moment (positions fermées au prix du marché)'].filter(Boolean).map(esc).join(' · ') + '</p></section>' +
       '<p class="fx-disclaimer">Résultats de simulations passées, sans garantie pour l\'avenir. Vous pouvez perdre tout ou partie du capital investi.</p>' +
-      '<footer><span class="hint">créé le ' + new Date(fx.createdAt).toLocaleDateString('fr-FR') + '</span><span class="fx-acts">' + (fx.strategy.data ? '<button type="button" class="secondary small" data-fx-load="' + esc(fx.id) + '" title="Remettre la stratégie, son capital et ce retrait dans le formulaire">Charger</button>' : '') +
+      '<footer><span class="hint">créé le ' + new Date(fx.createdAt).toLocaleDateString('fr-FR') + '</span><span class="fx-acts">' + (fx.strategy.data ? '<button type="button" class="secondary small" data-fx-load="' + esc(fx.id) + '" title="Charger la stratégie et ouvrir les simulations de ce FX dans l\'évaluation (recalculées si besoin)">📂 Voir les simulations</button>' +
+        '<button type="button" class="secondary small" data-fx-ea="' + esc(fx.id) + '" title="Télécharger l\'Expert Advisor MetaTrader 5 de ce FX (stratégie, paire, levier, capital)">⬇ EA (.mq5)</button>' : '') +
       '<button type="button" class="ghost small" data-fx-del="' + esc(fx.id) + '" title="Supprimer ce FX" aria-label="Supprimer">🗑</button></span></footer></article>';
   }
   function openFx() {
@@ -3611,20 +3614,97 @@
     const del = t.closest('[data-fx-del]');
     if (del) { const fx = fxList().find((x) => x.id === del.dataset.fxDel); if (fx && confirm('Supprimer le FX « ' + fx.name + ' » ?')) { setFxList(fxList().filter((x) => x.id !== fx.id)); openFx(); } return; }
     const ld = t.closest('[data-fx-load]');
-    if (ld) {
-      const fx = fxFind(ld.dataset.fxLoad);
-      if (!fx) return;
-      undoable('FX « ' + fx.name + ' » chargé', () => {
-        loadStrategy(fx.strategy.data); if (fx.strategy.config) applyConfig(fx.strategy.config);
-        const wd = fx.v === 2 ? fx.income : fx.withdraw;
-        $('capital').value = Math.round(fx.capital * 100) / 100; wdToForm(wd.w);
-        $('preset').value = 'mine'; $('deleteStrat').hidden = true;
-        $('presetDesc').textContent = 'FX « ' + fx.name + ' » : ' + fx.strategy.name + ', capital ' + money.format(fx.capital) + ', retrait ' + wd.desc + ', durée recommandée ' + durTxt(fx.duration.reco) + '.';
-        updateStyleHint();
-      });
-      closeFx();
-    }
+    if (ld) { const fx = fxFind(ld.dataset.fxLoad); if (fx) openFxSims(fx); return; }
+    const ea = t.closest('[data-fx-ea]');
+    if (ea) { const fx = fxFind(ea.dataset.fxEa); if (fx) downloadFxEa(fx); }
   });
+  /** Remet la stratégie, le capital et le retrait du FX dans le formulaire. */
+  function fxToForm(fx) {
+    loadStrategy(fx.strategy.data); if (fx.strategy.config) applyConfig(fx.strategy.config);
+    const wd = fx.v === 2 ? fx.income : fx.withdraw;
+    $('capital').value = Math.round(fx.capital * 100) / 100;
+    if (fx.strategy.leverage && LEVERAGES.includes(Number(fx.strategy.leverage))) $('leverage').value = String(fx.strategy.leverage);
+    if (wd && wd.w && wd.w.on !== false && wd.w.type !== 'none') wdToForm(wd.w); else { $('withdrawOn').checked = false; updateWithdrawUI(); }
+    $('preset').value = 'mine'; $('deleteStrat').hidden = true;
+    $('presetDesc').textContent = 'FX « ' + fx.name + ' » : ' + fx.strategy.name + ', capital ' + money.format(fx.capital) + ', retrait ' + ((wd && wd.desc) || 'aucun') + ', durée recommandée ' + durTxt(fx.duration.reco) + '.';
+    updateStyleHint();
+  }
+  /** Simulations du FX déjà dans l'historique : batch de l'agent, clés enregistrées, ou mêmes dates et même stratégie. */
+  function fxExistingSims(fx) {
+    const all = evalList(), byKey = new Map(all.map((e) => [e.key, e]));
+    if (fx.batch) { const b = batchStore.get().find((x) => x.id === fx.batch); if (b && b.entries.length) return { batch: b }; }
+    if (fx.keys && fx.keys.length) { const L = fx.keys.map((k) => byKey.get(k)).filter(Boolean); if (L.length >= Math.min(2, fx.keys.length)) return { entries: L }; }
+    const S = (fx.sims || []).filter((x) => x.from && x.to), near = (a, b) => Math.abs(Date.parse(a) - Date.parse(b)) <= 6 * 864e5;
+    if (S.length) {
+      const L = [];
+      for (const x of S) { const e = all.find((y) => y.name === fx.strategy.name && y.strategy && near(y.from, x.from) && near(y.to, x.to) && !L.includes(y)); if (e) L.push(e); }
+      if (L.length >= Math.max(2, Math.ceil(S.length * 0.8))) return { entries: L };
+    }
+    return null;
+  }
+  /** « Voir les simulations » : charge le FX dans le formulaire et ouvre ses simulations dans l'évaluation (batch du FX). */
+  async function openFxSims(fx) {
+    if (checkRunning || batchRunning) return toast('Un calcul est déjà en cours : attendez la fin ou arrêtez-le.', false);
+    if (!fx.strategy.data) return toast('Ce FX n\'a pas gardé sa stratégie : impossible de rejouer ses simulations.', false);
+    // la mécanique de retrait du FX devient une mécanique enregistrée (Resimuler avec un retrait)
+    const w = fx.v === 2 ? fx.income && fx.income.w : fx.withdraw && fx.withdraw.w;
+    if (w && w.on !== false && w.type !== 'none' && !wdPresets().some((p) => wdKey(p.w) === wdKey(w))) setWdPresets(wdPresets().concat({ id: 'w' + Date.now().toString(36), name: (fx.income && fx.income.name) || wdDesc(w), w: Object.assign({ on: true }, w) }));
+    const found = fxExistingSims(fx);
+    let b = found && found.batch;
+    if (!b && found) {
+      b = batchStore.get().find((x) => x.fx === fx.id);
+      if (!b) { b = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), at: new Date().toISOString(), fx: fx.id, name: '💼 ' + fx.name, entries: found.entries.map((e) => Object.assign({}, e)) }; const l = batchStore.get(); l.push(b); batchStore.set(l); updateBatchCount(); }
+    }
+    if (!b) {
+      // simulations jamais faites dans cette page (chercheur de FX, autre appareil) : on les recalcule, sans retrait comme dans l'évaluation
+      const S = (fx.sims || []).filter((x) => x.from && x.to);
+      if (!S.length) { closeFx(); undoable('FX « ' + fx.name + ' » chargé', () => fxToForm(fx)); return toast('FX chargé dans le formulaire. Ses périodes ne sont pas connues : lancez un lot pour le tester.', false); }
+      if (!confirm('Les ' + S.length + ' simulations de ce FX ne sont pas dans votre historique. Les recalculer maintenant (' + S.length + ' backtests, sur les mêmes dates) ?')) return;
+      closeFx();
+      fxToForm(fx); $('withdrawOn').checked = false; updateWithdrawUI();
+      const e0 = { strategy: fx.strategy.data, config: Object.assign({}, currentConfig(), fx.strategy.config || {}, { capital: fx.capital, leverage: Number(fx.strategy.leverage) || currentConfig().leverage, withdraw: { on: false } }) };
+      b = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), at: new Date().toISOString(), fx: fx.id, auto: true, name: '💼 ' + fx.name, entries: [] };
+      const l = batchStore.get(); l.push(b); batchStore.set(l); updateBatchCount();
+      checkRunning = 'fx'; checkStop = false;
+      let done = 0;
+      try {
+        for (const x of S) {
+          if (checkStop) break;
+          setRunLabel('FX : simulation ' + (++done) + ' / ' + S.length);
+          const before = evalList().length;
+          await rerunEntry(e0, dateOf(x.from), dateOf(x.to), '', false);
+          if (evalList().length > before) addToLotBatch(b, evalList()[evalList().length - 1]);
+          await new Promise((r) => setTimeout(r, 20));
+        }
+      } finally { checkRunning = ''; setRunLabel(''); }
+      b = batchStore.get().find((x) => x.id === b.id);
+      if (!b || !b.entries.length) { batchStore.set(batchStore.get().filter((x) => x.id !== (b && b.id))); updateBatchCount(); return toast('Simulations impossibles à recalculer : ' + ($('formError').textContent || 'données indisponibles') + '.', false); }
+      fxSaveKeys(fx, b.entries.map((e) => e.key));
+    } else closeFx();
+    loadBatch(b);
+    fxToForm(fx);
+    openEvaluation('charts');
+    toast('FX « ' + fx.name + ' » : ' + b.entries.length + ' simulations ouvertes. « 💸 Resimuler avec un retrait » applique sa mécanique de retrait.', false);
+  }
+  function fxSaveKeys(fx, keys) { const l = fxList(), x = l.find((y) => y.id === fx.id); if (x) { x.keys = keys; setFxList(l); } }
+  /** EA MetaTrader 5 du FX : sa stratégie, sa paire, son levier et son capital (taille des positions comme le backtest). */
+  function downloadFxEa(fx) {
+    if (!fx.strategy.data) return toast('Ce FX n\'a pas gardé sa stratégie : EA impossible à générer.', false);
+    const c = fx.strategy.config || {}, br = c.broker || {};
+    try {
+      const ea = F.mql5.generate(Object.assign({}, fx.strategy.data, { name: fx.strategy.data.name || fx.strategy.name }), {
+        pair: fx.strategy.pair || c.pair || 'EUR/USD', leverage: Number(fx.strategy.leverage || c.leverage) || 10, exposurePct: Number(c.exposurePct) || 100, capital: fx.capital,
+        periodLabel: 'FX « ' + fx.name + ' »', stats: null, timeframe: 'PERIOD_' + (br.tf || 'D1'), sizing: 'backtest', fixedLots: Number(br.lots) || 0.01, riskPct: Number(br.risk) || 1,
+        maxLots: Number(br.maxLots) || 10, maxSpreadPips: br.maxSpread != null && br.maxSpread !== '' ? Number(br.maxSpread) : 5,
+        news: { enabled: !!(c.news && c.news.on), mode: (c.news && c.news.mode) || 'block', before: (c.news && c.news.before) || 0, after: (c.news && c.news.after) || 0, impact: (c.news && c.news.impact) || 'high' },
+      });
+      const blob = new Blob(['\ufeff' + ea.code.replace(/\n/g, '\r\n')], { type: 'text/plain;charset=utf-8' }), a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = ea.fileName; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      toast('EA « ' + ea.fileName + ' » téléchargé (le retrait du FX se fait à la main : l\'EA ne retire pas d\'argent). Testez-le d\'abord en compte démo.', false);
+      logEvent('ea.downloaded', 'EA du FX « ' + fx.name + ' » téléchargé : ' + ea.fileName, { fx: fx.id });
+    } catch (e) { toast('EA impossible à générer : ' + e.message, false); }
+  }
   // ---------- Chercheur de FX : essaie les combinaisons (stratégie × levier × retrait) et propose les plans proches des critères ----------
   let minerState = { open: false, status: 'idle', res: null };
   const fxFind = (id) => fxList().find((x) => x.id === id) || ((minerState.res && minerState.res.cands) || []).map((c) => c.fx).find((x) => x.id === id);
@@ -3913,6 +3993,104 @@
   });
   $('fxModal').addEventListener('keydown', (ev) => { if (ev.target.dataset && ev.target.dataset.fxName && ev.key === 'Enter') { ev.preventDefault(); ev.target.blur(); } });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('fxModal').hidden) closeFx(); });
+
+  // ---------- Guide de recherche de l'agent IA (lu par l'agent via l'outil MCP fx_method) ----------
+  // { active: 'free' | 'forexia' | id, items: [{id, name, text}], updatedAt } — un seul guide appliqué à la fois
+  const AG_KEY = 'forexia.agentGuide';
+  let agMem = null, agDemarche = null, agTimer = null;
+  function agGet() {
+    try { const v = JSON.parse(localStorage.getItem(AG_KEY)); if (v && typeof v === 'object') return { active: v.active || 'free', items: Array.isArray(v.items) ? v.items : [], updatedAt: v.updatedAt }; } catch (e) { /* ignoré */ }
+    return agMem || { active: 'free', items: [] };
+  }
+  function agSet(v) {
+    v.updatedAt = new Date().toISOString(); agMem = v;
+    try { localStorage.setItem(AG_KEY, JSON.stringify(v)); } catch (e) { /* ignoré */ }
+    updateAgBtn();
+  }
+  function agActiveName(g) {
+    g = g || agGet();
+    if (g.active === 'forexia') return 'Démarche Forexia';
+    const it = g.items.find((x) => x.id === g.active);
+    return it ? it.name || 'Mon guide' : '';
+  }
+  function updateAgBtn() { const n = agActiveName(); $('agNow').textContent = n ? (n.length > 18 ? n.slice(0, 17) + '…' : n) : 'libre'; $('agNow').classList.toggle('on', !!n); }
+  async function agLoadDemarche() {
+    if (agDemarche != null) return agDemarche;
+    try { const r = await fetch('mcp/guide-demarche.md', { cache: 'no-cache' }); agDemarche = r.ok ? await r.text() : ''; } catch (e) { agDemarche = ''; }
+    return agDemarche;
+  }
+  function agStatus() {
+    const n = agActiveName();
+    $('agStatus').innerHTML = (n ? 'Guide appliqué : <b>' + esc(n) + '</b>. ' : 'Appliqué : <b>liberté de l\'agent</b>. ') +
+      (dbOn ? 'Transmis à l\'agent par la passerelle MT5 : il le lit au début de chaque recherche.' : 'Passerelle MT5 non connectée : l\'agent ne voit ce choix qu\'une fois la passerelle connectée (ou utilisez « 📋 Copier pour l\'agent »).');
+  }
+  async function openAgent() {
+    const g = agGet(), d = await agLoadDemarche();
+    const opt = (id, title, desc, extra) => '<div class="ag-opt' + (g.active === id || (id === 'free' && !agActiveName(g)) ? ' on' : '') + '" data-ag="' + esc(id) + '">' +
+      '<label class="ag-pick"><input type="radio" name="agActive" value="' + esc(id) + '"' + (g.active === id || (id === 'free' && !agActiveName(g)) ? ' checked' : '') + '><span>' + title + '</span></label>' + (desc ? '<p class="hint">' + desc + '</p>' : '') + (extra || '') + '</div>';
+    let h = '<div class="ag-list">' +
+      opt('free', '🧠 Liberté de l\'agent <small>(par défaut)</small>', 'L\'agent cherche avec sa propre méthode et son jugement, en utilisant librement tous les outils de Forexia.') +
+      opt('forexia', '📘 Démarche Forexia', 'Démarche proposée : choix de la stratégie, ajout progressif d\'indicateurs selon les constats, comparaisons sur les mêmes périodes, confirmation sur des périodes neuves, levier / durée / budget, puis retraits réglés selon l\'analyse temporelle.',
+        '<details class="ag-view"><summary>Voir le texte</summary><pre>' + esc(d || 'Texte indisponible (mcp/guide-demarche.md).') + '</pre></details><div class="ag-acts"><button type="button" class="secondary small" data-ag-dup>📄 Copier dans un nouveau guide pour la modifier</button></div>');
+    for (const it of g.items) {
+      h += opt(it.id, '✍️ <input class="ag-name" data-ag-name="' + esc(it.id) + '" value="' + esc(it.name || '') + '" placeholder="Nom du guide" aria-label="Nom du guide">', '',
+        '<textarea class="ag-text" data-ag-text="' + esc(it.id) + '" rows="10" placeholder="Écrivez votre démarche : par où commencer, quoi constater, quoi changer et dans quel ordre, quand passer aux retraits, ce que vous voulez en sortie…" spellcheck="true">' + esc(it.text || '') + '</textarea>' +
+        '<div class="ag-acts"><button type="button" class="secondary small" data-ag-copy="' + esc(it.id) + '">📋 Copier pour l\'agent</button><button type="button" class="ghost small" data-ag-del="' + esc(it.id) + '" title="Supprimer ce guide" aria-label="Supprimer">🗑</button></div>');
+    }
+    h += '</div><button type="button" class="primary small ag-new" data-ag-new>＋ Nouveau guide</button>';
+    $('agBody').innerHTML = h;
+    agStatus();
+    $('agModal').hidden = false; document.body.style.overflow = 'hidden';
+  }
+  function closeAgent() { clearTimeout(agTimer); agFlushText(); $('agModal').hidden = true; document.body.style.overflow = ''; }
+  function agFlushText() {
+    const g = agGet(); let ch = false;
+    $('agBody').querySelectorAll('[data-ag-name]').forEach((x) => { const it = g.items.find((i) => i.id === x.dataset.agName); if (it && it.name !== x.value) { it.name = x.value.slice(0, 80); ch = true; } });
+    $('agBody').querySelectorAll('[data-ag-text]').forEach((x) => { const it = g.items.find((i) => i.id === x.dataset.agText); if (it && it.text !== x.value) { it.text = x.value; ch = true; } });
+    if (ch) { agSet(g); agStatus(); }
+  }
+  $('agBtn').addEventListener('click', openAgent);
+  $('agModal').addEventListener('click', async (ev) => {
+    const t = ev.target;
+    if (t.closest('[data-close]')) return closeAgent();
+    if (t.closest('[data-ag-new]') || t.closest('[data-ag-dup]')) {
+      agFlushText();
+      const g = agGet(), dup = !!t.closest('[data-ag-dup]'), it = { id: 'g' + Date.now().toString(36), name: dup ? 'Ma démarche' : 'Mon guide ' + (g.items.length + 1), text: dup ? await agLoadDemarche() : '' };
+      g.items.push(it); g.active = it.id; agSet(g); await openAgent();
+      const ta = $('agBody').querySelector('[data-ag-text="' + it.id + '"]'); if (ta) { ta.scrollIntoView({ block: 'center' }); ta.focus(); }
+      return;
+    }
+    const del = t.closest('[data-ag-del]');
+    if (del) {
+      const g = agGet(), it = g.items.find((x) => x.id === del.dataset.agDel);
+      if (it && confirm('Supprimer le guide « ' + (it.name || 'sans nom') + ' » ?')) { g.items = g.items.filter((x) => x.id !== it.id); if (g.active === it.id) g.active = 'free'; agSet(g); openAgent(); }
+      return;
+    }
+    const cp = t.closest('[data-ag-copy]');
+    if (cp) {
+      agFlushText();
+      const it = agGet().items.find((x) => x.id === cp.dataset.agCopy);
+      const txt = 'Pour cette recherche, suis ce guide étape par étape :\n\n' + ((it && it.text) || '');
+      try { await navigator.clipboard.writeText(txt); toast('Guide copié : collez-le dans la conversation avec l\'agent.', false); } catch (e) { toast('Copie impossible : sélectionnez le texte du guide et copiez-le.', false); }
+      return;
+    }
+    // un clic dans un guide (hors champ) le choisit
+    const o = t.closest('.ag-opt');
+    if (o && !t.closest('textarea, input:not([type=radio]), details, button')) { const r = o.querySelector('input[type=radio]'); if (r && !r.checked) { r.checked = true; r.dispatchEvent(new Event('change', { bubbles: true })); } }
+  });
+  $('agModal').addEventListener('change', (ev) => {
+    if (ev.target.name !== 'agActive') return;
+    agFlushText();
+    const g = agGet(); g.active = ev.target.value; agSet(g);
+    $('agBody').querySelectorAll('.ag-opt').forEach((x) => x.classList.toggle('on', x.dataset.ag === g.active));
+    agStatus();
+  });
+  $('agModal').addEventListener('input', (ev) => {
+    if (!ev.target.closest('[data-ag-name],[data-ag-text]')) return;
+    clearTimeout(agTimer); agTimer = setTimeout(agFlushText, 600);
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('agModal').hidden) closeAgent(); });
+  updateAgBtn();
   updateFxCount();
   async function runWd() {
     const st = wdState;

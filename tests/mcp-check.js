@@ -128,7 +128,16 @@ const SYN = { pair: 'EUR/USD', source: 'synthetic', dateFrom: '2019-01-01', date
   // ---------------- démarche FX (batchs, époques, analyseurs, retraits, FX, chercheur)
   const MK = { pair: 'EUR/USD', source: 'synthetic', capital: 10000, leverage: 10 };
   let B1, B2, B3, FXID;
-  await test('fx_method', async () => { const m = await call('fx_method', {}); ok(m.steps.length >= 8 && m.tools.includes('run_batch')); });
+  await test('fx_method + agent_guide : liberté par défaut, Démarche Forexia, guide de l\'utilisateur', async () => {
+    let m = await call('fx_method', {}); ok(/liberté/.test(m.mode) && m.guide === null && m.tools.includes('run_batch'), JSON.stringify(m).slice(0, 200));
+    ok((await call('agent_guide', {})).guides.length === 2);
+    await call('agent_guide', { select: 'forexia' });
+    m = await call('fx_method', {}); ok(/guide/.test(m.mode) && m.guideName === 'Démarche Forexia' && /Phase 2/.test(m.guide), m.mode);
+    fs.writeFileSync(path.join(dataDir, 'agentGuide.json'), JSON.stringify({ active: 'g1', items: [{ id: 'g1', name: 'Ma méthode', text: '1. MACD seulement.\n2. Levier 1:10.' }] }));
+    m = await call('fx_method', {}); ok(m.guideName === 'Ma méthode' && /MACD seulement/.test(m.guide));
+    const sh = await call('agent_guide', { show: 'Démarche Forexia' }); ok(/Phase 1/.test(sh.text) && sh.active === 'Ma méthode');
+    await call('agent_guide', { select: 'free' }); m = await call('fx_method', {}); ok(m.guide === null);
+  });
   await test('run_batch : 16 périodes de 9 mois, plage 2005–2020, reproductible', async () => {
     const r = await call('run_batch', { strategy: { preset: 'ma' }, market: MK, n: 16, months: 9, yearFrom: 2005, yearTo: 2020, seed: 7 });
     B1 = r.batch.id;

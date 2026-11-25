@@ -25,12 +25,27 @@ module.exports = function fxTools(ctx) {
   const TM = ['stopAtr', 'takeAtr', 'atrPeriod', 'trailPips', 'trailAtr', 'breakevenPips', 'breakevenAtr', 'maxBars', 'pauseLosses', 'pauseBars'];
   const median = FC.median, mean = FC.mean;
 
-  /** Démarche de recherche : .claude/commands/fx.md (sans l'en-tête), une seule source pour /fx et pour l'outil fx_method. */
+  /** Démarche Forexia (guide proposé) : mcp/guide-demarche.md, aussi affichée dans la page. */
   function methodText() {
-    try {
-      const t = require('fs').readFileSync(path.join(__dirname, '..', '.claude', 'commands', 'fx.md'), 'utf8');
-      return t.replace(/^---[\s\S]*?---\s*/, '').replace('Critères de l\'utilisateur : $ARGUMENTS', 'Critères de l\'utilisateur : ceux donnés dans la conversation.');
-    } catch (e) { return null; }
+    try { return require('fs').readFileSync(path.join(__dirname, 'guide-demarche.md'), 'utf8'); } catch (e) { return null; }
+  }
+  // Guide de recherche choisi par l'utilisateur dans la page (bouton « 🧭 Guide agent ») :
+  // { active: 'free' | 'forexia' | id, items: [{id, name, text}] } — clé « forexia.agentGuide » de la base de la passerelle.
+  const guideStore = S('agentGuide.json', { active: 'free', items: [] });
+  /** Guide en vigueur : lu en direct dans la base de la passerelle si elle est configurée, sinon la dernière copie. */
+  async function activeGuide() {
+    let g = guideStore.get(), src = 'copie locale';
+    if (process.env.FOREXIA_BRIDGE_TOKEN) {
+      try {
+        const r = await bridge('POST', '/db/kv/list', {}), it = ((r && r.items) || []).find((x) => x.key === 'forexia.agentGuide');
+        if (it && it.data) { g = it.data; guideStore.set(g); src = 'page Forexia (passerelle)'; }
+      } catch (e) { src = 'copie locale (passerelle injoignable)'; }
+    }
+    g = { active: g.active || 'free', items: Array.isArray(g.items) ? g.items : [] };
+    const item = g.items.find((x) => x.id === g.active);
+    if (g.active === 'forexia') return { mode: 'guide', name: 'Démarche Forexia', text: methodText(), source: src, all: g };
+    if (item && String(item.text || '').trim()) return { mode: 'guide', name: item.name || 'Guide', text: item.text, source: src, all: g };
+    return { mode: 'free', name: 'Liberté de l\'agent', text: null, source: src, all: g };
   }
 
   // ---------------------------------------------------------------- historique complet d'une paire (chargé une fois)
@@ -313,7 +328,7 @@ module.exports = function fxTools(ctx) {
   let lastMine = null;
 
   // ---------------------------------------------------------------- synchronisation avec la page (passerelle MT5, table kv)
-  const SYNC = { 'forexia.fx': fxs, 'forexia.batches': batches, 'forexia.eras': eraStore, 'forexia.wdPresets': wdp, 'forexia.events': evStore };
+  const SYNC = { 'forexia.agentGuide': guideStore, 'forexia.fx': fxs, 'forexia.batches': batches, 'forexia.eras': eraStore, 'forexia.wdPresets': wdp, 'forexia.events': evStore };
   const idOf = (x) => (x && (x.id || x.key || x.name)) || JSON.stringify(x);
   function union(a, b) { const map = new Map(); (a || []).forEach((x) => map.set(idOf(x), x)); (b || []).forEach((x) => map.set(idOf(x), x)); return [...map.values()]; }
 
@@ -326,34 +341,50 @@ module.exports = function fxTools(ctx) {
   return [
     {
       name: 'fx_method',
-      description: 'À APPELER EN PREMIER pour toute recherche de stratégie ou de FX : la démarche obligatoire (phases, règles, critères de passage), à suivre pas à pas. Méthode pour trouver un FX (plan d\'investissement) comme le ferait un humain dans Forexia : batchs, comparaisons temporelles, époques, retraits, capital, durée. À lire avant de commencer la recherche d\'un FX.',
+      description: 'À APPELER EN PREMIER pour toute recherche de stratégie ou de FX : indique le guide de recherche choisi par l\'utilisateur dans la page Forexia (à suivre étape par étape), ou « liberté de l\'agent » (par défaut : méthode libre). Donne aussi les outils et les précautions.',
       inputSchema: obj({}),
-      handler: async () => ({
-        // la démarche complète (même texte que la commande /fx de Claude Code) : à suivre pour toute recherche
-        demarche: methodText(),
-        rule: 'Toute recherche de stratégie ou de FX suit cette démarche, phase par phase. Tu restes libre du choix de chaque essai, à condition qu\'il parte d\'un constat et soit comparé sur les mêmes périodes.',
-        goal: 'Un FX = stratégie + paire + levier + capital + durée de placement + manière de retirer, testé sur de nombreuses périodes passées. Il donne ce que le client récupère au bout de la durée (pire cas, mauvais, le plus souvent, bon), le revenu mensuel, le risque (1 à 7) et un score de confiance statistique (DSR, Student, époques).',
-        steps: [
-          '1. Choisir la stratégie : list_presets, list_strategies, frenchText ou règles. Premier run_batch de 20 à 40 périodes de la durée visée (months) sur tout l\'historique (cours online).',
-          '2. Constater : time_analysis (années, époques, rupture, événements), get_batch (pires et meilleures périodes), analyze_simulation sur les pires.',
-          '3. Affiner la stratégie progressivement : modify_strategy (ajouter un indicateur ou une condition, changer un réglage, stop / objectif / stop suiveur, achats ou ventes seulement, style), puis run_batch sameAs (mêmes périodes) et compare_batches. Garder seulement ce qui améliore la médiane ET la part gagnante.',
-          '4. Améliorer selon les propositions : improve_batch (« Améliorer » sur tout le batch), apply_proposal (une ou plusieurs corrections de l\'analyseur, scope batch), era_analysis (corrections par époque). Revalider chaque fois sur les mêmes périodes, puis sur de nouvelles périodes (autre seed).',
-          '5. Régler les éléments un par un avec vary_batch sur les mêmes périodes : levier, budget (capital), durée en mois, exposition, taille de position, paire, stratégie. subset_batch pour étudier une époque ou les périodes perdantes à part ; yearFrom / yearTo pour une plage.',
-          '6. Stratégie confirmée (régulière sur la plupart des époques, plusieurs seeds) : passer aux retraits. compare_withdrawals (avec byEra) puis simulate_withdrawal pour régler le type (excédent, somme fixe, % du compte, au seuil) et la valeur ; era / yearFrom pour régler selon l\'analyse temporelle ; vary_batch param withdraw pour l\'effet sur le batch.',
-          '7. build_fx (batch + meilleure mécanique, capital du client) : confiance, risque, scénarios, revenu ; fx_projection pour d\'autres budgets. Confiance faible : plus de simulations, plus d\'années, cours réels.',
-          '8. mine_fx explore toutes les combinaisons selon les critères ; ses propositions se revérifient avec les étapes 2 à 7.',
-          '9. Noter chaque déduction (note_add) ; save_strategy / save_fx ; forexia_sync push pour que l\'utilisateur voie tout dans la page.',
-        ],
-        cautions: [
-          'Plus on essaie de combinaisons, plus un bon résultat peut venir du hasard : le score de confiance en tient compte (nombre d\'essais).',
-          'Les données simulées (source synthetic) servent à tester la mécanique, pas le marché : conclure sur cours réels.',
-          'Une période choisie a posteriori n\'est pas reproductible : préférer un plan qui gagne dans la plupart des époques.',
-          'Levier au-delà de 1:30 : hors limite européenne pour les particuliers.',
-        ],
-        tools: ['modify_strategy', 'run_batch', 'vary_batch', 'improve_batch', 'subset_batch', 'list_batches', 'get_batch', 'compare_batches', 'time_analysis', 'get_eras', 'set_eras', 'market_events', 'analyze_simulation', 'apply_proposal', 'era_analysis',
-          'simulate_withdrawal', 'compare_withdrawals', 'save_withdraw_mechanic', 'list_withdraw_mechanics', 'build_fx', 'fx_projection', 'list_fx', 'get_fx', 'save_fx', 'rename_fx', 'delete_fx', 'mine_fx', 'note_add', 'note_list', 'forexia_sync', 'import_ea'],
-        currentEras: erasNow(),
-      }),
+      handler: async () => {
+        const g = await activeGuide();
+        return {
+          mode: g.mode === 'guide' ? 'guide de l\'utilisateur' : 'liberté de l\'agent',
+          guideName: g.name,
+          instruction: g.mode === 'guide'
+            ? 'L\'utilisateur a choisi le guide « ' + g.name + ' » : suis-le étape par étape pour cette recherche. Tu choisis chaque essai, dans le cadre de ce guide. Ne t\'en écarte que si l\'utilisateur le demande, et dis-le.'
+            : 'Aucun guide imposé : cherche avec ta propre méthode et ton jugement, en utilisant librement tous les outils. (Guide proposé, facultatif : outil agent_guide.)',
+          guide: g.text,
+          source: g.source,
+          goal: 'Un FX = stratégie + paire + levier + capital + durée de placement (mois) + manière de retirer, testé sur de nombreuses périodes passées. Il donne ce que le client récupère au bout de la durée (pire cas, mauvais, le plus souvent, bon), le revenu mensuel, le risque (1 à 7) et un score de confiance statistique (DSR, Student, époques, corrigé du nombre d\'essais).',
+          cautions: [
+            'N\'invente aucun chiffre : cite les sorties des outils.',
+            'Plus on essaie de combinaisons, plus un bon résultat peut venir du hasard : le score de confiance en tient compte.',
+            'Les données simulées (source synthetic) servent à tester la mécanique, pas le marché : conclure sur cours réels.',
+            'Levier au-delà de 1:30 : hors limite européenne pour les particuliers.',
+          ],
+          tools: ['modify_strategy', 'run_batch', 'vary_batch', 'improve_batch', 'subset_batch', 'list_batches', 'get_batch', 'compare_batches', 'time_analysis', 'get_eras', 'set_eras', 'market_events', 'analyze_simulation', 'apply_proposal', 'era_analysis',
+            'simulate_withdrawal', 'compare_withdrawals', 'save_withdraw_mechanic', 'list_withdraw_mechanics', 'build_fx', 'fx_projection', 'list_fx', 'get_fx', 'save_fx', 'rename_fx', 'delete_fx', 'mine_fx', 'note_add', 'note_list', 'forexia_sync', 'import_ea', 'agent_guide'],
+          currentEras: erasNow(),
+        };
+      },
+    },
+    {
+      name: 'agent_guide',
+      description: 'Guides de recherche de l\'utilisateur (bouton « 🧭 Guide agent » de la page) : liste, guide choisi, texte d\'un guide (show), ou choix d\'un autre guide si l\'utilisateur le demande dans la conversation (select : nom du guide, "forexia" pour la Démarche Forexia, "free" pour la liberté de l\'agent).',
+      inputSchema: obj({ show: { type: 'string', description: 'nom du guide à afficher' }, select: { type: 'string' } }),
+      handler: async (a) => {
+        const g = await activeGuide(), all = g.all;
+        const list = [{ id: 'free', name: 'Liberté de l\'agent (par défaut)' }, { id: 'forexia', name: 'Démarche Forexia' }].concat(all.items.map((x) => ({ id: x.id, name: x.name })));
+        const find = (n) => list.find((x) => x.id === n || x.name === n || x.name.toLowerCase() === String(n).toLowerCase()) || fail('Guide inconnu : « ' + n + ' ». Guides : ' + list.map((x) => x.name).join(', '));
+        if (a.select) {
+          const x = find(a.select), v = { active: x.id, items: all.items, updatedAt: new Date().toISOString() };
+          guideStore.set(v);
+          let pushed = false;
+          if (process.env.FOREXIA_BRIDGE_TOKEN) { try { await bridge('POST', '/db/kv/put', { key: 'forexia.agentGuide', data: v, updatedAt: v.updatedAt }); pushed = true; } catch (e) { /* page mise à jour plus tard */ } }
+          return { selected: x.name, sentToPage: pushed };
+        }
+        const out = { active: g.name, mode: g.mode, source: g.source, guides: list.map((x) => ({ name: x.name, active: x.id === all.active || (x.id === 'free' && g.mode === 'free' && !['forexia'].concat(all.items.map((i) => i.id)).includes(all.active)) })) };
+        if (a.show) { const x = find(a.show); out.text = x.id === 'forexia' ? methodText() : x.id === 'free' ? null : all.items.find((i) => i.id === x.id).text; }
+        return out;
+      },
     },
     // ------------------------------------------------------------ batchs
     {
@@ -586,7 +617,7 @@ module.exports = function fxTools(ctx) {
           mech: { name: nameW, w: w || { on: false, mode: 'periodic', type: 'none', value: 0 } }, other: { name: '—' }, trials: a.trials || trialsFor(e0.name, batches.get().length), eras: eraStore.get().length ? eraStore.get() : undefined });
         if (!w) fx.income = Object.assign(fx.income, { desc: 'sans retrait', perMonthPct: 0, fixedPct: null });
         fx.name = a.name || 'FX ' + e0.name + ' · ' + e0.pair + ' · 1:' + e0.leverage + ' · ' + nameW;
-        fx.batch = b.id;
+        fx.batch = b.id; fx.keys = R.map((r) => r.key);
         const capital = Math.max(fx.capital, Number(a.capital) || fx.capital);
         if (a.save) saveFx(fx);
         return Object.assign({ saved: !!a.save }, fxView(fx, capital, true));
@@ -797,13 +828,14 @@ module.exports = function fxTools(ctx) {
           let merged;
           if (k === 'forexia.events') merged = { items: union(rd && rd.items, local.items), edits: Object.assign({}, rd && rd.edits, local.edits), scanned: Object.assign({}, rd && rd.scanned, local.scanned) };
           else merged = union(dir === 'push' ? [] : rd, local);
+          if (k === 'forexia.agentGuide') merged = rd && (dir !== 'push' || !local.updatedAt || (rd.updatedAt || '') >= local.updatedAt) ? rd : local; // le choix fait dans la page prime
           if (k === 'forexia.eras' && dir !== 'push' && Array.isArray(rd) && rd.length) merged = rd; // les époques de l'utilisateur priment
           if (dir !== 'push') st.set(merged);
           if (dir !== 'pull') {
             const send = dir === 'push' && Array.isArray(merged) ? union(rd, merged) : merged;
             if (JSON.stringify(send) !== JSON.stringify(rd)) { const p = await bridge('POST', '/db/kv/put', { key: k, data: send, updatedAt: new Date().toISOString() }); if (p.ok === false) fail(p.message || 'Écriture refusée.'); }
           }
-          out[k.replace('forexia.', '')] = Array.isArray(merged) ? merged.length : (merged.items || []).length;
+          out[k.replace('forexia.', '')] = k === 'forexia.agentGuide' ? (merged.active || 'free') : Array.isArray(merged) ? merged.length : (merged.items || []).length;
         }
         // stratégies (table « strategies » de la base) : la plus récente l'emporte, nom par nom
         const rs = await bridge('POST', '/db/strategies/list', {}), remoteS = new Map(((rs && rs.items) || []).map((x) => [x.name, x])), localS = store.strategies();

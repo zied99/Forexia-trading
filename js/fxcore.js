@@ -148,6 +148,7 @@
     const w = mech.w || { on: false }, fixedPct = w.mode === 'periodic' && w.type === 'fixed' ? (Number(w.value) / capital) * 100 : null;
     return {
       v: 2, id: 'fx' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), createdAt: new Date().toISOString(), trials: meta.trials || undefined,
+      keys: meta.keys || undefined, // simulations de l'historique d'où vient le FX (pour les rouvrir)
       name: 'FX ' + (first.name || 'stratégie') + ' · ' + mech.name,
       strategy: { name: first.name || '', data: first.strategy || null, config: first.config || null, pair: first.pair || '', leverage: first.leverage || cfg.leverage || null, dataLabel: first.data || '' },
       principle: fxPrinciple(first.strategy, first.pair),

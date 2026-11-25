@@ -231,7 +231,7 @@ ensuite proposée dans la fenêtre et dans « Retrait fictif des gains » du for
 Un **FX** est un plan d'investissement à présenter à un client qui ne connaît pas le trading. Il s'enregistre depuis la
 comparaison de deux mécaniques de retrait (« 💸 Resimuler avec un retrait » › « ⚖️ Comparer » › **💼 Enregistrer un FX**),
 avec la mécanique gagnante. Le bouton **💼 FX** en haut de la page affiche les FX en cartes (nom modifiable sur la carte,
-« Charger », 🗑). Montants calculés pour le **capital investi**, modifiable sur la carte (jamais sous le capital du plan, montant
+« 📂 Voir les simulations », « ⬇ EA (.mq5) », 🗑). Montants calculés pour le **capital investi**, modifiable sur la carte (jamais sous le capital du plan, montant
 minimum testé ; les montants sont proportionnels). Un **point blanc à glisser** sur la barre des scénarios
 choisit un scénario (du pire au meilleur cas testé) : le gain au bout d'un an et le revenu mensuel suivent.
 
@@ -252,6 +252,20 @@ choisit un scénario (du pire au meilleur cas testé) : le gain au bout d'un an 
 | Avertissement | mention de prudence | texte fixe |
 
 Un FX construit sur des données simulées est signalé (« à refaire avec les cours réels MT5 avant de le présenter »).
+
+**📂 Voir les simulations** (sur chaque FX) : remet la stratégie, le capital et le retrait du FX dans le formulaire et
+ouvre ses simulations dans l'Évaluation, comme un batch. Elles sont retrouvées dans l'historique (batch de l'agent,
+simulations d'origine, ou mêmes dates) ; sinon elles sont recalculées une fois sur les mêmes dates, puis gardées.
+La mécanique de retrait du FX est ajoutée aux mécaniques enregistrées (« 💸 Resimuler avec un retrait »).
+**⬇ EA (.mq5)** : télécharge l'Expert Advisor MetaTrader 5 du FX (stratégie, paire, levier, capital ; le retrait reste
+manuel), à tester d'abord en compte démo.
+
+## Guide de l'agent IA
+
+Bouton **🧭 Guide agent** (en haut) : la méthode que suit l'agent IA (serveur MCP) pour chercher vos FX. Un seul
+guide appliqué : **liberté de l'agent** (par défaut), la **Démarche Forexia**, ou l'un de **vos guides** (autant que
+vous voulez, nom et texte modifiables). Le choix est enregistré dans la base (passerelle MT5) et lu par l'agent au
+début de chaque recherche. Détails : [mcp/README.md](mcp/README.md).
 
 ## Chercheur de FX
 

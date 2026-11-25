@@ -104,7 +104,8 @@ comprendre les pertes, choisir la manière de retirer, le capital et la durée. 
 
 | Outil | Rôle |
 |---|---|
-| `fx_method` | Méthode pas à pas pour trouver un FX, précautions, liste des outils. **À lire avant de chercher un FX.** |
+| `fx_method` | **À appeler en premier** : le guide de recherche choisi dans la page (bouton « 🧭 Guide agent » : votre guide, la Démarche Forexia, ou liberté de l'agent par défaut), les outils, les précautions. |
+| `agent_guide` | Liste des guides, texte d'un guide, ou changement de guide demandé dans la conversation. |
 | `modify_strategy` | Affiner pas à pas : ajouter un indicateur / une condition (ET, OU, aux deux entrées avec miroir pour les ventes), remplacer un réglage (`RSI(14)` → `RSI(10)`), retirer, stop / objectif / stop suiveur / break-even / durée max / pause, achats ou ventes seulement, style (scalping → long terme). |
 | `vary_batch` | Faire varier **un** élément sur les mêmes périodes qu'un batch : levier, budget, durée en mois, exposition, taille de position, spread, paire, stratégie, retrait ; comparaison automatique. |
 | `improve_batch` | « Améliorer » sur tout un batch, puis batch amélioré sur les mêmes périodes et comparaison. |
@@ -197,13 +198,25 @@ Le dossier [`agent/`](../agent/README.md) contient un projet complet pour un age
 
 Restent propres à la page : compte cloud (connexion), export CSV / JSON, annuler (Ctrl+Z), affichage.
 
+### Guide de recherche (bouton « 🧭 Guide agent » de la page)
+
+Dans la page, le bouton **🧭 Guide agent** ouvre la fenêtre des guides : vous pouvez en écrire plusieurs, mais **un
+seul est appliqué** :
+- **Liberté de l'agent** (par défaut) : il cherche avec sa propre méthode ;
+- **Démarche Forexia** ([`mcp/guide-demarche.md`](guide-demarche.md)) : choix de la stratégie, ajout progressif
+  d'indicateurs selon les constats, mêmes périodes pour chaque comparaison, confirmation sur des périodes neuves,
+  levier / durée / budget, retraits réglés selon l'analyse temporelle ; « Copier dans un nouveau guide » pour la modifier ;
+- **vos guides**, écrits librement.
+
+L'agent lit le guide choisi au début de chaque recherche (`fx_method`), en direct par la base de la passerelle MT5
+(`FOREXIA_BRIDGE_TOKEN`), sinon dans la dernière copie reçue par `forexia_sync`. Sans passerelle : « 📋 Copier pour
+l'agent » sur le guide, puis collez-le dans la conversation.
+
 ### Commande `/fx` (Claude Code)
 
 Dans une session Claude Code ouverte sur le dossier du projet (terminal ou onglet Code de Claude Desktop, session
-locale), tapez `/fx` suivi de vos critères, par exemple `/fx capital 20000 €, risque 4/7, 12 mois, 150 €/mois`.
-La démarche complète est dans [`.claude/commands/fx.md`](../.claude/commands/fx.md) : choix de la stratégie, ajout
-progressif d'indicateurs selon les constats, mêmes périodes pour chaque comparaison, confirmation sur des périodes
-neuves, réglage du levier, de la durée et du budget, puis retraits réglés selon l'analyse temporelle, et FX final.
+locale), tapez `/fx` suivi de vos critères, par exemple `/fx capital 20000 €, risque 4/7, 12 mois, 150 €/mois` :
+l'agent applique le guide choisi dans la page.
 
 ### Exemple : trouver un FX
 
