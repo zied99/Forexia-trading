@@ -988,3 +988,11 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 .time-batch-table td.tb-cell.bad { background: var(--down-soft); }
 .time-batch-table td.tb-empty { text-align: center; color: var(--muted); }
 .time-batch-verdict { margin-top: 8px; }
+
+.scope-tab.resim-tab { background: var(--panel); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.resim-banner { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.resim-banner > div:first-child { flex: 1 1 420px; }
+.resim-banner .resim-acts { display: flex; gap: 8px; flex-wrap: wrap; }
+.resim-banner .resim-acts button { width: auto; padding: 8px 14px; font-size: 14px; line-height: 1.2; }
+.resim-banner .spinner { vertical-align: middle; margin-right: 6px; }
+.banner.ok { background: var(--up-soft); border-color: transparent; color: var(--text); }

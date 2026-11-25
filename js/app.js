@@ -4918,7 +4918,87 @@
     }
     $('evalBody').innerHTML = h + '</section>';
   }
-  function addBatchBanner() { const h = batchBanner(); if (h) $('evalBody').insertAdjacentHTML('afterbegin', h); }
+  // ---------- « 🔄 Resimuler » : les simulations affichées avec la stratégie actuelle, puis décision ----------
+  let resimCtx = null; // { keys, before: Map(key → {r, dd}), stratName, prev: instantané d'avant l'amélioration, status }
+  const rulesSig = (st) => [...RULE_FIELDS.map((k) => st[k] || ''), ...['stopLossPips', 'takeProfitPips', 'stopAtr', 'takeAtr', 'atrPeriod', 'trailPips', 'trailAtr', 'breakevenPips', 'breakevenAtr', 'maxBars', 'pauseLosses', 'pauseBars'].map((k) => Number(st[k]) || 0)].join('|');
+  async function resimAll() {
+    if (checkRunning || batchRunning) return toast('Un calcul est déjà en cours : attendez la fin ou arrêtez-le.', false);
+    const shown = evalFiltered(evalList()).map((x) => x.e).filter((e) => e.strategy && e.config && !e.tag);
+    const sel = shown.filter((e) => barSel.has(e.key)), T = sel.length ? sel : shown;
+    if (!T.length) return toast('Aucune simulation à resimuler.', false);
+    const st = currentStrategy(), names = [...new Set(T.map((e) => e.name))];
+    if (!st.longEntry && !st.shortEntry) return toast('La stratégie du formulaire n\'a pas de règle d\'entrée.', false);
+    const same = T.filter((e) => rulesSig(e.strategy) === rulesSig(st)).length;
+    if (same === T.length && !confirm('Ces ' + T.length + ' simulations ont déjà les règles actuelles de « ' + st.name + ' ». Les resimuler quand même ?')) return;
+    if (names.length > 1 || names[0] !== st.name) { if (!confirm('Resimuler ' + T.length + ' simulation' + (T.length > 1 ? 's' : '') + ' (' + names.join(', ') + ') avec la stratégie du formulaire « ' + st.name + ' » ?')) return; }
+    else if (T.length > 40 && !confirm(T.length + ' simulations à relancer avec « ' + st.name + ' ». Continuer ?')) return;
+    // version d'avant l'amélioration : le dernier état gardé (Ctrl+Z) dont les règles diffèrent des règles actuelles
+    const sig = rulesSig(st), prev = undoStack.slice().reverse().find((u) => u.form && u.form.strat && u.form.strat.name === st.name && rulesSig(u.form.strat) !== sig) || null;
+    pushUndo('Resimulation de ' + T.length + ' simulation' + (T.length > 1 ? 's' : '') + ' avec « ' + st.name + ' »');
+    resimCtx = { keys: T.map((e) => e.key), before: new Map(T.map((e) => [e.key, { r: e.returnPct, dd: e.maxDrawdownPct }])), stratName: st.name, prev: prev ? clone(prev) : null, status: 'run', mark: undoStack.length };
+    renderEvaluation();
+    await rerunWithStrategy(resimCtx.keys, Object.assign({}, st));
+    resimCtx.status = checkStop ? 'stopped' : 'done';
+    renderEvaluation();
+  }
+  function resimBanner() {
+    const c = resimCtx;
+    if (!c) return '';
+    if (c.status === 'run') return '<div class="banner info resim-banner"><span><span class="spinner"></span> Resimulation de ' + c.keys.length + ' simulation' + (c.keys.length > 1 ? 's' : '') + ' avec « ' + esc(c.stratName) + ' »…</span></div>';
+    const after = evalList().filter((e) => c.keys.includes(e.key)), b = after.map((e) => c.before.get(e.key) || { r: NaN, dd: NaN });
+    const med = (a) => { const v = a.filter(Number.isFinite).sort((x, y) => x - y); return v.length ? (v.length % 2 ? v[v.length >> 1] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2) : NaN; };
+    const wins = (a) => a.filter((v) => v > 0).length, better = after.filter((e, i) => e.returnPct > b[i].r + 0.05).length, worse = after.filter((e, i) => e.returnPct < b[i].r - 0.05).length;
+    const pc = (v) => '<b class="' + cls(v) + '">' + signed(v, num1) + ' %</b>';
+    const mB = med(b.map((x) => x.r)), mA = med(after.map((e) => e.returnPct)), good = mA >= mB && wins(after.map((e) => e.returnPct)) >= wins(b.map((x) => x.r));
+    return '<div class="banner ' + (good ? 'ok' : 'warn') + ' resim-banner"><div><b>🔄 Resimulées avec « ' + esc(c.stratName) + ' » : ' + after.length + ' simulation' + (after.length > 1 ? 's' : '') + (c.status === 'stopped' ? ' (arrêté avant la fin)' : '') + '.</b> ' +
+      better + ' meilleure' + (better > 1 ? 's' : '') + ', ' + worse + ' moins bonne' + (worse > 1 ? 's' : '') + ' · résultat médian ' + pc(mB) + ' → ' + pc(mA) +
+      ' · gagnantes ' + wins(b.map((x) => x.r)) + ' → ' + wins(after.map((e) => e.returnPct)) + ' sur ' + after.length + ' · baisse maximale moyenne −' + num1.format(mean(b.map((x) => x.dd).filter(Number.isFinite))) + ' % → −' + num1.format(mean(after.map((e) => e.maxDrawdownPct))) + ' %</div>' +
+      '<div class="resim-acts"><button type="button" class="primary small" id="resimKeep" title="Garder les nouveaux résultats' + (evalBatch ? ' et mettre à jour le batch' : '') + '">✅ Garder</button>' +
+      '<button type="button" class="secondary small" id="resimUndo" title="Remettre les résultats d\'avant ; la stratégie reste avec l\'amélioration">↩ Revenir aux résultats d\'avant</button>' +
+      (c.prev ? '<button type="button" class="secondary small danger" id="resimDrop" title="Remettre les résultats d\'avant ET retirer l\'amélioration de la stratégie (version d\'avant)">⏪ Retirer l\'amélioration</button>' : '') + '</div></div>';
+  }
+  $('evalResimBtn').addEventListener('click', resimAll);
+  $('evalModal').addEventListener('click', (ev) => {
+    const id = ev.target.id;
+    if (!resimCtx || !['resimKeep', 'resimUndo', 'resimDrop'].includes(id)) return;
+    const c = resimCtx; resimCtx = null;
+    if (id === 'resimKeep') {
+      if (evalBatch) {
+        const list = batchStore.get(), b = list.find((x) => x.id === evalBatch.id), cur = evalList().filter((x) => evalBatch.keys.has(x.key));
+        if (b && cur.length) { b.entries = cur.map((x) => Object.assign({}, x)); b.updatedAt = new Date().toISOString(); batchStore.set(list); }
+      }
+      toast('Nouveaux résultats gardés' + (evalBatch ? ' (batch mis à jour)' : '') + '.', false);
+      return renderEvaluation();
+    }
+    // résultats d'avant : on revient à l'instantané pris juste avant la resimulation
+    if (undoStack.length >= c.mark) { undoStack.length = c.mark; const snap = undoStack.pop(); redoStack.push(capture(snap.label)); restore(snap); }
+    if (id === 'resimDrop' && c.prev) return dropImprovement(c);
+    toast('Résultats d\'avant remis (la stratégie garde l\'amélioration).', false);
+    renderEvaluation();
+  });
+  /** Retire l'amélioration : la stratégie reprend sa version d'avant, et chaque simulation reprend un résultat obtenu
+   *  avec cette version (retrouvé dans l'historique des annulations, sinon recalculé). */
+  async function dropImprovement(c) {
+    const old = Object.assign({}, c.prev.form.strat), sig = rulesSig(old);
+    undoable('Amélioration retirée de « ' + old.name + ' »', () => {
+      loadStrategy(old);
+      if (storage.get().some((x) => x.name === old.name)) saveStrategy(old, currentConfig()); else $('preset').value = 'mine';
+      $('presetDesc').textContent = 'Version d\'avant l\'amélioration remise.';
+    });
+    const list = evalList(), fixed = [], missing = [];
+    for (const k of c.keys) {
+      const i = list.findIndex((e) => e.key === k);
+      if (i < 0 || (list[i].strategy && rulesSig(list[i].strategy) === sig)) continue;
+      let found = null;
+      for (let u = undoStack.length - 1; u >= 0 && !found; u--) found = (undoStack[u].evaluations || []).find((e) => e.key === k && e.strategy && rulesSig(e.strategy) === sig) || null;
+      if (found) { list[i] = clone(found); fixed.push(list[i]); } else missing.push(k);
+    }
+    if (fixed.length) { evalSave(list); dbPush('simulations/put', { items: fixed }); cloudPush(() => C.putSimulations(fixed)); }
+    if (missing.length) await rerunWithStrategy(missing, old);
+    toast('Amélioration retirée : « ' + old.name + ' » est revenue à sa version d\'avant, et ses ' + c.keys.length + ' simulations aussi.', false);
+    renderEvaluation();
+  }
+  function addBatchBanner() { const h = batchBanner(); if (h) $('evalBody').insertAdjacentHTML('afterbegin', h); const r = resimBanner(); if (r) $('evalBody').insertAdjacentHTML('afterbegin', r); }
   // ---------- Graphiques et recommandations (sur les simulations affichées) ----------
   let evalView = 'table';
   document.querySelectorAll('.eval-views [data-view]').forEach((b) => b.addEventListener('click', () => {

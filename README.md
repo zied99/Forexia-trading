@@ -282,6 +282,12 @@ chaque batch de la stratégie choisie (et de la paire / des données filtrées),
 (vert : gagne, rouge : perd), la part gagnante, le nombre de simulations, ses simulations placées sur les années et
 « Recharger ». Les époques où tous les batchs gagnent, ou perdent, sont signalées.
 
+**🔄 Resimuler** (Évaluation, à côté des vues) : relance les simulations affichées (ou sélectionnées) avec la stratégie
+actuelle du formulaire, sur les mêmes dates — par exemple après « Ajouter à la stratégie en cours ». Un bandeau résume
+l'effet (meilleures / moins bonnes, médiane, part gagnante, baisse maximale) et propose : **✅ Garder** (le batch ouvert
+est mis à jour), **↩ Revenir aux résultats d'avant** (la stratégie garde l'amélioration), ou **⏪ Retirer
+l'amélioration** (la stratégie et toutes ses simulations reviennent à la version d'avant).
+
 ## Écart entre les simulations
 
 En haut du Tableau et des Graphiques de l'Évaluation : **⏱ Écart entre deux simulations** — les dates de début rangées
