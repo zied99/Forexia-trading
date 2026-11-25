@@ -288,6 +288,13 @@ l'effet (meilleures / moins bonnes, médiane, part gagnante, baisse maximale) et
 est mis à jour), **↩ Revenir aux résultats d'avant** (la stratégie garde l'amélioration), ou **⏪ Retirer
 l'amélioration** (la stratégie et toutes ses simulations reviennent à la version d'avant).
 
+**🧬 Versions** (Évaluation, à côté des vues) : les ajouts et ajustements successifs de la stratégie choisie (filtre
+Stratégie, sinon celle du formulaire), du plus récent au plus ancien : ce qui a été ajouté (+), retiré (−) ou réglé (~)
+par rapport à la version précédente, la note de l'amélioration, et les simulations faites avec chaque version (médiane,
+part gagnante). **↩ Revenir à cette version** remet ses règles (et la stratégie enregistrée) ; **↩ Revenir et 🔄
+resimuler** relance aussitôt les simulations affichées avec elle, puis propose Garder / Revenir. Les versions viennent
+du journal des versions (gardé dans la base), des simulations et des copies gardées dans les batchs.
+
 ## Écart entre les simulations
 
 En haut du Tableau et des Graphiques de l'Évaluation : **⏱ Écart entre deux simulations** — les dates de début rangées

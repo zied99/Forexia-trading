@@ -19,7 +19,7 @@
   // ---------- Toutes les données dans la base : passerelle (base SQLite sur votre PC) et compte en ligne ----------
   // Chaque donnée gardée dans le navigateur est aussi enregistrée dans la base dès qu'elle change, et récupérée
   // à la connexion (la version la plus récente l'emporte ; à la première connexion d'un appareil, les listes sont réunies).
-  const SYNC_KEYS = ['forexia.agentGuide', 'forexia.fx', 'forexia.batches', 'forexia.eras', 'forexia.events', 'forexia.wdPresets', 'forexia.wdResults', 'forexia.drawings', 'forexia.lastRun'];
+  const SYNC_KEYS = ['forexia.stratVersions', 'forexia.agentGuide', 'forexia.fx', 'forexia.batches', 'forexia.eras', 'forexia.events', 'forexia.wdPresets', 'forexia.wdResults', 'forexia.drawings', 'forexia.lastRun'];
   const SYNC_META = 'forexia.syncMeta';
   const syncMeta = () => { try { return JSON.parse(localStorage.getItem(SYNC_META)) || {}; } catch (e) { return {}; } };
   let syncMuted = false, syncTimer = null, kvOldBridge = false;
@@ -2727,6 +2727,8 @@
     dbCall(path, body).catch(() => { dbOn = false; dbBadge(); });
   }
   function logEvent(type, summary, data) {
+    // journal des versions : chaque amélioration ajoutée ou enregistrement de stratégie
+    try { if (type === 'strategy.enhanced') { const cur = currentStrategy(), sg = rulesSig(cur), u = undoStack.slice().reverse().find((x) => x.form && x.form.strat && x.form.strat.name === cur.name && rulesSig(x.form.strat) !== sg); if (u && !verList().some((v) => v.name === cur.name && v.sig === rulesSig(u.form.strat))) logVersion(u.form.strat, 'Version d\'avant l\'amélioration', new Date(Date.now() - 1000).toISOString()); logVersion(cur, summary.replace(/^[^:]*:\s*/, '')); } else if (type === 'strategy.saved' && data && data.name) logVersion(storage.get().find((x) => x.name === data.name), 'Enregistrée'); } catch (e) { /* facultatif */ }
     dbPush('events/put', { type: type, summary: summary, data: data });
     cloudPush(() => C.addEvent(type, summary, data));
   }
@@ -4861,6 +4863,7 @@
     if (evalView === 'charts') { renderEvalCharts(list, filt); wireTimeline(); return addBatchBanner(); }
     if (evalView === 'reco') { renderEvalReco(list, filt); return addBatchBanner(); }
     if (evalView === 'time') { renderEvalTime(list, filt); wireTimeline(); return addBatchBanner(); }
+    if (evalView === 'versions') { renderEvalVersions(); return addBatchBanner(); }
     const p = (v) => '<span class="' + cls(v) + '">' + signed(v, num2) + ' %</span>';
     const rows = shown.map(({ e, i }) => '<tr>' +
       '<td>' + (i + 1) + '</td><td class="l">' + new Date(e.at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) + '</td>' +
@@ -4998,6 +5001,102 @@
     toast('Amélioration retirée : « ' + old.name + ' » est revenue à sa version d\'avant, et ses ' + c.keys.length + ' simulations aussi.', false);
     renderEvaluation();
   }
+  // ---------- Versions d'une stratégie : ajouts et ajustements successifs, retour à une version ----------
+  // Journal (dans la base) : chaque version enregistrée ou améliorée, avec ce qui a été fait. Les versions plus
+  // anciennes sont aussi retrouvées dans les simulations (chacune garde les règles avec lesquelles elle a tourné).
+  const VER_KEY = 'forexia.stratVersions';
+  const TM_LABEL = { stopLossPips: 'stop-loss (pips)', takeProfitPips: 'objectif (pips)', stopAtr: 'stop (ATR)', takeAtr: 'objectif (ATR)', atrPeriod: 'période ATR', trailPips: 'stop suiveur (pips)', trailAtr: 'stop suiveur (ATR)', breakevenPips: 'break-even (pips)', breakevenAtr: 'break-even (ATR)', maxBars: 'durée max (bougies)', pauseLosses: 'pause après pertes', pauseBars: 'pause (bougies)' };
+  const verList = () => { try { const l = JSON.parse(localStorage.getItem(VER_KEY)); return Array.isArray(l) ? l : []; } catch (e) { return []; } };
+  function logVersion(strat, note, at) {
+    if (!strat || !strat.name || (!strat.longEntry && !strat.shortEntry)) return;
+    const l = verList(), sig = rulesSig(strat), last = l.filter((v) => v.name === strat.name).pop();
+    if (last && last.sig === sig) { if (note && (!last.note || last.note === 'Enregistrée')) { last.note = note; localStorage.setItem(VER_KEY, JSON.stringify(l)); } return; }
+    const s = {}; for (const k of RULE_FIELDS) s[k] = strat[k] || ''; for (const k of Object.keys(TM_LABEL)) if (Number(strat[k])) s[k] = Number(strat[k]);
+    l.push({ id: 'v' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name: strat.name, at: at || new Date().toISOString(), sig: sig, note: note || '', strat: s });
+    localStorage.setItem(VER_KEY, JSON.stringify(l.slice(-3000)));
+  }
+  const condSet = (st, k) => new Set(ruleGroups(st[k] || '').flat());
+  /** Ce qui change d'une version à la suivante : conditions ajoutées / retirées par règle, gestion des trades. */
+  function versionDiff(a, b) {
+    if (!a) return [];
+    const out = [];
+    for (const k of RULE_FIELDS) {
+      let A, B; try { A = condSet(a, k); B = condSet(b, k); } catch (e) { if ((a[k] || '') !== (b[k] || '')) out.push({ t: '~', txt: RULE_LABEL[k] + ' modifiée' }); continue; }
+      for (const c of B) if (!A.has(c)) out.push({ t: '+', txt: RULE_LABEL[k] + ' : ' + c });
+      for (const c of A) if (!B.has(c)) out.push({ t: '−', txt: RULE_LABEL[k] + ' : ' + c });
+    }
+    for (const k of Object.keys(TM_LABEL)) { const x = Number(a[k]) || 0, y = Number(b[k]) || 0; if (x !== y) out.push({ t: '~', txt: TM_LABEL[k] + ' : ' + (x || 'aucun') + ' → ' + (y || 'aucun') }); }
+    return out;
+  }
+  /** Versions d'une stratégie, de la plus ancienne à la plus récente, avec leurs simulations. */
+  function strategyVersions(name) {
+    // date d'une version : celle du journal quand elle y est (une simulation relancée garde sa date d'origine)
+    const map = new Map(), add = (sig, strat, at, note, logged) => {
+      let v = map.get(sig);
+      if (!v) { v = { sig: sig, strat: strat, first: at, logged: !!logged, notes: [], entries: [] }; map.set(sig, v); }
+      else if (logged && !v.logged) { v.first = at; v.logged = true; }
+      else if (logged === v.logged && at < v.first) v.first = at;
+      if (note && !v.notes.includes(note)) v.notes.push(note);
+      return v;
+    };
+    for (const x of verList().filter((v) => v.name === name)) add(x.sig, x.strat, x.at, x.note, true);
+    for (const e of evalList().filter((e) => e.name === name && e.strategy)) add(rulesSig(e.strategy), e.strategy, e.at, '').entries.push(e);
+    // les batchs gardent une copie de leurs simulations, avec les règles d'alors (versions remplacées depuis)
+    const seen = new Set(evalList().map((e) => e.key + '|' + (e.strategy ? rulesSig(e.strategy) : '')));
+    for (const b of batchStore.get()) for (const e of b.entries) {
+      if (e.name !== name || !e.strategy) continue;
+      const sg = rulesSig(e.strategy);
+      if (seen.has(e.key + '|' + sg)) continue;
+      seen.add(e.key + '|' + sg);
+      const v = add(sg, e.strategy, e.at, '');
+      v.entries.push(e);
+      if (!v.notes.some((n) => n.startsWith('batch'))) v.notes.push('batch « ' + b.name + ' »');
+    }
+    const saved = storage.get().find((s) => s.name === name), cur = currentStrategy();
+    if (saved) add(rulesSig(saved), saved, saved.savedAt || new Date().toISOString(), '');
+    const list = [...map.values()].sort((a, b) => (a.first < b.first ? -1 : 1));
+    const curSig = cur.name === name ? rulesSig(cur) : saved ? rulesSig(saved) : null;
+    list.forEach((v, i) => { v.n = i + 1; v.diff = versionDiff(i ? list[i - 1].strat : null, v.strat); v.current = v.sig === curSig; v.saved = !!(saved && rulesSig(saved) === v.sig); });
+    return list;
+  }
+  function renderEvalVersions() {
+    const name = (evalScope === 'all' && $('evalFStrat').value) || currentStratName();
+    const V = strategyVersions(name);
+    const med = (a) => { const v = a.filter(Number.isFinite).sort((x, y) => x - y); return v.length ? (v.length % 2 ? v[v.length >> 1] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2) : NaN; };
+    let h = '<section class="eval-chart ver-sec"><h4>🧬 Versions de « ' + esc(name) + ' »</h4><p class="hint">Chaque ajout ou ajustement de la stratégie, du plus récent au plus ancien, avec ce qui a changé et les simulations faites avec cette version. « Revenir à cette version » remet ses règles (et la stratégie enregistrée) ; « 🔄 Resimuler » ensuite pour comparer sur vos simulations.</p>';
+    if (!V.length) h += '<p class="eval-empty">Aucune version connue pour « ' + esc(name) + ' ».</p>';
+    for (const v of V.slice().reverse()) {
+      const R = v.entries.map((e) => e.returnPct), w = R.length ? (R.filter((x) => x > 0).length / R.length) * 100 : NaN;
+      h += '<article class="ver-card' + (v.current ? ' cur' : '') + '"><header><b>Version ' + v.n + '</b> <span class="hint">du ' + new Date(v.first).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) + '</span>' +
+        (v.current ? ' <span class="ev-badge">actuelle</span>' : '') + (v.saved ? ' <span class="ev-badge">enregistrée</span>' : '') + '</header>' +
+        (v.notes.length ? '<p class="ver-note">' + v.notes.map(esc).join(' · ') + '</p>' : '') +
+        (v.n === 1 ? '<p class="hint">Version de départ connue.</p>' : v.diff.length ? '<ul class="ver-diff">' + v.diff.map((d) => '<li class="' + (d.t === '+' ? 'add' : d.t === '−' ? 'del' : 'chg') + '"><b>' + d.t + '</b> ' + esc(d.txt) + '</li>').join('') + '</ul>' : '<p class="hint">Mêmes conditions que la version précédente (écriture différente).</p>') +
+        '<p class="ver-stats">' + (R.length ? R.length + ' simulation' + (R.length > 1 ? 's' : '') + ' faite' + (R.length > 1 ? 's' : '') + ' avec cette version · médiane <b class="' + cls(med(R)) + '">' + signed(med(R), num1) + ' %</b> · ' + Math.round(w) + ' % gagnantes' : 'Aucune simulation faite avec cette version.') + '</p>' +
+        (v.current ? '' : '<div class="ver-acts"><button type="button" class="secondary small" data-ver-back="' + (v.n - 1) + '">↩ Revenir à cette version</button><button type="button" class="primary small" data-ver-back-resim="' + (v.n - 1) + '">↩ Revenir et 🔄 resimuler</button></div>') +
+        '</article>';
+    }
+    $('evalBody').innerHTML = h + '</section>';
+  }
+  async function backToVersion(i, resim) {
+    const name = (evalScope === 'all' && $('evalFStrat').value) || currentStratName(), v = strategyVersions(name)[i];
+    if (!v) return;
+    const s = Object.assign({}, v.strat, { name: name });
+    undoable('Retour à la version ' + v.n + ' de « ' + name + ' »', () => {
+      loadStrategy(s);
+      if (storage.get().some((x) => x.name === name)) saveStrategy(s, currentConfig()); else $('preset').value = 'mine';
+      $('presetDesc').textContent = 'Version ' + v.n + ' remise (' + new Date(v.first).toLocaleDateString('fr-FR') + ').';
+      logVersion(currentStrategy(), 'Retour à la version ' + v.n);
+    });
+    toast('« ' + name + ' » est revenue à sa version ' + v.n + (resim ? ' : resimulation des simulations affichées…' : '. « 🔄 Resimuler » pour la tester sur vos simulations.'), false);
+    if (resim) { evalView = 'charts'; document.querySelectorAll('.eval-views [data-view]').forEach((x) => x.setAttribute('aria-selected', x.dataset.view === 'charts')); renderEvaluation(); return resimAll(); }
+    renderEvaluation();
+  }
+  $('evalModal').addEventListener('click', (ev) => {
+    const b = ev.target.closest('[data-ver-back],[data-ver-back-resim]');
+    if (!b) return;
+    if (b.dataset.verBackResim != null) return backToVersion(+b.dataset.verBackResim, true);
+    return backToVersion(+b.dataset.verBack, false);
+  });
   function addBatchBanner() { const h = batchBanner(); if (h) $('evalBody').insertAdjacentHTML('afterbegin', h); const r = resimBanner(); if (r) $('evalBody').insertAdjacentHTML('afterbegin', r); }
   // ---------- Graphiques et recommandations (sur les simulations affichées) ----------
   let evalView = 'table';

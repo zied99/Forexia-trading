@@ -996,3 +996,14 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 .resim-banner .resim-acts button { width: auto; padding: 8px 14px; font-size: 14px; line-height: 1.2; }
 .resim-banner .spinner { vertical-align: middle; margin-right: 6px; }
 .banner.ok { background: var(--up-soft); border-color: transparent; color: var(--text); }
+
+/* Versions d'une stratégie */
+.ver-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-top: 10px; background: var(--panel); }
+.ver-card.cur { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.ver-card header { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.ver-note { margin: 6px 0 0; font-style: italic; }
+.ver-diff { margin: 6px 0 0; padding-left: 0; list-style: none; font: 12.5px/1.6 var(--mono); }
+.ver-diff li.add b { color: var(--up); } .ver-diff li.del b { color: var(--down); } .ver-diff li.chg b { color: var(--warn); }
+.ver-stats { margin: 6px 0 0; font-size: 13px; }
+.ver-acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.ver-acts button { width: auto; padding: 8px 14px; font-size: 14px; line-height: 1.2; }
