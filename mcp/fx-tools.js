@@ -667,6 +667,8 @@ module.exports = function fxTools(ctx) {
         trials: { type: 'number', description: 'nombre d\'essais à déclarer pour la confiance (défaut : variantes de la stratégie dans l\'historique × 2 + batchs comparés)' } }, FILT), ['id', 'mechanic']),
       handler: async (a) => {
         const b = getBatch(a.id), w = normW(a.mechanic), L = pickEntries(b, a.indexes, a), R = await wdRows(L, w);
+        // les simulations relancées redonnent-elles les résultats enregistrés ? (données du courtier changées, autre version…)
+        const byK = new Map(L.map((e) => [e.key, e])), mism = R.map((r) => ({ r: r, e: byK.get(r.key) })).filter((x) => x.e && Math.abs(x.r.b.ret - x.e.returnPct) > 0.5);
         if (R.length < 3) fail('Il faut au moins 3 simulations relancées (batch plus grand).');
         const e0 = L[0], nameW = a.mechanic === 'none' || !w ? 'Sans retrait' : wName(a.mechanic, w);
         const fx = FC.fxFromRows(R, { name: e0.name, strategy: e0.strategy, config: e0.config, pair: e0.pair, leverage: e0.leverage, dataLabel: e0.data, synthetic: L.some((e) => /simul/i.test(e.data || '')),
@@ -676,7 +678,7 @@ module.exports = function fxTools(ctx) {
         fx.batch = b.id; fx.keys = R.map((r) => r.key);
         const capital = Math.max(fx.capital, Number(a.capital) || fx.capital);
         if (a.save) saveFx(fx);
-        return Object.assign({ saved: !!a.save }, fxView(fx, capital, true));
+        return Object.assign({ saved: !!a.save, rerunMismatch: mism.length ? { count: mism.length, of: R.length, examples: mism.slice(0, 5).map((x) => ({ from: x.e.from, to: x.e.to, recordedPct: r2(x.e.returnPct), rerunPct: r2(x.r.b.ret), withdrawalInRecord: (x.e.withdrawn || 0) > 0 })), note: 'Le FX utilise les simulations relancées aujourd\'hui. Pour un batch à jour : resimulate_batch avec replace=true.' } : undefined }, fxView(fx, capital, true));
       },
     },
     {
