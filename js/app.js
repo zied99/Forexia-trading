@@ -3460,7 +3460,7 @@
   /** Note de risque de 1 (très faible) à 7 (très élevé), d'après les pertes possibles et les baisses en cours de route. */
   function fxRiskNote(loss10, ddMed, worstLoss) { return F.fxcore.fxRiskNote(loss10, ddMed, worstLoss); }
   /** FX à partir des simulations relancées avec une mécanique de retrait (rows : voir wdRow). */
-  function fxFromRows(R, meta) { return F.fxcore.fxFromRows(R, meta); }
+  function fxFromRows(R, meta) { return F.fxcore.fxFromRows(R, Object.assign({ eras: activeEras() }, meta)); }
   const NO_WD = 'pas de retrait partiel durant la période de trading';
   const wdNone = (w) => !w || w.on === false || w.mode === 'none';
   /** Enregistre un FX construit à partir de simulations relancées (rows) et d'une mécanique (sans retrait possible). */
@@ -3663,7 +3663,7 @@
     const incomeTxt = inc.w.mode === 'periodic' && inc.w.type === 'fixed' ? '≈ ' + fxMoney(inc.fixedPct) + ' / mois' : '≈ ' + fxMoney(inc.perMonthPct) + ' / mois en moyenne';
     const incomeSub = (inc.w.mode === 'periodic' && inc.w.type === 'excess' ? 'part des gains au-dessus du capital : variable, parfois nul' : inc.w.mode === 'periodic' && inc.w.type === 'fixed' ? 'somme fixe : ' + num1.format(inc.fixedPct) + ' % du capital par mois, soit ' + fxMoney(inc.fixedPct) + ' pour ' + money0.format(FX_BASE) : inc.desc) +
       ' · capital préservé ' + inc.kept + ' fois sur ' + fx.n;
-    const solTxt = 'testé sur ' + fx.n + ' périodes de ' + fx.years[0] + ' à ' + fx.years[1] + ' · ' + sol.eraWin + ' époque' + (sol.eraWin > 1 ? 's' : '') + ' gagnante' + (sol.eraWin > 1 ? 's' : '') + ' sur ' + sol.eras;
+    const solTxt = 'testé sur ' + fx.n + ' périodes de ' + fx.years[0] + ' à ' + fx.years[1] + ' · ' + sol.eraWin + ' ' + (sol.unit || 'époque') + (sol.eraWin > 1 ? 's' : '') + ' gagnante' + (sol.eraWin > 1 ? 's' : '') + ' sur ' + sol.eras + (sol.unit === 'année' ? ' (dans votre période)' : '');
     const tipSol = 'Solidité ' + sol.score + '/100 : simulations ' + Math.round(sol.parts.simulations) + '/30, années couvertes ' + Math.round(sol.parts.annees) + '/25, époques ' + Math.round(sol.parts.epoques) + '/20, régularité ' + Math.round(sol.parts.regularite) + '/15, données réelles ' + Math.round(sol.parts.donnees) + '/10.';
     return '<article class="fx-card fx2" data-fx="' + esc(fx.id) + '">' +
       '<header><textarea class="fx-name" rows="2" data-fx-name="' + esc(fx.id) + '" aria-label="Nom du FX" title="Cliquez pour modifier le nom" spellcheck="false">' + esc(fx.name) + '</textarea><span class="fx-badge">FX</span></header>' +
@@ -4050,7 +4050,7 @@
     let h = '<b>Score de confiance : ' + c.score + '/100 (' + lvl + ')</b><p>Il dit à quel point on peut se fier aux résultats du plan. Trois mesures statistiques reconnues, calculées sur les ' + fx.n + ' essais du plan sur des périodes passées :</p><ol>';
     if (c.parts.dsr != null) h += '<li><b>Ratio de Sharpe « dégonflé »</b> (Bailey et López de Prado) : <b>' + pc0(c.parts.dsr) + '</b>. Probabilité que le plan gagne vraiment plus qu\'il ne risque, mois après mois, une fois corrigé de la durée d\'historique (' + d.T + ' mois distincts), des mois extrêmes et des ' + d.trials + ' essais faits pour le trouver (le meilleur de nombreux essais peut être dû au hasard).</li>';
     if (c.parts.student != null) h += '<li><b>Test de Student</b> sur le capital au bout d\'un an : <b>' + pc0(c.parts.student) + '</b>. Probabilité que le résultat moyen à un an soit positif (' + signed(d.y1Mean, num1) + ' % en moyenne ; les essais dont les périodes se recouvrent comptent moins, soit l\'équivalent de ' + num1.format(d.nEff) + ' essais indépendants).</li>';
-    h += '<li><b>Cohérence entre époques</b> : <b>' + pc0(c.parts.eras) + '</b>. Le plan gagne dans ' + d.eras.win + ' époque' + (d.eras.win > 1 ? 's' : '') + ' de marché sur ' + d.eras.total + ' (lissé pour ne pas surestimer avec peu d\'époques).</li></ol>';
+    const un = fx.solidity.unit === 'année'; h += '<li><b>' + (un ? 'Régularité d\'une année à l\'autre' : 'Cohérence entre époques') + '</b> : <b>' + pc0(c.parts.eras) + '</b>. Le plan gagne ' + (un ? 'sur ' : 'dans ') + d.eras.win + ' ' + (un ? 'année' : 'époque') + (d.eras.win > 1 ? 's' : '') + (un ? ' (dans votre période)' : ' de marché') + ' sur ' + d.eras.total + ' (lissé pour ne pas surestimer avec peu d\'époques).</li></ol>';
     h += '<p>Score = moyenne géométrique des mesures (une seule mesure faible fait baisser le score)' + (c.data < 1 ? ' × 0,4 car le plan est construit sur des données simulées.' : '.') + '</p><p class="fx-tip-scale">Moins de 40 : faible · 40 à 60 : moyenne · 60 à 80 : bonne · plus de 80 : élevée.</p>';
     return h;
   }

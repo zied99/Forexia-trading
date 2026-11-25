@@ -267,6 +267,11 @@ faites avec une ancienne version de la stratégie, la page l'indique (avec les c
 jour (resimulées avec la version actuelle, mêmes dates, batch mis à jour) avant de créer le FX. « ⬇ EA » d'un FX utilise
 la dernière version de la stratégie ; si elle a changé depuis le FX, la page l'indique et vous choisissez la version.
 
+**Confiance et époques** : un FX utilise vos époques. Si toutes ses simulations sont dans une seule époque (période
+choisie volontairement, par exemple « depuis 2020 »), la régularité dans le temps est mesurée année par année à
+l'intérieur de cette période (« 6 années gagnantes sur 7 (dans votre période) »), au lieu de pénaliser les époques non
+testées.
+
 **FX d'un batch** : « 💼 Créer un FX » sur chaque batch (Évaluation › Batchs) ou « 💼 Créer un FX de ce batch » dans le
 bandeau d'un batch rechargé : le FX est construit avec les simulations de ce batch seulement (et « 📂 Voir les
 simulations » rouvre ce batch). « Enregistrer un FX » de l'Évaluation, lui, prend toutes les simulations affichées.

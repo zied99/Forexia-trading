@@ -133,7 +133,15 @@
     const years = new Set(), eraRes = {};
     const eras = F.advisor.normEras(meta.eras);
     R.forEach((r) => { for (let y = +r.from.slice(0, 4); y <= +r.to.slice(0, 4); y++) years.add(y); const m = F.advisor.midDate(r), er = eras.find((x) => m >= x.fromD && m <= x.toD); if (er) (eraRes[er.label] = eraRes[er.label] || []).push(r.w.ret); });
-    const eraKeys = Object.keys(eraRes), eraWin = eraKeys.filter((k) => pctile(eraRes[k], 0.5) > 0).length;
+    let eraKeys = Object.keys(eraRes), eraUnit = 'époque';
+    // toutes les simulations dans une seule époque (période choisie volontairement) : la régularité se mesure année par
+    // année à l'intérieur de cette période (l'année du milieu de chaque simulation)
+    if (eraKeys.length < 2) {
+      const byYear = {};
+      R.forEach((r) => { const y = F.advisor.midDate(r).slice(0, 4); (byYear[y] = byYear[y] || []).push(r.w.ret); });
+      if (Object.keys(byYear).length >= 2) { for (const k of Object.keys(eraRes)) delete eraRes[k]; Object.assign(eraRes, byYear); eraKeys = Object.keys(eraRes); eraUnit = 'année'; }
+    }
+    const eraWin = eraKeys.filter((k) => pctile(eraRes[k], 0.5) > 0).length;
     const synthetic = !!meta.synthetic;
     const parts = {
       simulations: Math.min(1, n / 40) * 30,
@@ -163,7 +171,7 @@
       riskNote: fxRiskNote(Math.max(0, 100 - p10), ddMed, Math.max(0, 100 - worst)),
       income: { name: mech.name, w: w, desc: wdDesc(w), perMonthPct: (agg.perMonth / capital) * 100, fixedPct: fixedPct, yearly: agg.yearly, kept: agg.kept, other: other.name },
       path: path,
-      solidity: { score: solidity, parts: parts, synthetic: synthetic, eras: eraKeys.length, eraWin: eraWin },
+      solidity: { score: solidity, parts: parts, synthetic: synthetic, eras: eraKeys.length, eraWin: eraWin, unit: eraUnit },
       conditions: { leverage: first.leverage || cfg.leverage || null, spread: cfg.spreadPips != null ? cfg.spreadPips : null, commission: cfg.commission || 0, source: first.data || '' },
     };
   }
