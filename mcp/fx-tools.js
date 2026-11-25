@@ -48,6 +48,61 @@ module.exports = function fxTools(ctx) {
     return { mode: 'free', name: 'Liberté de l\'agent', text: null, source: src, all: g };
   }
 
+  // ---------------------------------------------------------------- versions des stratégies (même format que la page)
+  const VER_TM = ['stopLossPips', 'takeProfitPips', 'stopAtr', 'takeAtr', 'atrPeriod', 'trailPips', 'trailAtr', 'breakevenPips', 'breakevenAtr', 'maxBars', 'pauseLosses', 'pauseBars'];
+  const VER_RULES = ['longEntry', 'longExit', 'shortEntry', 'shortExit'];
+  const RULE_LABEL = { longEntry: 'Entrée achat', longExit: 'Sortie achat', shortEntry: 'Entrée vente', shortExit: 'Sortie vente' };
+  const TM_LABEL = { stopLossPips: 'stop-loss (pips)', takeProfitPips: 'objectif (pips)', stopAtr: 'stop (ATR)', takeAtr: 'objectif (ATR)', atrPeriod: 'période ATR', trailPips: 'stop suiveur (pips)', trailAtr: 'stop suiveur (ATR)', breakevenPips: 'break-even (pips)', breakevenAtr: 'break-even (ATR)', maxBars: 'durée max (bougies)', pauseLosses: 'pause après pertes', pauseBars: 'pause (bougies)' };
+  const verStore = S('stratVersions.json', []);
+  const verSig = (st) => [...VER_RULES.map((k) => st[k] || ''), ...VER_TM.map((k) => Number(st[k]) || 0)].join('|');
+  function logVersion(strat, note, at) {
+    if (!strat || !strat.name || (!strat.longEntry && !strat.shortEntry)) return;
+    const l = verStore.get(), sig = verSig(strat), last = l.filter((v) => v.name === strat.name).pop();
+    if (last && verSig(last.strat) === sig) { if (note && (!last.note || last.note === 'Enregistrée')) { last.note = note; verStore.set(l); } return; }
+    const st = {}; for (const k of VER_RULES) st[k] = strat[k] || ''; for (const k of VER_TM) if (Number(strat[k])) st[k] = Number(strat[k]);
+    l.push({ id: 'v' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name: strat.name, at: at || new Date().toISOString(), sig: sig, note: note || '', strat: st, by: 'agent' });
+    verStore.set(l.slice(-3000));
+  }
+  function condSet(rule) {
+    if (!rule || !String(rule).trim()) return new Set();
+    const R = F.rules, split = (n, op) => (n.k === 'bin' && n.op === op ? split(n.a, op).concat(split(n.b, op)) : [n]);
+    return new Set(split(R.parse(rule), 'OR').flatMap((g) => split(g, 'AND').map((n) => R.stringify(n))));
+  }
+  function versionDiff(a, b) {
+    if (!a) return [];
+    const out = [];
+    for (const k of VER_RULES) {
+      let A, B; try { A = condSet(a[k]); B = condSet(b[k]); } catch (e) { if ((a[k] || '') !== (b[k] || '')) out.push({ t: '~', txt: RULE_LABEL[k] + ' modifiée' }); continue; }
+      for (const c of B) if (!A.has(c)) out.push({ t: '+', txt: RULE_LABEL[k] + ' : ' + c });
+      for (const c of A) if (!B.has(c)) out.push({ t: '−', txt: RULE_LABEL[k] + ' : ' + c });
+    }
+    for (const k of VER_TM) { const x = Number(a[k]) || 0, y = Number(b[k]) || 0; if (x !== y) out.push({ t: '~', txt: TM_LABEL[k] + ' : ' + (x || 'aucun') + ' → ' + (y || 'aucun') }); }
+    return out;
+  }
+  /** Versions d'une stratégie (journal, simulations, copies des batchs), de la plus ancienne à la plus récente. */
+  function strategyVersions(name) {
+    const map = new Map(), add = (sig, strat, at, note, logged) => {
+      let v = map.get(sig);
+      if (!v) { v = { sig: sig, strat: strat, first: at, logged: !!logged, notes: [], entries: [] }; map.set(sig, v); }
+      else if (logged && !v.logged) { v.first = at; v.logged = true; }
+      else if (logged === v.logged && at < v.first) v.first = at;
+      if (note && !v.notes.includes(note)) v.notes.push(note);
+      return v;
+    };
+    for (const x of verStore.get().filter((v) => v.name === name)) add(verSig(x.strat), x.strat, x.at, x.note, true);
+    const seen = new Set();
+    for (const e of store.evaluations().concat(batches.get().flatMap((b) => b.entries))) {
+      if (e.name !== name || !e.strategy) continue;
+      const sg = verSig(e.strategy); if (seen.has(e.key + '|' + sg)) continue; seen.add(e.key + '|' + sg);
+      add(sg, e.strategy, e.at, '').entries.push(e);
+    }
+    const saved = store.strategies().find((x) => x.name === name);
+    if (saved) add(verSig(saved), saved, saved.savedAt || new Date().toISOString(), '');
+    const list = [...map.values()].sort((x, y) => (x.first < y.first ? -1 : 1));
+    list.forEach((v, i) => { v.n = i + 1; v.diff = versionDiff(i ? list[i - 1].strat : null, v.strat); v.current = !!saved && verSig(saved) === v.sig; });
+    return list;
+  }
+
   // ---------------------------------------------------------------- historique complet d'une paire (chargé une fois)
   const hcache = new Map();
   async function history(m) {
@@ -329,7 +384,7 @@ module.exports = function fxTools(ctx) {
   let lastMine = null;
 
   // ---------------------------------------------------------------- synchronisation avec la page (passerelle MT5, table kv)
-  const SYNC = { 'forexia.agentGuide': guideStore, 'forexia.fx': fxs, 'forexia.batches': batches, 'forexia.eras': eraStore, 'forexia.wdPresets': wdp, 'forexia.events': evStore };
+  const SYNC = { 'forexia.stratVersions': verStore, 'forexia.agentGuide': guideStore, 'forexia.fx': fxs, 'forexia.batches': batches, 'forexia.eras': eraStore, 'forexia.wdPresets': wdp, 'forexia.events': evStore };
   const idOf = (x) => (x && (x.id || x.key || x.name)) || JSON.stringify(x);
   function union(a, b) { const map = new Map(); (a || []).forEach((x) => map.set(idOf(x), x)); (b || []).forEach((x) => map.set(idOf(x), x)); return [...map.values()]; }
 
@@ -339,7 +394,7 @@ module.exports = function fxTools(ctx) {
   const FILT = { era: { type: 'string', description: 'ne garder que les simulations de cette époque (nom, voir get_eras)' }, yearFrom: { type: 'number' }, yearTo: { type: 'number' },
     minReturn: { type: 'number', description: 'rendement minimum (%)' }, maxReturn: { type: 'number', description: 'rendement maximum (%)' } };
 
-  return [
+  const tools = [
     {
       name: 'fx_method',
       description: 'À APPELER EN PREMIER pour toute recherche de stratégie ou de FX : indique le guide de recherche choisi par l\'utilisateur dans la page Forexia (à suivre étape par étape), ou « liberté de l\'agent » (par défaut : méthode libre). Donne aussi les outils et les précautions.',
@@ -362,7 +417,7 @@ module.exports = function fxTools(ctx) {
             'Levier au-delà de 1:30 : hors limite européenne pour les particuliers.',
           ],
           tools: ['modify_strategy', 'run_batch', 'vary_batch', 'improve_batch', 'subset_batch', 'list_batches', 'get_batch', 'compare_batches', 'time_analysis', 'get_eras', 'set_eras', 'market_events', 'analyze_simulation', 'apply_proposal', 'era_analysis',
-            'simulate_withdrawal', 'compare_withdrawals', 'save_withdraw_mechanic', 'list_withdraw_mechanics', 'build_fx', 'fx_projection', 'list_fx', 'get_fx', 'save_fx', 'rename_fx', 'delete_fx', 'mine_fx', 'note_add', 'note_list', 'forexia_sync', 'import_ea', 'agent_guide'],
+            'simulate_withdrawal', 'compare_withdrawals', 'save_withdraw_mechanic', 'list_withdraw_mechanics', 'build_fx', 'fx_projection', 'list_fx', 'get_fx', 'save_fx', 'rename_fx', 'delete_fx', 'mine_fx', 'note_add', 'note_list', 'forexia_sync', 'import_ea', 'agent_guide', 'fx_simulations', 'fx_ea', 'batches_by_era', 'resimulate_batch', 'restore_batch', 'strategy_versions', 'revert_strategy'],
           currentEras: erasNow(),
         };
       },
@@ -805,6 +860,107 @@ module.exports = function fxTools(ctx) {
         return { strategy: st, settings: r.config || r.settings || null, saved: !!a.save };
       },
     },
+    // ------------------------------------------------------------ comme les derniers ajouts de la page
+    {
+      name: 'fx_simulations',
+      description: '« 📂 Voir les simulations » d\'un FX : ses simulations (périodes, ce qui est récupéré, revenu, gain à un an) et le batch d\'où il vient. asBatch=true : si ce batch n\'existe pas (FX du chercheur ou de la page), les simulations sont recalculées sur les mêmes dates et enregistrées en batch, pour les analyser (time_analysis, era_analysis…).',
+      inputSchema: obj({ id: { type: 'string' }, asBatch: { type: 'boolean' } }, ['id']),
+      handler: async (a) => {
+        const fx = getFx(a.id), S = (fx.sims || []).filter((x) => x.from && x.to);
+        let b = fx.batch ? batches.get().find((x) => x.id === fx.batch) : null;
+        if (!b && fx.keys && fx.keys.length) b = batches.get().find((x) => x.entries.length && x.entries.every((e) => fx.keys.includes(e.key))) || null;
+        const out = { fx: fx.name, capital: Math.round(fx.capital), simulations: S.map((x) => ({ from: x.from, to: x.to, months: x.m, backPct: r2(x.b - 100), incomePerMonthPct: r2(x.inc), oneYearPct: r2(x.y1), oneYearNoWithdrawPct: r2(x.y1b) })) };
+        if (!b && a.asBatch) {
+          if (!fx.strategy.data) fail('Ce FX n\'a pas gardé sa stratégie.');
+          if (!S.length) fail('Les périodes de ce FX ne sont pas connues.');
+          const m = Object.assign(fx.strategy.config ? marketOfEntry({ config: fx.strategy.config, pair: fx.strategy.pair, data: fx.strategy.dataLabel }) : { pair: fx.strategy.pair, source: /simul/i.test(fx.strategy.dataLabel || '') ? 'synthetic' : 'online' }, { capital: fx.capital, leverage: Number(fx.strategy.leverage) || 10 });
+          delete m.withdraw;
+          const r = await runBatch({ strategy: Object.assign({}, fx.strategy.data, { name: fx.strategy.name }), market: m, periods: S.map((x) => ({ from: x.from, to: x.to })), name: '💼 ' + fx.name });
+          b = getBatch(r.batch.id);
+          const l = fxs.get(), f = l.find((x) => x.id === fx.id); if (f) { f.batch = b.id; f.keys = b.entries.map((e) => e.key); fxs.set(l); }
+          out.recomputed = true;
+        }
+        out.batch = b ? batchHead(b) : null;
+        if (!b) out.hint = 'Pas de batch pour ce FX : asBatch=true pour recalculer ses simulations et les analyser.';
+        return out;
+      },
+    },
+    {
+      name: 'fx_ea',
+      description: '« ⬇ EA (.mq5) » d\'un FX : l\'Expert Advisor MetaTrader 5 du plan (stratégie, paire, levier, capital ; taille des positions comme le backtest). Le retrait n\'est pas dans l\'EA : il se fait à la main.',
+      inputSchema: obj({ id: { type: 'string' }, timeframe: { type: 'string', enum: ['M15', 'M30', 'H1', 'H4', 'D1'] }, maxLots: { type: 'number' }, outputPath: { type: 'string' }, includeCode: { type: 'boolean' } }, ['id']),
+      handler: async (a) => {
+        const fx = getFx(a.id);
+        if (!fx.strategy.data) fail('Ce FX n\'a pas gardé sa stratégie.');
+        const c = fx.strategy.config || {}, br = c.broker || {};
+        const r = await callTool('generate_ea', { strategy: Object.assign(strategyView(fx.strategy.data), { name: fx.strategy.data.name || fx.strategy.name }), pair: fx.strategy.pair || c.pair || 'EUR/USD',
+          timeframe: a.timeframe || br.tf || 'D1', sizing: 'backtest', leverage: Number(fx.strategy.leverage || c.leverage) || 10, exposurePct: Number(c.exposurePct) || 100, maxLots: a.maxLots || Number(br.maxLots) || 10,
+          outputPath: a.outputPath, includeCode: a.includeCode });
+        return Object.assign({ fx: fx.name, capital: Math.round(fx.capital), withdrawal: fx.income.desc + ' (à faire à la main)' }, r);
+      },
+    },
+    {
+      name: 'batches_by_era',
+      description: '« 📅 Analyse temporelle › Les batchs dans le temps » : pour chaque batch d\'une stratégie (et d\'une paire / source de données), le résultat médian, la part gagnante et le nombre de simulations dans chaque époque ; et les époques où tous les batchs gagnent, ou perdent.',
+      inputSchema: obj({ strategy: { type: 'string', description: 'nom de la stratégie (défaut : tous les batchs)' }, pair: { type: 'string' }, data: { type: 'string', description: 'source de données (texte contenu dans le libellé, ex. MT5, BCE, simulées)' } }),
+      handler: async (a) => {
+        const eras = ADV.normEras(erasNow()), inEra = (e, er) => { const m = ADV.midDate(e); return m >= er.fromD && m <= er.toD; };
+        const B = batches.get().map((b) => ({ b: b, L: b.entries.filter((e) => (!a.strategy || e.name === a.strategy) && (!a.pair || e.pair === a.pair) && (!a.data || String(e.data || '').toLowerCase().includes(String(a.data).toLowerCase()))) })).filter((x) => x.L.length);
+        const cell = (L) => (L.length ? { n: L.length, medianReturnPct: r2(median(L.map((e) => e.returnPct))), winRatePct: r2((L.filter((e) => e.returnPct > 0).length / L.length) * 100) } : null);
+        const rows = B.map((x) => ({ id: x.b.id, name: x.b.name, overall: cell(x.L), byEra: Object.fromEntries(eras.map((er) => [er.label, cell(x.L.filter((e) => inEra(e, er)))]).filter((kv) => kv[1])) }));
+        const verdict = eras.map((er) => { const r = rows.map((x) => x.byEra[er.label]).filter(Boolean); return { era: er.label, batches: r.length, winning: r.filter((c) => c.medianReturnPct > 0).length }; }).filter((v) => v.batches >= 2);
+        return { eras: eras.map((e) => e.label), batches: rows, allWin: verdict.filter((v) => v.winning === v.batches).map((v) => v.era), allLose: verdict.filter((v) => v.winning === 0).map((v) => v.era) };
+      },
+    },
+    {
+      name: 'resimulate_batch',
+      description: '« 🔄 Resimuler » : relance les simulations d\'un batch (mêmes dates) avec une stratégie mise à jour (défaut : la stratégie enregistrée du même nom, ex. après une amélioration ajoutée) et compare avant / après. replace=false (défaut) : nouveau batch, l\'ancien reste (= « Revenir aux résultats d\'avant » possible à tout moment). replace=true (= « Garder ») : le batch est mis à jour, sa version d\'avant est gardée pour restore_batch.',
+      inputSchema: obj({ id: { type: 'string' }, strategy: strategyArg, replace: { type: 'boolean' }, indexes: idx }, ['id']),
+      handler: async (a) => {
+        const b = getBatch(a.id), L = pickEntries(b, a.indexes), e0 = L[0];
+        const st = a.strategy ? resolveStrategy(a.strategy) : (() => { const s = store.strategies().find((x) => x.name === e0.name); return s ? resolveStrategy(s) : fail('Aucune stratégie enregistrée « ' + e0.name + ' » : indiquez strategy.'); })();
+        const same = L.filter((e) => e.strategy && verSig(e.strategy) === verSig(st)).length;
+        const r = await runBatch({ strategy: st, market: marketOfEntry(e0), periods: L.map((e) => ({ from: e.from, to: e.to })), name: b.name + ' · resimulé' });
+        const nb = getBatch(r.batch.id), cmp = compareBatches([Object.assign({}, b, { entries: L }), nb]);
+        const out = { strategy: st.name, alreadySameRules: same + ' / ' + L.length, before: batchHead(Object.assign({}, b, { entries: L })).stats, after: r.batch.stats, headToHead: cmp.headToHead[0] || null };
+        if (a.replace) {
+          const l = batches.get(), x = l.find((y) => y.id === b.id), keys = new Map(nb.entries.map((e) => [e.from + '|' + e.to, e]));
+          x.previous = { at: new Date().toISOString(), entries: x.entries };
+          x.entries = x.entries.map((e) => { const n = keys.get(e.from + '|' + e.to); return n ? Object.assign({}, n, { key: e.key, at: e.at }) : e; });
+          batches.set(l.filter((y) => y.id !== nb.id));
+          out.replaced = true; out.batch = batchHead(x); out.hint = 'restore_batch pour revenir aux résultats d\'avant.';
+        } else { out.newBatch = r.batch; out.hint = 'Pour garder : resimulate_batch avec replace=true ; sinon rien à faire (l\'ancien batch est intact). Pour retirer l\'amélioration de la stratégie : strategy_versions puis revert_strategy.'; }
+        return out;
+      },
+    },
+    {
+      name: 'restore_batch', description: 'Remet un batch tel qu\'il était avant le dernier resimulate_batch replace=true (« Revenir aux résultats d\'avant »).',
+      inputSchema: obj({ id: { type: 'string' } }, ['id']),
+      handler: async (a) => {
+        const l = batches.get(), b = l.find((x) => x.id === a.id || x.name === a.id) || fail('Batch introuvable.');
+        if (!b.previous) fail('Ce batch n\'a pas de version d\'avant.');
+        b.entries = b.previous.entries; delete b.previous; batches.set(l);
+        return { restored: batchHead(b) };
+      },
+    },
+    {
+      name: 'strategy_versions',
+      description: '« 🧬 Versions » : les ajouts et ajustements successifs d\'une stratégie (journal des versions de la page et de l\'agent, simulations, copies dans les batchs), avec pour chaque version ce qui a été ajouté (+), retiré (−) ou réglé (~), la note, et les simulations faites avec (médiane, part gagnante).',
+      inputSchema: obj({ name: { type: 'string' } }, ['name']),
+      handler: async (a) => strategyVersions(a.name).map((v) => ({ version: v.n, date: v.first, current: v.current, notes: v.notes, changes: v.diff.map((d) => d.t + ' ' + d.txt), simulations: v.entries.length,
+        medianReturnPct: v.entries.length ? r2(median(v.entries.map((e) => e.returnPct))) : null, winRatePct: v.entries.length ? r2((v.entries.filter((e) => e.returnPct > 0).length / v.entries.length) * 100) : null, rules: strategyView(Object.assign({ name: a.name }, v.strat)) })).reverse(),
+    },
+    {
+      name: 'revert_strategy',
+      description: '« ↩ Revenir à cette version » : la stratégie enregistrée reprend les règles d\'une version (numéro de strategy_versions). Puis resimulate_batch pour la retester.',
+      inputSchema: obj({ name: { type: 'string' }, version: { type: 'number' } }, ['name', 'version']),
+      handler: async (a) => {
+        const v = strategyVersions(a.name).find((x) => x.n === a.version) || fail('Version inconnue (strategy_versions).');
+        await callTool('save_strategy', { strategy: Object.assign(strategyView(Object.assign({}, v.strat, { name: a.name }))), notes: 'Retour à la version ' + v.n });
+        logVersion(Object.assign({}, v.strat, { name: a.name }), 'Retour à la version ' + v.n);
+        return { name: a.name, version: v.n, rules: strategyView(Object.assign({ name: a.name }, v.strat)), hint: 'resimulate_batch pour la retester sur un batch.' };
+      },
+    },
     // ------------------------------------------------------------ carnet de déductions
     {
       name: 'note_add', description: 'Carnet de l\'agent : note une déduction (ce qui marche, ce qui ne marche pas, sur quelle base) pour s\'en servir dans les itérations suivantes.',
@@ -828,12 +984,12 @@ module.exports = function fxTools(ctx) {
           const rv = remote.get(k), rd = rv ? rv.data : null, local = st.get();
           let merged;
           if (k === 'forexia.events') merged = { items: union(rd && rd.items, local.items), edits: Object.assign({}, rd && rd.edits, local.edits), scanned: Object.assign({}, rd && rd.scanned, local.scanned) };
+          else if (k === 'forexia.agentGuide') merged = rd && (dir !== 'push' || !local.updatedAt || (rd.updatedAt || '') >= local.updatedAt) ? rd : local; // le choix fait dans la page prime
           else merged = union(dir === 'push' ? [] : rd, local);
-          if (k === 'forexia.agentGuide') merged = rd && (dir !== 'push' || !local.updatedAt || (rd.updatedAt || '') >= local.updatedAt) ? rd : local; // le choix fait dans la page prime
           if (k === 'forexia.eras' && dir !== 'push' && Array.isArray(rd) && rd.length) merged = rd; // les époques de l'utilisateur priment
           if (dir !== 'push') st.set(merged);
           if (dir !== 'pull') {
-            const send = dir === 'push' && Array.isArray(merged) ? union(rd, merged) : merged;
+            const send = dir === 'push' && Array.isArray(merged) && Array.isArray(rd) ? union(rd, merged) : merged;
             if (JSON.stringify(send) !== JSON.stringify(rd)) { const p = await bridge('POST', '/db/kv/put', { key: k, data: send, updatedAt: new Date().toISOString() }); if (p.ok === false) fail(p.message || 'Écriture refusée.'); }
           }
           out[k.replace('forexia.', '')] = k === 'forexia.agentGuide' ? (merged.active || 'free') : Array.isArray(merged) ? merged.length : (merged.items || []).length;
@@ -849,4 +1005,6 @@ module.exports = function fxTools(ctx) {
       },
     },
   ];
+  tools.logVersion = logVersion;
+  return tools;
 };

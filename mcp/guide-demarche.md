@@ -69,6 +69,9 @@ Boucle : **constater → une hypothèse → une modification → même périodes
    périodes perdantes), `apply_proposal` (scope `batch`, une ou plusieurs corrections, `saveAsBatch`), et les
    corrections recommandées par `era_analysis`.
 4. Après 2 ou 3 améliorations gardées : confirmation sur une graine neuve et sur la plage non utilisée.
+5. Une amélioration enregistrée dans la stratégie se vérifie sur tout le batch : `resimulate_batch` (mêmes dates,
+   comparaison avant / après). Si elle n'aide pas l'ensemble : `strategy_versions` puis `revert_strategy` (version
+   d'avant), et note-le (`note_add`, étiquette `rejeté`).
 
 **Stratégie confirmée** quand, sur au moins 2 jeux de périodes différents (30 périodes chacun, cours réels) :
 rendement médian > 0, au moins 60 % de périodes gagnantes, gagnante dans la majorité des époques, baisse maximale

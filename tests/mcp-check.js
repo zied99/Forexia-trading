@@ -256,6 +256,64 @@ const SYN = { pair: 'EUR/USD', source: 'synthetic', dateFrom: '2019-01-01', date
     const r = await call('market_events', { pair: 'EUR/USD', add: { date: '2016-06-24', title: 'Test agent', importance: 3 }, from: '2016-06-01', to: '2016-06-30' });
     ok(r.added && r.events.some((e) => e.title === 'Test agent'));
   });
+  await test('versions de stratégie : save → modify (amélioration) → strategy_versions → revert_strategy', async () => {
+    await call('save_strategy', { strategy: { preset: 'macd', name: 'V test' } });
+    await call('modify_strategy', { strategy: { saved: 'V test' }, add: [{ rule: 'entries', condition: 'ADX(14) > 25' }], save: true });
+    const v = await call('strategy_versions', { name: 'V test' });
+    ok(v.length === 2 && v[0].current && v[0].changes.some((c) => /^\+ Entrée achat : ADX\(14\) > 25/.test(c)), JSON.stringify(v.map((x) => [x.version, x.current, x.changes])));
+    const r = await call('revert_strategy', { name: 'V test', version: 1 });
+    ok(!/ADX/.test(r.rules.longEntry) && !/ADX/.test((await call('list_strategies', {})).find((s) => s.name === 'V test').longEntry));
+    const v2 = await call('strategy_versions', { name: 'V test' }); ok(v2.find((x) => x.version === 1).current, JSON.stringify(v2.map((x) => [x.version, x.current])));
+  });
+  await test('resimulate_batch (nouveau batch, puis « Garder » replace) + restore_batch', async () => {
+    const b = await call('run_batch', { strategy: { saved: 'V test' }, market: MK, n: 8, months: 12, seed: 11 });
+    await call('modify_strategy', { strategy: { saved: 'V test' }, add: [{ rule: 'entries', condition: 'ADX(14) > 25' }], save: true });
+    const r = await call('resimulate_batch', { id: b.batch.id });
+    ok(r.strategy === 'V test' && r.alreadySameRules === '0 / 8' && r.newBatch && r.headToHead && r.headToHead.samePeriods === 8, JSON.stringify(r).slice(0, 300));
+    const k = await call('resimulate_batch', { id: b.batch.id, replace: true });
+    ok(k.replaced && (await call('get_batch', { id: b.batch.id })).strategy.longEntry.includes('ADX'));
+    await call('restore_batch', { id: b.batch.id });
+    ok(!(await call('get_batch', { id: b.batch.id })).strategy.longEntry.includes('ADX'));
+  });
+  await test('batches_by_era', async () => {
+    const name = (await call('get_batch', { id: B1 })).strategy.name;
+    const r = await call('batches_by_era', { strategy: name });
+    ok(r.batches.length >= 2 && r.batches[0].overall.n > 0 && Object.keys(r.batches[0].byEra).length >= 2 && Array.isArray(r.allWin), JSON.stringify(r).slice(0, 300));
+  });
+  await test('fx_simulations (asBatch : recalcul) + fx_ea', async () => {
+    const f = (await call('list_fx', {})).find((x) => x.by === 'agent' && x.id !== FXID) || (await call('list_fx', {}))[0];
+    const s = await call('fx_simulations', { id: f.id });
+    ok(s.simulations.length >= 5, JSON.stringify(s).slice(0, 200));
+    const s2 = await call('fx_simulations', { id: f.id, asBatch: true });
+    ok(s2.batch && s2.batch.stats.n === s.simulations.length, JSON.stringify(s2.batch && s2.batch.stats));
+    const e = await call('fx_ea', { id: f.id });
+    ok(/void FxSignals\(/.test(e.code) && /\.mq5$/.test(e.fileName) && /main/.test(e.withdrawal), e.fileName + ' ' + e.withdrawal);
+  });
+  await test('forexia_sync avec une vraie passerelle (guide, versions, FX, batchs, stratégies dans les deux sens)', async () => {
+    const { spawn: sp, execFileSync } = require('child_process');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'forexia-br-')), port = 18000 + Math.floor(Math.random() * 2000);
+    let br;
+    try { br = sp('python3', [path.join(__dirname, '..', 'bridge', 'forexia_bridge.py'), '--port', String(port), '--db', path.join(tmp, 'f.db')], { env: Object.assign({}, process.env, { APPDATA: tmp }), stdio: ['ignore', 'pipe', 'ignore'] }); }
+    catch (e) { console.log('       (python3 absent : test passé)'); return; }
+    const token = await new Promise((res, rej) => { let out = ''; br.stdout.on('data', (c) => { out += c; const m = /appairage : (\S+)/.exec(out); if (m) res(m[1]); }); br.on('error', rej); setTimeout(() => rej(new Error('passerelle muette')), 8000); });
+    try {
+      const db = (p, body) => fetch('http://127.0.0.1:' + port + '/db/' + p, { method: 'POST', headers: { 'X-Forexia-Token': token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then((r) => r.json());
+      await db('kv/put', { key: 'forexia.agentGuide', data: { active: 'g1', items: [{ id: 'g1', name: 'Guide page', text: 'Commencer par Ichimoku.' }], updatedAt: '2026-11-20T00:00:00Z' }, updatedAt: '2026-11-20T00:00:00Z' });
+      await db('kv/put', { key: 'forexia.stratVersions', data: [{ id: 'vp1', name: 'Strat page', at: '2026-11-20T00:00:00Z', sig: 'a', note: 'Enregistrée', strat: { longEntry: 'CROSS_UP(RSI(14), 30)', shortEntry: '' } }, { id: 'vp2', name: 'Strat page', at: '2026-11-21T00:00:00Z', sig: 'b', note: 'Filtre ADX', strat: { longEntry: 'CROSS_UP(RSI(14), 30) AND ADX(14) > 25', shortEntry: '' } }], updatedAt: '2026-11-21T00:00:00Z' });
+      await db('strategies/put', { name: 'Strat page', data: { name: 'Strat page', longEntry: 'CROSS_UP(RSI(14), 30) AND ADX(14) > 25', savedAt: '2026-11-21T00:00:00Z' } });
+      const env = Object.assign({}, process.env, { FOREXIA_MCP_DATA: dataDir, FOREXIA_BRIDGE_URL: 'http://127.0.0.1:' + port, FOREXIA_BRIDGE_TOKEN: token });
+      const cli = (name, args) => JSON.parse(execFileSync(process.execPath, [path.join(__dirname, '..', 'mcp', 'cli.js'), name, JSON.stringify(args || {})], { env: env }).toString());
+      const s = cli('forexia_sync', {});
+      ok(s.counts.agentGuide === 'g1' && s.counts.stratVersions >= 2 && s.counts.fx >= 1 && s.counts.batches >= 1 && s.counts.strategies.pulled >= 1, JSON.stringify(s.counts));
+      ok(cli('fx_method').guideName === 'Guide page');
+      const v = cli('strategy_versions', { name: 'Strat page' }); ok(v.length === 2 && v[0].current && v[0].changes.some((c) => /ADX/.test(c)), JSON.stringify(v.map((x) => x.changes)));
+      cli('revert_strategy', { name: 'Strat page', version: 1 });
+      cli('forexia_sync', { direction: 'push' });
+      const kv = await db('kv/list'), vers = kv.items.find((x) => x.key === 'forexia.stratVersions').data, sts = (await db('strategies/list')).items;
+      ok(vers.some((x) => x.by === 'agent' && /Retour à la version 1/.test(x.note)) && !/ADX/.test(sts.find((x) => x.name === 'Strat page').data.longEntry), JSON.stringify(vers.map((x) => x.note)));
+      ok(kv.items.find((x) => x.key === 'forexia.fx').data.length >= 1 && kv.items.find((x) => x.key === 'forexia.agentGuide').data.active === 'g1');
+    } finally { br.kill(); }
+  });
   await test('note_add / note_list', async () => {
     await call('note_add', { text: 'Levier 20 : plus de pertes que levier 10 sur les mêmes périodes', tags: ['levier'], refs: [B1, B2] });
     await call('note_add', { text: 'Le filtre EMA 200 aide surtout avant 2008', tags: ['époques'] });

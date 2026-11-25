@@ -111,6 +111,10 @@ comprendre les pertes, choisir la manière de retirer, le capital et la durée. 
 | `improve_batch` | « Améliorer » sur tout un batch, puis batch amélioré sur les mêmes périodes et comparaison. |
 | `subset_batch` | Batch extrait d'un autre (époque, années, périodes perdantes…). |
 | `import_ea` | Relit un EA Forexia (.mq5) : stratégie et réglages. |
+| `resimulate_batch` / `restore_batch` | « 🔄 Resimuler » : un batch relancé avec la stratégie mise à jour (mêmes dates), comparé avant / après ; `replace` = « Garder », `restore_batch` = revenir aux résultats d'avant. |
+| `strategy_versions` / `revert_strategy` | « 🧬 Versions » : ajouts et ajustements successifs d'une stratégie (+ / − / ~, simulations de chaque version) ; retour à une version. Journal partagé avec la page. |
+| `batches_by_era` | « 📅 Analyse temporelle › Les batchs dans le temps » : chaque batch d'une stratégie, époque par époque ; époques où tous gagnent ou perdent. |
+| `fx_simulations` / `fx_ea` | « 📂 Voir les simulations » d'un FX (recalculées en batch si besoin) et « ⬇ EA (.mq5) » du FX. |
 | `run_batch` | Batch : une stratégie sur N périodes de `months` mois (ou `monthsList`), dans une plage `yearFrom`–`yearTo`, graine `seed` reproductible, périodes données (`periods`) ou **les mêmes qu'un autre batch** (`sameAs`) pour ne changer qu'une chose (levier, capital, stratégie, paire, retrait). Enregistré. |
 | `list_batches` / `get_batch` / `rename_batch` / `delete_batch` | Batchs enregistrés (agent et, après `forexia_sync`, ceux de la page) : rendement médian, part gagnante, capital moyen, chaque simulation. |
 | `compare_batches` | Batchs côte à côte, par époque, et période par période quand ils ont les mêmes périodes (qui gagne le plus souvent, écart médian), classement « régularité ». |
@@ -194,6 +198,11 @@ Le dossier [`agent/`](../agent/README.md) contient un projet complet pour un age
 | Chercheur de FX | `mine_fx`, `save_fx` |
 | Tester sur d'autres paires | `test_other_pairs`, `vary_batch` `pair` |
 | EA MT5 : générer, déployer, tester, calendrier | `generate_ea`, `mt5_deploy_ea`, `mt5_run_test`, `mt5_status`, `mt5_export_calendar` |
+| 🔄 Resimuler, Garder / Revenir / Retirer l'amélioration | `resimulate_batch`, `restore_batch`, `revert_strategy` |
+| 🧬 Versions de la stratégie | `strategy_versions`, `revert_strategy` |
+| 📅 Analyse temporelle (batchs dans le temps), écart entre simulations | `batches_by_era`, `time_analysis`, chiffres des batchs (`gapBetweenSimulations`) |
+| FX : 📂 Voir les simulations, ⬇ EA, FX sans retrait | `fx_simulations`, `fx_ea`, `build_fx` avec `mechanic: "none"` |
+| 🧭 Guide agent | `fx_method`, `agent_guide` |
 | Base de données (passerelle) | `forexia_sync` (stratégies, FX, batchs, époques, mécaniques, événements) |
 
 Restent propres à la page : compte cloud (connexion), export CSV / JSON, annuler (Ctrl+Z), affichage.

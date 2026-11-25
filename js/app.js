@@ -5010,7 +5010,7 @@
   function logVersion(strat, note, at) {
     if (!strat || !strat.name || (!strat.longEntry && !strat.shortEntry)) return;
     const l = verList(), sig = rulesSig(strat), last = l.filter((v) => v.name === strat.name).pop();
-    if (last && last.sig === sig) { if (note && (!last.note || last.note === 'Enregistrée')) { last.note = note; localStorage.setItem(VER_KEY, JSON.stringify(l)); } return; }
+    if (last && rulesSig(last.strat) === sig) { if (note && (!last.note || last.note === 'Enregistrée')) { last.note = note; localStorage.setItem(VER_KEY, JSON.stringify(l)); } return; }
     const s = {}; for (const k of RULE_FIELDS) s[k] = strat[k] || ''; for (const k of Object.keys(TM_LABEL)) if (Number(strat[k])) s[k] = Number(strat[k]);
     l.push({ id: 'v' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name: strat.name, at: at || new Date().toISOString(), sig: sig, note: note || '', strat: s });
     localStorage.setItem(VER_KEY, JSON.stringify(l.slice(-3000)));
@@ -5039,7 +5039,7 @@
       if (note && !v.notes.includes(note)) v.notes.push(note);
       return v;
     };
-    for (const x of verList().filter((v) => v.name === name)) add(x.sig, x.strat, x.at, x.note, true);
+    for (const x of verList().filter((v) => v.name === name)) add(rulesSig(x.strat), x.strat, x.at, x.note, true);
     for (const e of evalList().filter((e) => e.name === name && e.strategy)) add(rulesSig(e.strategy), e.strategy, e.at, '').entries.push(e);
     // les batchs gardent une copie de leurs simulations, avec les règles d'alors (versions remplacées depuis)
     const seen = new Set(evalList().map((e) => e.key + '|' + (e.strategy ? rulesSig(e.strategy) : '')));

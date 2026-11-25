@@ -710,7 +710,10 @@ const TOOLS = [
 ];
 
 // ---------------------------------------------------------------- démarche FX (batchs, époques, retraits, FX, chercheur) : mcp/fx-tools.js
-TOOLS.push(...require('./fx-tools')({ callTool: (n, x) => TOOLS.find((t) => t.name === n).handler(x), DATA_DIR, F, D, E, readJson, writeJson, store, resolveStrategy, strategyView, statsView, settingsOf, fail, r2, iso, today, onlineHistory, csvHistory, bridge, bridgeTerminal, toBar, subBars, obj, strategySchema, marketSchema }));
+const FX_TOOLS = require('./fx-tools')({ callTool: (n, x) => TOOLS.find((t) => t.name === n).handler(x), DATA_DIR, F, D, E, readJson, writeJson, store, resolveStrategy, strategyView, statsView, settingsOf, fail, r2, iso, today, onlineHistory, csvHistory, bridge, bridgeTerminal, toBar, subBars, obj, strategySchema, marketSchema });
+TOOLS.push(...FX_TOOLS);
+// journal des versions : chaque stratégie enregistrée (save_strategy, modify_strategy save, revert_strategy…)
+{ const st = TOOLS.find((x) => x.name === 'save_strategy'), h = st.handler; st.handler = async (a) => { const r = await h(a); try { FX_TOOLS.logVersion(store.strategies().find((x) => x.name === r.saved), a.notes || 'Enregistrée'); } catch (e) { /* facultatif */ } return r; }; }
 
 // ---------------------------------------------------------------- protocole MCP (JSON-RPC 2.0)
 const INSTRUCTIONS = 'Forexia : backtests de stratégies Forex. IMPORTANT : pour toute recherche de stratégie ou de FX, appelez d\'abord fx_method : il indique le guide de recherche choisi par l\'utilisateur dans la page (à suivre étape par étape) ou la liberté de l\'agent (par défaut : votre propre méthode). Commencez par forexia_help. Une stratégie se donne en règles techniques, en français (frenchText), ' +
