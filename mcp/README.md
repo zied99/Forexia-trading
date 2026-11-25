@@ -197,6 +197,14 @@ Le dossier [`agent/`](../agent/README.md) contient un projet complet pour un age
 
 Restent propres à la page : compte cloud (connexion), export CSV / JSON, annuler (Ctrl+Z), affichage.
 
+### Commande `/fx` (Claude Code)
+
+Dans une session Claude Code ouverte sur le dossier du projet (terminal ou onglet Code de Claude Desktop, session
+locale), tapez `/fx` suivi de vos critères, par exemple `/fx capital 20000 €, risque 4/7, 12 mois, 150 €/mois`.
+La démarche complète est dans [`.claude/commands/fx.md`](../.claude/commands/fx.md) : choix de la stratégie, ajout
+progressif d'indicateurs selon les constats, mêmes périodes pour chaque comparaison, confirmation sur des périodes
+neuves, réglage du levier, de la durée et du budget, puis retraits réglés selon l'analyse temporelle, et FX final.
+
 ### Exemple : trouver un FX
 
 > Tu as accès à Forexia par le serveur MCP « forexia ». Lis `fx_method`, puis `forexia_sync` (pull) pour voir
