@@ -100,7 +100,13 @@
     clearTimeout(cloudTimer); cloudTimer = null;
     if (!cloudQueue.size || !cloudOn()) return;
     const items = [...cloudQueue.values()]; cloudQueue.clear();
-    cloudPush(() => kvToCloud(items));
+    // échec (compte injoignable, Supabase en panne…) : rien n'est perdu, l'envoi est refait plus tard
+    setSync('run');
+    kvToCloud(items).then(() => setSync('ok')).catch((e) => {
+      cloudFail(e);
+      for (const it of items) if (!cloudQueue.has(it.key)) cloudQueue.set(it.key, it);
+      if (e && e.code !== 'auth') { clearTimeout(cloudTimer); cloudTimer = setTimeout(cloudFlushNow, 2 * 60000); }
+    });
   }
   function cloudSchedule() {
     if (cloudTimer) return;
@@ -114,7 +120,14 @@
     if (cloudOn()) { for (const it of items) if (!CLOUD_SKIP.includes(it.key)) cloudQueue.set(it.key, it); cloudSchedule(); }
   }
   window.addEventListener('beforeunload', () => { if (syncDirty.size) kvFlush(); cloudFlushNow(); });
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { if (syncDirty.size) kvFlush(); cloudFlushNow(); } });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') { if (syncDirty.size) kvFlush(); cloudFlushNow(); }
+    // retour sur la page (ex. téléphone) : on reprend ce que les autres appareils ont envoyé (au plus toutes les 2 minutes)
+    else if (typeof cloudOn === 'function' && cloudOn() && Date.now() - cloudPullAt > 2 * 60000) { cloudPullAt = Date.now(); cloudFlushNow(); kvSyncCloud().then(() => setSync('ok')).catch(cloudFail); }
+  });
+  let cloudPullAt = Date.now();
+  // page ouverte longtemps : nouvelle synchronisation complète toutes les 10 minutes (envois en attente compris)
+  setInterval(() => { if (document.visibilityState === 'visible' && typeof cloudOn === 'function' && cloudOn()) { cloudPullAt = Date.now(); cloudFlushNow(); kvSyncCloud().then(() => setSync('ok')).catch(cloudFail); } }, 10 * 60000);
   // listes d'objets identifiés (FX, batchs, époques, mécaniques…) : réunion des deux côtés
   function kvUnion(local, remote) {
     if (!Array.isArray(local) || !Array.isArray(remote)) return remote;
