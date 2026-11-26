@@ -262,6 +262,12 @@ choisit un scénario (du pire au meilleur cas testé) : le gain au bout d'un an 
 
 Un FX construit sur des données simulées est signalé (« à refaire avec les cours réels MT5 avant de le présenter »).
 
+**Fenêtre des FX : filtres et archives** : en haut de la fenêtre « 💼 FX », filtres par nom, stratégie, paire, risque
+maximum, confiance minimum et type de retrait, et tri (plus récents, confiance, ce qui est le plus souvent récupéré,
+chances de gain, risque). « 🗄 Archiver » met un FX de côté sans le supprimer : onglet « 🗄 Archivés », d'où
+« 📤 Désarchiver » le remet avec les autres. Le compteur du bouton « 💼 FX » ne compte que les FX actifs. Côté agent :
+`list_fx` (actifs) et `list_fx` avec `archived: true`.
+
 **FX et EA à jour** : un FX se base sur les résultats actuels de ses simulations (ceux du tableau). Si certaines ont été
 faites avec une ancienne version de la stratégie, la page l'indique (avec les changements) et propose de les mettre à
 jour (resimulées avec la version actuelle, mêmes dates, batch mis à jour) avant de créer le FX. « ⬇ EA » d'un FX utilise

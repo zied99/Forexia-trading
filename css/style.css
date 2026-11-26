@@ -1020,3 +1020,11 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 .bar-panel .bp-head .bp-filter { margin-left: auto; width: auto; }
 
 .batch-acts .batch-fx { white-space: nowrap; }
+
+/* Fenêtre des FX : filtres et archives */
+.fx-filters { margin-bottom: 12px; }
+.fx-views { margin-bottom: 10px; }
+.fx-filter-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 10px; align-items: end; }
+.fx-filter-row .fx-freset { width: auto; justify-self: start; }
+.fx-count { margin: 0 0 8px; }
+.fx-arch-btn { white-space: nowrap; }

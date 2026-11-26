@@ -717,8 +717,8 @@ module.exports = function fxTools(ctx) {
     },
     {
       name: 'list_fx', description: 'FX enregistrés : ceux de l\'utilisateur (page Forexia, récupérés automatiquement par la passerelle si FOREXIA_BRIDGE_TOKEN est configuré) et ceux de l\'agent (champ by). Sans passerelle : seulement ceux de l\'agent — le dire à l\'utilisateur.',
-      inputSchema: obj({}),
-      handler: async () => fxs.get().filter((f) => f.v === 2).map((f) => { const v = fxView(f); return { id: v.id, name: v.name, by: f.by || 'page', pair: v.pair, leverage: v.leverage, capital: v.minCapital, recommendedMonths: v.recommendedMonths, winRatePct: v.winRatePct, usualBackEur: v.backAtEndEur.usual, riskNote: v.riskNote, confidence: v.confidence.score, income: v.income.desc }; }),
+      inputSchema: obj({ archived: { type: 'boolean', description: 'true : les FX archivés (mis de côté par l\'utilisateur) ; défaut : les FX actifs' } }),
+      handler: async (a) => fxs.get().filter((f) => f.v === 2 && (a && a.archived ? !!f.archived : !f.archived)).map((f) => { const v = fxView(f); return { id: v.id, name: v.name, by: f.by || 'page', archived: !!f.archived, pair: v.pair, leverage: v.leverage, capital: v.minCapital, recommendedMonths: v.recommendedMonths, winRatePct: v.winRatePct, usualBackEur: v.backAtEndEur.usual, riskNote: v.riskNote, confidence: v.confidence.score, income: v.income.desc }; }),
     },
     {
       name: 'get_fx', description: 'Détail complet d\'un FX enregistré (scénarios, évolution, confiance, règles de la stratégie), pour un capital donné.',

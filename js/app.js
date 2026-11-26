@@ -3465,7 +3465,7 @@
   let fxMem = null;
   const fxList = () => { try { const l = JSON.parse(localStorage.getItem(FX_KEY)); return Array.isArray(l) ? l : []; } catch (e) { return fxMem || []; } };
   function setFxList(l) { fxMem = l; const ok = lsSet(FX_KEY, JSON.stringify(l)); if (!ok) lsFullToast('le FX'); updateFxCount(); return ok; }
-  function updateFxCount() { if ($('fxCount')) $('fxCount').textContent = fxList().length; }
+  function updateFxCount() { if ($('fxCount')) $('fxCount').textContent = fxList().filter((x) => !x.archived).length; }
   const pctile = (a, q) => { const v = a.filter(Number.isFinite).sort((x, y) => x - y); if (!v.length) return NaN; const k = (v.length - 1) * q, lo = Math.floor(k), hi = Math.ceil(k); return v[lo] + (v[hi] - v[lo]) * (k - lo); };
   // Nom des devises pour la phrase « Le principe »
   const CUR_NAME = { EUR: 'l\'euro', USD: 'le dollar', GBP: 'la livre sterling', JPY: 'le yen', CHF: 'le franc suisse', CAD: 'le dollar canadien', AUD: 'le dollar australien', NZD: 'le dollar néo-zélandais' };
@@ -3491,7 +3491,8 @@
     if (!setFxList(fxList().concat(fx)) || !fxList().some((x) => x.id === fx.id)) return;
     logEvent('fx.saved', 'FX enregistré : ' + name, { id: fx.id });
     toast('FX « ' + name + ' » enregistré.', false);
-    // la liste des FX s'ouvre sur le nouveau plan
+    // la liste des FX s'ouvre sur le nouveau plan (FX actifs, sans filtre)
+    Object.assign(fxF, { view: 'active', q: '', strat: '', pair: '', risk: '', conf: '', wd: '' });
     openFx();
     const card = $('fxBody').querySelector('.fx-card[data-fx="' + fx.id + '"]');
     if (card) { card.classList.add('fx-new'); card.scrollIntoView({ block: 'start' }); setTimeout(() => card.classList.remove('fx-new'), 2500); }
@@ -3524,6 +3525,7 @@
       '<footer><span class="hint">' + fx.n + ' simulations · ' + fx.years[0] + '–' + fx.years[1] + ' · ' + esc(fx.strategy.dataLabel || '') + ' · créé le ' + new Date(fx.createdAt).toLocaleDateString('fr-FR') + '</span>' +
       '<span class="fx-acts">' + (fx.strategy.data ? '<button type="button" class="secondary small" data-fx-load="' + esc(fx.id) + '" title="Charger la stratégie et ouvrir les simulations de ce FX dans l\'évaluation (recalculées si besoin)">📂 Voir les simulations</button>' +
         '<button type="button" class="secondary small" data-fx-ea="' + esc(fx.id) + '" title="Télécharger l\'Expert Advisor MetaTrader 5 de ce FX (stratégie, paire, levier, capital)">⬇ EA (.mq5)</button>' : '') +
+      '<button type="button" class="ghost small fx-arch-btn" data-fx-arch="' + esc(fx.id) + '" title="' + (fx.archived ? 'Remettre ce FX avec les autres' : 'Mettre ce FX de côté (archives) sans le supprimer') + '">' + (fx.archived ? '📤 Désarchiver' : '🗄 Archiver') + '</button>' +
       '<button type="button" class="ghost small" data-fx-del="' + esc(fx.id) + '" title="Supprimer ce FX" aria-label="Supprimer">🗑</button></span></footer></article>';
   }
   let FX_BASE = 10000; // capital du FX en cours d'affichage (les montants sont calculés pour ce capital)
@@ -3698,20 +3700,74 @@
       '<p class="fx-disclaimer">Résultats de simulations passées, sans garantie pour l\'avenir. Vous pouvez perdre tout ou partie du capital investi.</p>' +
       '<footer><span class="hint">créé le ' + new Date(fx.createdAt).toLocaleDateString('fr-FR') + '</span><span class="fx-acts">' + (fx.strategy.data ? '<button type="button" class="secondary small" data-fx-load="' + esc(fx.id) + '" title="Charger la stratégie et ouvrir les simulations de ce FX dans l\'évaluation (recalculées si besoin)">📂 Voir les simulations</button>' +
         '<button type="button" class="secondary small" data-fx-ea="' + esc(fx.id) + '" title="Télécharger l\'Expert Advisor MetaTrader 5 de ce FX (stratégie, paire, levier, capital)">⬇ EA (.mq5)</button>' : '') +
+      '<button type="button" class="ghost small fx-arch-btn" data-fx-arch="' + esc(fx.id) + '" title="' + (fx.archived ? 'Remettre ce FX avec les autres' : 'Mettre ce FX de côté (archives) sans le supprimer') + '">' + (fx.archived ? '📤 Désarchiver' : '🗄 Archiver') + '</button>' +
       '<button type="button" class="ghost small" data-fx-del="' + esc(fx.id) + '" title="Supprimer ce FX" aria-label="Supprimer">🗑</button></span></footer></article>';
   }
-  function openFx() {
-    const l = fxList();
-    $('fxBody').innerHTML = l.length ? '<div class="fx-grid">' + l.slice().reverse().map(fxCardHtml).join('') + '</div>' +
+  // filtres de la fenêtre des FX (gardés pendant la session)
+  const fxF = { view: 'active', q: '', strat: '', pair: '', risk: '', conf: '', wd: '', sort: 'new' };
+  const fxWd = (fx) => { const w = fx.v === 2 ? fx.income && fx.income.w : fx.withdraw && fx.withdraw.w; return wdNone(w) ? 'none' : (w.mode === 'periodic' ? w.type : 'threshold'); };
+  const fxConfOf = (fx) => { try { return fx.v === 2 ? fxConfidence(fx).score : (fx.confidence && fx.confidence.score) || 0; } catch (e) { return 0; } };
+  function fxShown() {
+    const all = fxList(), q = fxF.q.trim().toLowerCase();
+    let l = all.filter((fx) => (fxF.view === 'archived') === !!fx.archived)
+      .filter((fx) => (!q || (fx.name + ' ' + fx.strategy.name).toLowerCase().includes(q)) && (!fxF.strat || fx.strategy.name === fxF.strat) && (!fxF.pair || fx.strategy.pair === fxF.pair) &&
+        (!fxF.risk || (fx.riskNote || 7) <= +fxF.risk) && (!fxF.wd || fxWd(fx) === fxF.wd));
+    if (fxF.conf) l = l.filter((fx) => fxConfOf(fx) >= +fxF.conf);
+    const key = { new: (fx) => -(Date.parse(fx.createdAt) || 0), conf: (fx) => -fxConfOf(fx), back: (fx) => -((fx.scenarios && fx.scenarios.med) || 0), risk: (fx) => fx.riskNote || 7, win: (fx) => -(fx.winRate || 0) }[fxF.sort];
+    return l.map((fx) => ({ fx: fx, k: key(fx) })).sort((x, y) => x.k - y.k).map((x) => x.fx);
+  }
+  function fxFiltersHtml() {
+    const all = fxList(), uniq = (f) => [...new Set(all.map(f).filter(Boolean))].sort((x, y) => String(x).localeCompare(String(y), 'fr'));
+    const sel = (id, cur, opts) => '<select data-fxf="' + id + '">' + opts.map(([v, l]) => '<option value="' + esc(v) + '"' + (String(cur) === String(v) ? ' selected' : '') + '>' + esc(l) + '</option>').join('') + '</select>';
+    const nA = all.filter((x) => !x.archived).length, nR = all.length - nA;
+    return '<div class="fx-filters"><div class="eval-scope fx-views"><button type="button" class="scope-tab" data-fx-view="active" aria-selected="' + (fxF.view === 'active') + '">Actifs <span class="count">' + nA + '</span></button>' +
+      '<button type="button" class="scope-tab" data-fx-view="archived" aria-selected="' + (fxF.view === 'archived') + '">🗄 Archivés <span class="count">' + nR + '</span></button></div>' +
+      '<div class="fx-filter-row">' +
+      '<label class="field">Recherche<input type="search" data-fxf="q" value="' + esc(fxF.q) + '" placeholder="nom du FX ou de la stratégie" autocomplete="off"></label>' +
+      '<label class="field">Stratégie' + sel('strat', fxF.strat, [['', 'Toutes']].concat(uniq((x) => x.strategy.name).map((v) => [v, v]))) + '</label>' +
+      '<label class="field">Paire' + sel('pair', fxF.pair, [['', 'Toutes']].concat(uniq((x) => x.strategy.pair).map((v) => [v, v]))) + '</label>' +
+      '<label class="field">Risque' + sel('risk', fxF.risk, [['', 'Tous'], ['2', '2/7 au plus'], ['3', '3/7 au plus'], ['4', '4/7 au plus'], ['5', '5/7 au plus']]) + '</label>' +
+      '<label class="field">Confiance' + sel('conf', fxF.conf, [['', 'Toutes'], ['30', '30 et plus'], ['50', '50 et plus'], ['60', '60 et plus'], ['70', '70 et plus'], ['80', '80 et plus']]) + '</label>' +
+      '<label class="field">Retrait' + sel('wd', fxF.wd, [['', 'Tous'], ['none', 'Sans retrait'], ['excess', 'Excédent'], ['fixed', 'Somme fixe'], ['pct', '% du compte'], ['threshold', 'Au seuil']]) + '</label>' +
+      '<label class="field">Trier par' + sel('sort', fxF.sort, [['new', 'Plus récents'], ['conf', 'Confiance'], ['back', 'Le plus souvent récupéré'], ['win', 'Chances de gain'], ['risk', 'Risque le plus faible']]) + '</label>' +
+      '<button type="button" class="secondary small fx-freset" data-fx-freset' + (['q', 'strat', 'pair', 'risk', 'conf', 'wd'].some((k) => fxF[k]) ? '' : ' hidden') + '>Effacer les filtres</button></div></div><div id="fxGrid"></div>';
+  }
+  function renderFxGrid() {
+    const g = $('fxGrid'); if (!g) return;
+    const all = fxList(), l = fxShown();
+    g.innerHTML = l.length ? '<p class="hint fx-count">' + l.length + ' FX' + (l.length < all.filter((x) => (fxF.view === 'archived') === !!x.archived).length ? ' (filtres appliqués)' : '') + '</p><div class="fx-grid">' + l.map(fxCardHtml).join('') + '</div>' +
       '<p class="hint fx-note">Chiffres issus de simulations passées (backtests) : ils ne garantissent pas les résultats futurs. « Probabilité » et « Risque » comptent les retraits (compte final + sommes retirées).</p>'
-      : '<p class="eval-empty">Aucun FX pour l\'instant. Utilisez le <b>⛏️ Chercheur de FX</b> ci-dessus, ou, dans Évaluation › « 💸 Resimuler avec un retrait », comparez deux mécaniques (⚖️ Comparer) puis cliquez sur « 💼 Enregistrer un FX ».</p>';
+      : fxF.view === 'archived' && !all.some((x) => x.archived) ? '<p class="eval-empty">Aucun FX archivé. « 🗄 Archiver » sur un FX le met de côté ici, sans le supprimer.</p>'
+        : all.length ? '<p class="eval-empty">Aucun FX ne correspond à ces filtres.</p>'
+          : '<p class="eval-empty">Aucun FX pour l\'instant. Utilisez le <b>⛏️ Chercheur de FX</b> ci-dessus, « 💼 Créer un FX » sur un batch, ou « 💼 Enregistrer un FX » dans l\'Évaluation.</p>';
+    const r = $('fxBody').querySelector('[data-fx-freset]'); if (r) r.hidden = !['q', 'strat', 'pair', 'risk', 'conf', 'wd'].some((k) => fxF[k]);
+  }
+  function openFx() {
+    $('fxBody').innerHTML = fxFiltersHtml();
+    renderFxGrid();
     $('fxModal').hidden = false; document.body.style.overflow = 'hidden';
   }
   function closeFx() { $('fxModal').hidden = true; if ($('evalModal').hidden && $('wdModal').hidden) document.body.style.overflow = ''; }
   $('fxBtn').addEventListener('click', openFx);
+  $('fxBody').addEventListener('input', (ev) => { const k = ev.target.dataset && ev.target.dataset.fxf; if (k === 'q') { fxF.q = ev.target.value; renderFxGrid(); } });
+  $('fxBody').addEventListener('change', (ev) => { const k = ev.target.dataset && ev.target.dataset.fxf; if (k && k !== 'q') { fxF[k] = ev.target.value; renderFxGrid(); } });
+  $('fxBody').addEventListener('click', (ev) => {
+    const v = ev.target.closest('[data-fx-view]');
+    if (v) { fxF.view = v.dataset.fxView; return openFx(); }
+    if (ev.target.closest('[data-fx-freset]')) { Object.assign(fxF, { q: '', strat: '', pair: '', risk: '', conf: '', wd: '' }); return openFx(); }
+  });
   $('fxModal').addEventListener('click', (ev) => {
     const t = ev.target;
     if (t.closest('[data-close]')) return closeFx();
+    const ar = t.closest('[data-fx-arch]');
+    if (ar) {
+      const l = fxList(), fx = l.find((x) => x.id === ar.dataset.fxArch);
+      if (!fx) return toast('Enregistrez d\'abord ce FX pour pouvoir l\'archiver.', false);
+      fx.archived = !fx.archived; fx.archivedAt = fx.archived ? new Date().toISOString() : undefined;
+      setFxList(l);
+      toast(fx.archived ? 'FX « ' + fx.name + ' » archivé : onglet « 🗄 Archivés ».' : 'FX « ' + fx.name + ' » remis avec les FX actifs.', false);
+      return openFx();
+    }
     const del = t.closest('[data-fx-del]');
     if (del) { const fx = fxList().find((x) => x.id === del.dataset.fxDel); if (fx && confirm('Supprimer le FX « ' + fx.name + ' » ?')) { setFxList(fxList().filter((x) => x.id !== fx.id)); openFx(); } return; }
     const ld = t.closest('[data-fx-load]');
