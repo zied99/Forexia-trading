@@ -105,6 +105,9 @@ Avec `vary_batch` sur le batch de référence (mêmes périodes), un élément �
 
 ## À savoir (réglages de l'utilisateur)
 
+- Un FX retenu se confirme par une **deep évaluation** (`fx_deep_eval`, `dryRun` d'abord) : le FX rejoué à intervalles réguliers
+  sur sa période ; regarder la part gagnante, la médiane contre celles du FX, et la reprise du gain après une perte.
+
 - Seul le résultat **actuel** d'une simulation compte ; une simulation modifiée garde son résultat d'origine pour comparaison.
 - Si l'utilisateur a choisi une période (ex. « depuis 2020 »), travailler dans cette période : la régularité du FX se mesure
   alors année par année.

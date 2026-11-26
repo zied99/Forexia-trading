@@ -176,6 +176,10 @@ pareil, méthodiquement. Lis `fx_method` au début.
    les étapes 2 à 6 avant d'être recommandée.
 8. **Mémoire.** `note_add` après chaque conclusion (avec les ids de batchs) ; `build_fx save=true` ou `save_fx` ;
    `forexia_sync` (push) pour que l'utilisateur voie le plan dans la page.
+9. **Deep évaluation d'un FX retenu.** `fx_deep_eval` avec `dryRun` d'abord : moins de 6 évaluations (`few`) →
+   proposer le pas plus court ou la date de fin suggérés. Puis le lancer : comparer `summary` à `fxClaims`
+   (FX trop optimiste ?) et lire `recovery` (après une perte, combien de pas avant un gain). Avec l'accord de
+   l'utilisateur : `save` + `attachToFx` (référence sur la carte du FX). Celles déjà faites : `deep_eval_list`.
 
 Lis aussi la rubrique `notions` de `fx_method` : résultats actuels / d'origine, versions de stratégie
 (`strategy_versions`, `revert_strategy`, `resimulate_batch`), mise à jour des simulations seulement avec l'accord de

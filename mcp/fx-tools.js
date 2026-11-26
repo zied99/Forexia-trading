@@ -360,6 +360,7 @@ module.exports = function fxTools(ctx) {
       income: { method: fx.income.name, desc: fx.income.desc, perMonthEurUsual: med.incomePerMonthEur, yearlyPct: r2(fx.income.yearly), betterThan: fx.income.other },
       capitalAfterOneYear: { withWithdrawalEur: med.oneYearEur, withWithdrawalPct: r2(med.oneYearPct), withoutWithdrawalPct: r2(med.oneYearNoWithdrawPct), estimated: med.estimated },
       drawdown: { medianPct: r2(fx.drawdown.med), maxPct: r2(fx.drawdown.max) }, solidity: fx.solidity.score + '/100' + (fx.solidity.synthetic ? ' (données simulées : à refaire sur cours réels)' : ''),
+      deepEvalReference: fx.deepRef ? { id: fx.deepRef.id, name: fx.deepRef.name, period: fx.deepRef.from + ' → ' + fx.deepRef.to, stepDays: fx.deepRef.step, evaluations: fx.deepRef.n, winRatePct: fx.deepRef.winPct, medianReturnPct: r2(fx.deepRef.medianPct), recoveryAvgSteps: Number.isFinite(fx.deepRef.recoAvg) ? r2(fx.deepRef.recoAvg) : null } : null,
       erasWon: fx.solidity.eraWin + ' / ' + fx.solidity.eras,
       gapBetweenSimulations: (() => { const g = fx.spacing || FC.spacingOf(fx.sims || []); return g ? { meanDays: r2(g.meanDays), stdDays: r2(g.sdDays), minDays: g.minDays, maxDays: g.maxDays, overlapPct: r2(g.overlapPct) } : null; })(),
     };
@@ -373,6 +374,39 @@ module.exports = function fxTools(ctx) {
     return o;
   }
   const getFx = (id) => { const f = fxs.get().find((x) => x.id === id || x.name === id); if (!f) fail('FX introuvable : « ' + id + ' » (outil list_fx).'); return f; };
+  const getDeep = (id) => deepStore.get().find((x) => x.id === id || x.name === id) || fail('Deep évaluation introuvable : « ' + id + ' » (outil deep_eval_list).');
+  /** Plan d'une deep évaluation : mêmes règles que la page (js/fxcore.js deepStarts / deepFew). */
+  function deepPlanOf(fx, a) {
+    const S = (fx.sims || []).filter((x) => x.from && x.to), g = S.length >= 2 ? fx.spacing || FC.spacingOf(S) : null, now = iso(today());
+    const auto = { from: S.length ? S.map((x) => x.from).sort()[0] : null, to: S.length ? S.map((x) => x.to).sort().pop() : null, stepDays: g ? Math.max(7, Math.round(g.sdDays)) : null };
+    const from = a.from || auto.from || fail('Ce FX ne garde pas les dates de ses simulations : indiquez from, to et stepDays.');
+    const to = [a.to || auto.to || now, now].sort()[0];
+    const step = Math.max(1, Math.round(Number(a.stepDays) || auto.stepDays || 0)) || fail('Indiquez stepDays (pas entre deux évaluations, en jours).');
+    if (from >= to) fail('« to » doit être après « from ».');
+    const months = Math.max(1, (fx.duration && fx.duration.reco) || 12), plan = { from: from, to: to, step: step, months: months, auto: auto };
+    plan.starts = FC.deepStarts(from, to, step, months, D.addMonths);
+    plan.few = FC.deepFew(plan, now);
+    return plan;
+  }
+  /** Statistiques d'une deep évaluation (comme la page : KPI, par année, reprise du gain), comparées au FX. */
+  function deepView(d, fx) {
+    const R = d.rows, ret = R.map((x) => x.ret), n = ret.length, srt = ret.slice().sort((x, y) => x - y), rc = FC.deepRecovery(ret), fin = (v) => (Number.isFinite(v) ? r2(v) : null);
+    const byYear = {};
+    R.forEach((x) => { (byYear[x.from.slice(0, 4)] = byYear[x.from.slice(0, 4)] || []).push(x.ret); });
+    const summary = { evaluations: n, winRatePct: r2(n ? (ret.filter((v) => v > 0).length / n) * 100 : 0), medianReturnPct: fin(median(ret)), meanReturnPct: fin(mean(ret)), p10ReturnPct: fin(FC.pctile(ret, 0.1)),
+      worstReturnPct: fin(srt[0]), bestReturnPct: fin(srt[n - 1]), medianDrawdownPct: fin(median(R.map((x) => x.dd))), worstDrawdownPct: fin(Math.max(...R.map((x) => x.dd))), recoveryAvgSteps: fin(rc.avg) };
+    const step = d.plan.step;
+    const out = { summary: summary,
+      recovery: { stepDays: step, lossSeries: rc.runs.length, avgSteps: fin(rc.avg), medianSteps: fin(rc.median), maxSteps: fin(rc.max), avgDays: fin(rc.avg * step), maxDays: fin(rc.max * step), nextWinAfterLossPct: fin(rc.nextWinAfterLoss), ongoingLossSteps: rc.ongoing, runs: rc.runs,
+        meaning: 'après une évaluation perdante, nombre de pas (1 pas = ' + step + ' jours) avant une évaluation gagnante' },
+      byYear: Object.keys(byYear).sort().map((y) => { const L = byYear[y]; return { year: y, evaluations: L.length, winRatePct: r2((L.filter((v) => v > 0).length / L.length) * 100), medianReturnPct: r2(median(L)), worstReturnPct: r2(Math.min(...L)), bestReturnPct: r2(Math.max(...L)) }; }),
+      evaluations: R.map((x) => ({ from: x.from, to: x.to, returnPct: r2(x.ret), maxDrawdownPct: r2(x.dd), trades: x.trades })),
+      hint: 'Comparer summary et fxClaims : un écart important signale un FX trop optimiste. recovery : combien de temps attendre après une perte.' };
+    if (fx) out.fxClaims = { winRatePct: r2(fx.winRate), usualBackPct: r2(fx.scenarios.med - 100), badBackPct: r2(fx.scenarios.p10 - 100), medianDrawdownPct: r2(fx.drawdown.med) };
+    return out;
+  }
+  /** « 📌 Envoyer la référence au FX » (même résumé que la page : fx.deepRef). */
+  function attachDeep(d) { const l = fxs.get(), f = l.find((x) => x.id === d.fxId) || fail('Le FX de cette deep évaluation n\'existe plus.'); f.deepRef = FC.deepRef(d); fxs.set(l); return f; }
   function saveFx(fx, name) {
     const o = Object.assign({}, fx); delete o._w; delete o._sims;
     if (name) o.name = String(name).slice(0, 80);
@@ -402,6 +436,7 @@ module.exports = function fxTools(ctx) {
     'Confiance = moyenne géométrique de 3 probabilités : Sharpe « dégonflé » (corrigé du nombre de versions / variantes essayées), Student sur le résultat à un an, régularité entre époques. Si toutes les simulations sont dans UNE époque choisie par l\'utilisateur (ex. « depuis 2020 »), la régularité se mesure année par année dans cette période : ne pas pousser l\'utilisateur vers des époques qu\'il a écartées. Les périodes qui se chevauchent comptent une seule fois (mois distincts) ; données simulées × 0,4.',
     'Époques : celles de l\'utilisateur (get_eras) priment ; s\'il a choisi une période (ex. depuis 2020), travailler dans cette période (yearFrom, era) sauf demande contraire.',
     'Écart entre simulations (gapBetweenSimulations dans les chiffres d\'un batch) : un écart faible avec chevauchement = mêmes mois regardés plusieurs fois ; pour plus de confiance, des périodes réparties (n plus grand, autre seed) plutôt que des périodes collées.',
+    'Deep évaluation (fx_deep_eval) : rejoue un FX à intervalles réguliers (pas = écart type entre ses simulations), chaque évaluation de la durée recommandée, jamais plus courte. Commencer par dryRun : s\'il y a moins de 6 évaluations (few), proposer à l\'utilisateur le pas plus court ou la date de fin suggérés. Lire summary contre fxClaims (FX trop optimiste ?) et recovery (« Reprise du gain » : après une perte, combien de pas avant un gain). L\'enregistrer (save) et l\'envoyer au FX (attachToFx / deep_eval_attach) quand l\'utilisateur le veut ; deep_eval_list / deep_eval_get pour celles déjà faites.',
     'Guide de recherche : celui choisi par l\'utilisateur (fx_method) ; en liberté, la Démarche Forexia reste une bonne base.',
   ];
 
@@ -447,7 +482,7 @@ module.exports = function fxTools(ctx) {
             'Levier au-delà de 1:30 : hors limite européenne pour les particuliers.',
           ],
           tools: ['modify_strategy', 'run_batch', 'vary_batch', 'improve_batch', 'subset_batch', 'list_batches', 'get_batch', 'compare_batches', 'time_analysis', 'get_eras', 'set_eras', 'market_events', 'analyze_simulation', 'apply_proposal', 'era_analysis',
-            'simulate_withdrawal', 'compare_withdrawals', 'save_withdraw_mechanic', 'list_withdraw_mechanics', 'build_fx', 'fx_projection', 'list_fx', 'get_fx', 'save_fx', 'rename_fx', 'delete_fx', 'mine_fx', 'note_add', 'note_list', 'forexia_sync', 'import_ea', 'agent_guide', 'fx_simulations', 'fx_ea', 'fx_deep_eval', 'batches_by_era', 'resimulate_batch', 'restore_batch', 'strategy_versions', 'revert_strategy'],
+            'simulate_withdrawal', 'compare_withdrawals', 'save_withdraw_mechanic', 'list_withdraw_mechanics', 'build_fx', 'fx_projection', 'list_fx', 'get_fx', 'save_fx', 'rename_fx', 'delete_fx', 'mine_fx', 'note_add', 'note_list', 'forexia_sync', 'import_ea', 'agent_guide', 'fx_simulations', 'fx_ea', 'fx_deep_eval', 'deep_eval_list', 'deep_eval_get', 'deep_eval_attach', 'deep_eval_delete', 'batches_by_era', 'resimulate_batch', 'restore_batch', 'strategy_versions', 'revert_strategy'],
           currentEras: erasNow(),
         };
       },
@@ -940,42 +975,68 @@ module.exports = function fxTools(ctx) {
     },
     {
       name: 'fx_deep_eval',
-      description: '« 🔬 Deep évaluation FX » : rejoue un FX sur toute sa période, une évaluation toutes les « écart type » jours (écart entre ses simulations, ou stepDays), chacune de la durée recommandée (jamais plus courte) ; enregistre le batch et renvoie les statistiques comparées à celles du FX.',
-      inputSchema: obj({ id: { type: 'string' }, from: { type: 'string', description: 'AAAA-MM-JJ (défaut : début des simulations du FX)' }, to: { type: 'string', description: 'AAAA-MM-JJ (défaut : fin des simulations du FX)' }, stepDays: { type: 'number', description: 'pas entre deux évaluations (défaut : écart type entre les simulations du FX)' }, save: { type: 'string', description: 'nom : enregistre la deep évaluation (liste « 📚 Deep évaluations enregistrées » de la page)' }, attachToFx: { type: 'boolean', description: 'avec save : envoie la référence au FX (« 📌 Envoyer la référence au FX », résumé affiché sur la carte du FX)' } }, ['id']),
+      description: '« 🔬 Deep évaluation FX » : rejoue un FX sur une période, une évaluation tous les stepDays jours (défaut : écart type entre ses simulations), chacune de la durée recommandée du FX (jamais plus courte, jamais au-delà de « to »). Renvoie les statistiques comparées à celles du FX, le détail par année, la « 🔁 Reprise du gain » (recovery) et chaque évaluation. dryRun=true : le plan seulement (nombre d\'évaluations, avertissement « few » s\'il y en a moins de 6, avec un pas plus court ou une date de fin proposés). save (nom) : l\'enregistre (liste de la page) ; attachToFx : envoie sa référence au FX (carte du FX).',
+      inputSchema: obj({ id: { type: 'string', description: 'FX (id ou nom)' }, from: { type: 'string', description: 'AAAA-MM-JJ (défaut : début des simulations du FX)' }, to: { type: 'string', description: 'AAAA-MM-JJ (défaut : fin des simulations du FX ; au plus aujourd\'hui)' }, stepDays: { type: 'number', description: 'pas entre deux évaluations (défaut : écart type entre les simulations du FX)' }, dryRun: { type: 'boolean', description: 'plan seulement, sans lancer' }, save: { type: 'string', description: 'nom : enregistre la deep évaluation (liste « 📚 Deep évaluations enregistrées » de la page)' }, attachToFx: { type: 'boolean', description: 'avec save : envoie la référence au FX (« 📌 Envoyer la référence au FX », résumé affiché sur la carte du FX)' } }, ['id']),
       handler: async (a) => {
-        const fx = getFx(a.id), S = (fx.sims || []).filter((x) => x.from && x.to);
+        const fx = getFx(a.id), pl = deepPlanOf(fx, a);
         if (!fx.strategy.data) fail('Ce FX n\'a pas gardé sa stratégie.');
-        const g = S.length >= 2 ? fx.spacing || FC.spacingOf(S) : null;
-        const from = a.from || (S.length ? S.map((x) => x.from).sort()[0] : fail('Ce FX ne garde pas les dates de ses simulations : indiquez from, to et stepDays.'));
-        const to = [a.to || (S.length ? S.map((x) => x.to).sort().pop() : iso(today())), iso(today())].sort()[0];
-        if (!a.stepDays && !g) fail('Indiquez stepDays (pas entre deux évaluations, en jours).');
-        const months = Math.max(1, (fx.duration && fx.duration.reco) || 12), step = Math.max(7, Math.round(a.stepDays || (g && g.sdDays) || 30)), periods = [];
-        for (let t = Date.parse(from + 'T00:00:00Z'); periods.length < 2000; t += step * 864e5) {
-          const st = new Date(t), en = new Date(D.addMonths(st, months).getTime() - 864e5);
-          if (iso(en) > to) break;
-          periods.push({ from: iso(st), to: iso(en) });
-        }
-        if (!periods.length) fail('Période du FX plus courte que sa durée recommandée.');
+        const head = { fx: fx.name, period: pl.from + ' → ' + pl.to, stepDays: pl.step, months: pl.months, plannedEvaluations: pl.starts.length,
+          defaults: pl.auto, few: pl.few || undefined };
+        if (pl.few) head.fewHint = 'Seulement ' + pl.few.evaluations + ' évaluation(s) : chacune dure ' + pl.months + ' mois et la période laisse ' + pl.few.marginDays + ' jours de marge. ' +
+          [pl.few.shorterStepDays ? 'stepDays=' + pl.few.shorterStepDays + ' → ≈ ' + pl.few.evaluationsWithShorterStep + ' évaluations' : '', pl.few.extendTo ? 'to=' + pl.few.extendTo + ' (jusqu\'à aujourd\'hui)' : ''].filter(Boolean).join(' ; ') + '. Proposer ces choix à l\'utilisateur.';
+        if (a.dryRun) return Object.assign(head, { periods: pl.starts.slice(0, 60) });
+        if (!pl.starts.length) fail('Période plus courte que la durée recommandée du FX (' + pl.months + ' mois) : aucune évaluation possible. Indiquez from / to.');
         const m = Object.assign(fx.strategy.config ? marketOfEntry({ config: fx.strategy.config, pair: fx.strategy.pair, data: fx.strategy.dataLabel }) : { pair: fx.strategy.pair, source: /simul/i.test(fx.strategy.dataLabel || '') ? 'synthetic' : 'online' }, { capital: fx.capital, leverage: Number(fx.strategy.leverage) || 10 });
         const w = fx.income && fx.income.w; if (w && w.on !== false && w.mode !== 'none') m.withdraw = w.mode === 'periodic' ? { mode: 'periodic', every: w.every, days: w.days, type: w.type, value: w.value } : { pct: w.pct, share: w.share, when: w.when }; else delete m.withdraw;
-        const r = await runBatch({ strategy: Object.assign({}, fx.strategy.data, { name: fx.strategy.name }), market: m, periods: periods, name: '🔬 Deep éval · ' + fx.name });
-        const st = r.batch.stats, rows = r.simulations.map((e) => ({ from: e.from, to: e.to, ret: e.returnPct, dd: e.maxDrawdownPct, trades: e.trades, withdrawn: e.withdrawn || 0, key: e.key }));
-        const rets = rows.map((x) => x.ret), rc = FC.deepRecovery(rets), fin = (v) => (Number.isFinite(v) ? r2(v) : null);
-        const recovery = { stepDays: step, lossSeries: rc.runs.length, avgSteps: fin(rc.avg), medianSteps: fin(rc.median), maxSteps: fin(rc.max), avgDays: fin(rc.avg * step), maxDays: fin(rc.max * step), nextWinAfterLossPct: fin(rc.nextWinAfterLoss), ongoingLossSteps: rc.ongoing, runs: rc.runs };
-        let saved;
-        if (a.save) {
-          const d = { id: 'd' + Date.now().toString(36), name: String(a.save).slice(0, 100), at: new Date().toISOString(), fxId: fx.id, fxName: fx.name, plan: { from: from, to: to, step: step, months: months }, rows: rows, stopped: false, batchId: r.batch.id };
-          deepStore.set(deepStore.get().concat(d)); saved = { id: d.id, name: d.name };
-          if (a.attachToFx) {
-            const l = fxs.get(), f = l.find((x) => x.id === fx.id), srt = rets.slice().sort((x, y) => x - y);
-            f.deepRef = { id: d.id, name: d.name, at: d.at, from: from, to: to, step: step, months: months, n: rets.length, winPct: Math.round((rets.filter((v) => v > 0).length / Math.max(1, rets.length)) * 100), medianPct: median(rets), p10Pct: FC.pctile(srt, 0.1), recoAvg: rc.avg, recoMax: rc.max, nextWinPct: rc.nextWinAfterLoss };
-            fxs.set(l); saved.attachedToFx = fx.name;
-          }
+        const r = await runBatch({ strategy: Object.assign({}, fx.strategy.data, { name: fx.strategy.name }), market: m, periods: pl.starts, name: '🔬 Deep éval · ' + fx.name });
+        const rows = r.simulations.map((e) => ({ from: e.from, to: e.to, ret: e.returnPct, dd: e.maxDrawdownPct, trades: e.trades, withdrawn: e.withdrawn || 0 }));
+        const d = { id: 'd' + Date.now().toString(36), name: a.save ? String(a.save).slice(0, 100) : '', at: new Date().toISOString(), fxId: fx.id, fxName: fx.name,
+          plan: { from: pl.from, to: pl.to, step: pl.step, months: pl.months }, rows: rows, stopped: false, batchId: r.batch.id, by: 'agent' };
+        const out = Object.assign(head, { batch: r.batch.id }, deepView(d, fx));
+        if (a.save) { deepStore.set(deepStore.get().concat(d)); out.saved = { id: d.id, name: d.name }; if (a.attachToFx) { attachDeep(d); out.saved.attachedToFx = fx.name; } }
+        else out.hint += ' Non enregistrée : pour la garder, relancer avec save="nom" (et attachToFx=true pour l\'afficher sur la carte du FX).';
+        return out;
+      },
+    },
+    {
+      name: 'deep_eval_list', description: '« 📚 Deep évaluations enregistrées » (page et agent) : nom, FX, période, pas, nombre d\'évaluations, part gagnante, médiane, reprise du gain, et si c\'est la référence affichée sur le FX.',
+      inputSchema: obj({ fx: { type: 'string', description: 'filtrer sur un FX (id ou nom)' } }),
+      handler: async (a) => {
+        const fxl = fxs.get(), f = a.fx ? getFx(a.fx) : null;
+        return deepStore.get().filter((d) => !f || d.fxId === f.id).map((d) => { const s = deepView(d, null).summary, fx = fxl.find((x) => x.id === d.fxId);
+          return { id: d.id, name: d.name, at: d.at, fx: d.fxName, fxId: d.fxId, fxExists: !!fx, isFxReference: !!(fx && fx.deepRef && fx.deepRef.id === d.id), period: d.plan.from + ' → ' + d.plan.to, stepDays: d.plan.step, months: d.plan.months,
+            evaluations: s.evaluations, winRatePct: s.winRatePct, medianReturnPct: s.medianReturnPct, recoveryAvgSteps: s.recoveryAvgSteps, stopped: !!d.stopped }; });
+      },
+    },
+    {
+      name: 'deep_eval_get', description: 'Détail d\'une deep évaluation enregistrée (« Voir » dans la page) : statistiques comparées au FX, par année, reprise du gain, chaque évaluation.',
+      inputSchema: obj({ id: { type: 'string', description: 'id ou nom' } }, ['id']),
+      handler: async (a) => { const d = getDeep(a.id), fx = fxs.get().find((x) => x.id === d.fxId); return Object.assign({ id: d.id, name: d.name, at: d.at, fx: d.fxName, period: d.plan.from + ' → ' + d.plan.to, stepDays: d.plan.step, months: d.plan.months, isFxReference: !!(fx && fx.deepRef && fx.deepRef.id === d.id) }, deepView(d, fx)); },
+    },
+    {
+      name: 'deep_eval_attach', description: '« 📌 Envoyer la référence au FX » : affiche le résumé d\'une deep évaluation enregistrée sur la carte de son FX (remplace la référence précédente : demander à l\'utilisateur avant). detach=true : « Retirer la référence » du FX (la deep évaluation reste enregistrée).',
+      inputSchema: obj({ id: { type: 'string', description: 'deep évaluation (id ou nom) ; avec detach : id ou nom du FX accepté aussi' }, detach: { type: 'boolean' } }, ['id']),
+      handler: async (a) => {
+        if (a.detach) {
+          const l = fxs.get(), d = deepStore.get().find((x) => x.id === a.id || x.name === a.id), f = l.find((x) => (d && x.id === d.fxId) || x.id === a.id || x.name === a.id) || fail('FX introuvable.');
+          if (!f.deepRef) return { fx: f.name, detached: false, note: 'Ce FX n\'a pas de deep évaluation de référence.' };
+          const old = f.deepRef.name; delete f.deepRef; fxs.set(l); return { fx: f.name, detached: old };
         }
-        return { fx: fx.name, period: from + ' → ' + to, stepDays: step, months: months, evaluations: r.simulations.length, batch: r.batch.id, recovery: recovery, saved: saved,
-          stats: { winRatePct: st.winRatePct, medianReturnPct: st.medianReturnPct, meanReturnPct: st.meanReturnPct, p10ReturnPct: st.p10ReturnPct, worstReturnPct: st.worstReturnPct, bestReturnPct: st.bestReturnPct, meanMaxDrawdownPct: st.meanMaxDrawdownPct, worstMaxDrawdownPct: st.worstMaxDrawdownPct },
-          fxClaims: { winRatePct: r2(fx.winRate), usualBackPct: r2(fx.scenarios.med - 100), badBackPct: r2(fx.scenarios.p10 - 100) },
-          hint: 'Comparer stats et fxClaims : un écart important signale un FX trop optimiste. recovery = après une évaluation perdante, combien de pas (1 pas = stepDays) avant une gagnante. time_analysis sur le batch pour le détail par année. save + attachToFx pour garder la deep évaluation et l\'afficher sur la carte du FX.' };
+        const d = getDeep(a.id), prev = (fxs.get().find((x) => x.id === d.fxId) || {}).deepRef;
+        attachDeep(d);
+        return { fx: d.fxName, attached: d.name, replaced: prev && prev.id !== d.id ? prev.name : undefined };
+      },
+    },
+    {
+      name: 'deep_eval_delete', description: 'Supprime une deep évaluation enregistrée (🗑 dans la page) ; sa référence est aussi retirée du FX. Demander à l\'utilisateur avant.',
+      inputSchema: obj({ id: { type: 'string', description: 'id ou nom' } }, ['id']),
+      handler: async (a) => {
+        const d = getDeep(a.id);
+        deepStore.set(deepStore.get().filter((x) => x.id !== d.id));
+        const l = fxs.get(); let detached = null;
+        l.forEach((x) => { if (x.deepRef && x.deepRef.id === d.id) { delete x.deepRef; detached = x.name; } });
+        if (detached) fxs.set(l);
+        return { deleted: d.name, detachedFromFx: detached || undefined };
       },
     },
     {

@@ -371,8 +371,36 @@
       avg: runs.length ? mean(runs) : NaN, median: runs.length ? median(runs) : NaN, max: runs.length ? Math.max(...runs) : NaN };
   }
 
+  /** Plan d'une deep évaluation : départs tous les `step` jours de `from`, chacune de `months` mois, jamais au-delà de `to`.
+   * addMonths(date, n) fourni par l'appelant (F.data.addMonths). few : explication et correctifs quand il y a moins de 6 évaluations. */
+  function deepStarts(from, to, step, months, addMonths) {
+    const out = [], DAY = 864e5, iso = (d) => d.toISOString().slice(0, 10);
+    for (let t = Date.parse(from + 'T00:00:00Z'); out.length <= 2000; t += step * DAY) {
+      const st = new Date(t), en = new Date(addMonths(st, months).getTime() - DAY);
+      if (iso(en) > to) break;
+      out.push({ from: iso(st), to: iso(en) });
+    }
+    return out;
+  }
+  function deepFew(plan, today) {
+    const n = plan.starts.length;
+    if (n >= 6) return null;
+    const DAY = 864e5, span = (Date.parse(plan.to) - Date.parse(plan.from)) / DAY, room = span - plan.months * 30.4375;
+    const step = room > 14 ? Math.max(7, Math.floor(room / 11)) : 0;
+    return { evaluations: n, periodDays: Math.max(0, Math.round(span)), marginDays: Math.max(0, Math.round(room)),
+      shorterStepDays: step && step < plan.step ? step : null, evaluationsWithShorterStep: step && step < plan.step ? Math.floor(room / step) + 1 : null,
+      extendTo: Date.parse(today) - Date.parse(plan.to) > 60 * DAY ? today : null };
+  }
+  /** Résumé d'une deep évaluation enregistrée, gardé sur le FX (fx.deepRef). */
+  function deepRef(d) {
+    const r = d.rows.map((x) => x.ret), rc = deepRecovery(r);
+    return { id: d.id, name: d.name, at: new Date().toISOString(), from: d.plan.from, to: d.plan.to, step: d.plan.step, months: d.plan.months, n: r.length,
+      winPct: Math.round((r.filter((v) => v > 0).length / Math.max(1, r.length)) * 100), medianPct: median(r), p10Pct: pctile(r, 0.1),
+      recoAvg: rc.avg, recoMax: rc.max, nextWinPct: rc.nextWinAfterLoss };
+  }
+
   F.fxcore = {
-    deepRecovery,
+    deepRecovery, deepStarts, deepFew, deepRef,
     pctile, mean, median, durationDays, CUR_NAME, RISK_TXT, MINER_LEV,
     wdApply, wdKey, wdDesc, withdrawLabel, wdRow, wdDerive, wdAgg, fxRowFromRecord, spacingOf,
     fxPrinciple, fxRiskNote, fxSimsFromRows, fxFromRows, simsOf, fxPoint, fxConfidence, fxProjection,

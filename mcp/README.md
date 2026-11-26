@@ -115,6 +115,8 @@ comprendre les pertes, choisir la manière de retirer, le capital et la durée. 
 | `strategy_versions` / `revert_strategy` | « 🧬 Versions » : ajouts et ajustements successifs d'une stratégie (+ / − / ~, simulations de chaque version) ; retour à une version. Journal partagé avec la page. |
 | `batches_by_era` | « 📅 Analyse temporelle › Les batchs dans le temps » : chaque batch d'une stratégie, époque par époque ; époques où tous gagnent ou perdent. |
 | `fx_simulations` / `fx_ea` | « 📂 Voir les simulations » d'un FX (recalculées en batch si besoin) et « ⬇ EA (.mq5) » du FX. |
+| `fx_deep_eval` | « 🔬 Deep éval FX » : rejoue le FX à intervalles réguliers (pas = écart type entre ses simulations), chaque évaluation de la durée recommandée. `dryRun` : le plan seul (avertissement `few` sous 6 évaluations, avec pas plus court / date de fin proposés). Renvoie statistiques contre le FX, par année, « 🔁 Reprise du gain » (`recovery`) et chaque évaluation ; `save` (nom) l'enregistre, `attachToFx` l'affiche sur la carte du FX. |
+| `deep_eval_list` / `deep_eval_get` / `deep_eval_attach` / `deep_eval_delete` | « 📚 Deep évaluations enregistrées » : liste, détail (« Voir »), « 📌 Envoyer la référence au FX » (`detach` : la retirer), suppression (la référence est retirée du FX). |
 | `run_batch` | Batch : une stratégie sur N périodes de `months` mois (ou `monthsList`), dans une plage `yearFrom`–`yearTo`, graine `seed` reproductible, périodes données (`periods`) ou **les mêmes qu'un autre batch** (`sameAs`) pour ne changer qu'une chose (levier, capital, stratégie, paire, retrait). Enregistré. |
 | `list_batches` / `get_batch` / `rename_batch` / `delete_batch` | Batchs enregistrés (agent et, après `forexia_sync`, ceux de la page) : rendement médian, part gagnante, capital moyen, chaque simulation. |
 | `compare_batches` | Batchs côte à côte, par époque, et période par période quand ils ont les mêmes périodes (qui gagne le plus souvent, écart médian), classement « régularité ». |
@@ -202,6 +204,7 @@ Le dossier [`agent/`](../agent/README.md) contient un projet complet pour un age
 | 🧬 Versions de la stratégie | `strategy_versions`, `revert_strategy` |
 | 📅 Analyse temporelle (batchs dans le temps), écart entre simulations | `batches_by_era`, `time_analysis`, chiffres des batchs (`gapBetweenSimulations`) |
 | FX : 📂 Voir les simulations, ⬇ EA, FX sans retrait | `fx_simulations`, `fx_ea`, `build_fx` avec `mechanic: "none"` |
+| 🔬 Deep éval FX : lancer, 🔁 Reprise du gain, 💾 Enregistrer, 📚 liste, 📌 référence sur le FX | `fx_deep_eval` (`dryRun`, `save`, `attachToFx`), `deep_eval_list`, `deep_eval_get`, `deep_eval_attach`, `deep_eval_delete` ; `get_fx` → `deepEvalReference` |
 | 🧭 Guide agent | `fx_method`, `agent_guide` |
 | Base de données (passerelle) | `forexia_sync` (stratégies, FX, batchs, époques, mécaniques, événements) |
 

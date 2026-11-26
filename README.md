@@ -278,7 +278,8 @@ La carte **🔁 Reprise du gain** dit, après une évaluation perdante, au bout 
 évaluations) une évaluation redevient gagnante : en moyenne, le plus souvent, au plus, et la chance que l'évaluation juste après une
 perte gagne. **💾 Enregistrer** garde la deep évaluation (liste « 📚 Deep évaluations enregistrées », synchronisée dans le compte) ;
 **📌 Envoyer la référence au FX** affiche son résumé sur la carte du FX, avec un lien pour la rouvrir. Côté agent :
-`fx_deep_eval` renvoie `recovery` et accepte `save` (nom) et `attachToFx`.
+`fx_deep_eval` (plan seul avec `dryRun`, enregistrement avec `save`, référence sur le FX avec `attachToFx`) et
+`deep_eval_list`, `deep_eval_get`, `deep_eval_attach`, `deep_eval_delete` pour celles déjà enregistrées.
 
 **Fenêtre des FX : filtres et archives** : en haut de la fenêtre « 💼 FX », filtres par nom, stratégie, paire, risque
 maximum, confiance minimum et type de retrait, et tri (plus récents, confiance, ce qui est le plus souvent récupéré,

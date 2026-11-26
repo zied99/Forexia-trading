@@ -289,6 +289,24 @@ const SYN = { pair: 'EUR/USD', source: 'synthetic', dateFrom: '2019-01-01', date
     const e = await call('fx_ea', { id: f.id });
     ok(/void FxSignals\(/.test(e.code) && /\.mq5$/.test(e.fileName) && /main/.test(e.withdrawal), e.fileName + ' ' + e.withdrawal);
   });
+  await test('deep évaluation : plan (few), lancement, enregistrement, référence sur le FX, liste, détail, suppression', async () => {
+    const f = (await call('list_fx', {})).find((x) => x.by === 'agent') || (await call('list_fx', {}))[0];
+    const g = await call('get_fx', { id: f.id }), s0 = (await call('fx_simulations', { id: f.id })).simulations;
+    const from = s0.map((x) => x.from).sort()[0];
+    const short = await call('fx_deep_eval', { id: f.id, from: from, to: new Date(Date.parse(from) + (g.recommendedMonths * 30.4 + 120) * 864e5).toISOString().slice(0, 10), stepDays: 400, dryRun: true });
+    ok(short.plannedEvaluations === 1 && short.few && short.few.shorterStepDays && /stepDays=/.test(short.fewHint), JSON.stringify(short).slice(0, 300));
+    const r = await call('fx_deep_eval', { id: f.id, stepDays: 120, save: 'Deep test agent', attachToFx: true });
+    ok(r.summary.evaluations >= 3 && r.evaluations.length === r.summary.evaluations && r.byYear.length && r.recovery && r.saved && r.saved.attachedToFx && r.fxClaims, JSON.stringify(r).slice(0, 300));
+    ok((await call('get_fx', { id: f.id })).deepEvalReference.name === 'Deep test agent');
+    const l = await call('deep_eval_list', {});
+    ok(l.some((x) => x.name === 'Deep test agent' && x.isFxReference), JSON.stringify(l).slice(0, 300));
+    const d = await call('deep_eval_get', { id: 'Deep test agent' });
+    ok(d.summary.evaluations === r.summary.evaluations && d.isFxReference);
+    ok((await call('deep_eval_attach', { id: 'Deep test agent', detach: true })).detached === 'Deep test agent' && !(await call('get_fx', { id: f.id })).deepEvalReference);
+    await call('deep_eval_attach', { id: 'Deep test agent' });
+    const del = await call('deep_eval_delete', { id: 'Deep test agent' });
+    ok(del.detachedFromFx && !(await call('get_fx', { id: f.id })).deepEvalReference && !(await call('deep_eval_list', {})).some((x) => x.name === 'Deep test agent'));
+  });
   await test('forexia_sync avec une vraie passerelle (guide, versions, FX, batchs, stratégies dans les deux sens)', async () => {
     const { spawn: sp, execFileSync } = require('child_process');
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'forexia-br-')), port = 18000 + Math.floor(Math.random() * 2000);

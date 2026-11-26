@@ -4398,13 +4398,7 @@
   const DEEP_KEY = 'forexia.deepEvals';
   const deepList = () => { try { const l = JSON.parse(localStorage.getItem(DEEP_KEY)); return Array.isArray(l) ? l : []; } catch (e) { return []; } };
   const setDeepList = (l) => localStorage.setItem(DEEP_KEY, JSON.stringify(l));
-  /** Résumé d'une deep évaluation enregistrée, gardé sur le FX (fx.deepRef). */
-  function deepRefOf(d) {
-    const r = d.rows.map((x) => x.ret), rc = F.fxcore.deepRecovery(r);
-    return { id: d.id, name: d.name, at: new Date().toISOString(), from: d.plan.from, to: d.plan.to, step: d.plan.step, months: d.plan.months, n: r.length,
-      winPct: Math.round((r.filter((v) => v > 0).length / Math.max(1, r.length)) * 100), medianPct: F.fxcore.median(r), p10Pct: F.fxcore.pctile(r.slice().sort((a, b) => a - b), 0.1),
-      recoAvg: rc.avg, recoMax: rc.max, nextWinPct: rc.nextWinAfterLoss };
-  }
+  const deepRefOf = (d) => F.fxcore.deepRef(d);
   const deepRecovery = (rows) => F.fxcore.deepRecovery(rows.map((r) => r.ret));
   const DAY = 864e5;
   /** Plan de la deep évaluation : début et fin de la période du FX, pas (écart type entre ses simulations), durée. */
@@ -4420,23 +4414,19 @@
     if (!from) return Object.assign(base, { error: 'Indiquez la date de début (ce FX ne garde pas les dates de ses simulations).' });
     if (!step) return Object.assign(base, { error: 'Indiquez le pas entre deux évaluations (en jours), par exemple l\'écart type entre les simulations.' });
     if (from >= to) return Object.assign(base, { error: 'La date de fin doit être après la date de début.' });
-    for (let t = Date.parse(from + 'T00:00:00Z'); ; t += step * DAY) {
-      const st = new Date(t), en = new Date(F.data.addMonths(st, months).getTime() - DAY);
-      if (F.data.iso(en) > to) break; // pas d'évaluation plus courte que la durée recommandée
-      base.starts.push({ from: F.data.iso(st), to: F.data.iso(en) });
-      if (base.starts.length > 2000) break;
-    }
+    base.starts = F.fxcore.deepStarts(from, to, step, months, F.data.addMonths);
     return base;
   }
   const durDays = (d) => (d < 60 ? Math.round(d) + ' jours' : num1.format(d / 30.4375) + ' mois');
   /** Peu d'évaluations : dire pourquoi et proposer un pas plus court ou une période plus longue. */
   function deepFewHtml(pl) {
-    if (pl.starts.length >= 6) return '';
-    const span = (Date.parse(pl.to) - Date.parse(pl.from)) / DAY, room = span - pl.months * 30.4375, today = F.data.iso(new Date()), acts = [];
-    if (room > 14) { const st = Math.max(7, Math.floor(room / 11)); if (st < pl.step) acts.push('<button type="button" class="secondary small" data-deep-set="step:' + st + '">Une évaluation tous les ' + durDays(st) + ' (≈ ' + (Math.floor(room / st) + 1) + ' évaluations)</button>'); }
-    if (Date.parse(today) - Date.parse(pl.to) > 60 * DAY) acts.push('<button type="button" class="secondary small" data-deep-set="to:' + today + '">Prolonger jusqu\'à aujourd\'hui</button>');
-    return '<p class="val warn">Seulement ' + pl.starts.length + ' évaluation' + (pl.starts.length > 1 ? 's' : '') + ' : chacune dure ' + pl.months + ' mois (durée recommandée, jamais moins) et la période ne fait que ' + durDays(Math.max(0, span)) +
-      ', soit ' + durDays(Math.max(0, room)) + ' de marge pour décaler les départs, avec un pas de ' + durDays(pl.step) + '.</p>' + (acts.length ? '<div class="row buttons deep-few">' + acts.join('') + '</div>' : '');
+    const w = F.fxcore.deepFew(pl, F.data.iso(new Date()));
+    if (!w) return '';
+    const acts = [];
+    if (w.shorterStepDays) acts.push('<button type="button" class="secondary small" data-deep-set="step:' + w.shorterStepDays + '">Une évaluation tous les ' + durDays(w.shorterStepDays) + ' (≈ ' + w.evaluationsWithShorterStep + ' évaluations)</button>');
+    if (w.extendTo) acts.push('<button type="button" class="secondary small" data-deep-set="to:' + w.extendTo + '">Prolonger jusqu\'à aujourd\'hui</button>');
+    return '<p class="val warn">Seulement ' + w.evaluations + ' évaluation' + (w.evaluations > 1 ? 's' : '') + ' : chacune dure ' + pl.months + ' mois (durée recommandée, jamais moins) et la période ne fait que ' + durDays(w.periodDays) +
+      ', soit ' + durDays(w.marginDays) + ' de marge pour décaler les départs, avec un pas de ' + durDays(pl.step) + '.</p>' + (acts.length ? '<div class="row buttons deep-few">' + acts.join('') + '</div>' : '');
   }
   function openDeep() {
     if (!deepState.fxId || !fxList().some((x) => x.id === deepState.fxId && !x.archived)) { const a = fxList().filter((x) => !x.archived && x.v === 2); deepState.fxId = a.length ? a[a.length - 1].id : ''; }
