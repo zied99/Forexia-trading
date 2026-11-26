@@ -713,6 +713,8 @@ const TOOLS = [
 const FX_TOOLS = require('./fx-tools')({ callTool: (n, x) => TOOLS.find((t) => t.name === n).handler(x), DATA_DIR, F, D, E, readJson, writeJson, store, resolveStrategy, strategyView, statsView, settingsOf, fail, r2, iso, today, onlineHistory, csvHistory, bridge, bridgeTerminal, toBar, subBars, obj, strategySchema, marketSchema });
 TOOLS.push(...FX_TOOLS);
 // journal des versions : chaque stratégie enregistrée (save_strategy, modify_strategy save, revert_strategy…)
+// stratégies de la page d'abord (list_strategies), si la passerelle est configurée
+{ const ls = TOOLS.find((x) => x.name === 'list_strategies'), lh = ls.handler; let last = 0; ls.handler = async (a) => { if (process.env.FOREXIA_BRIDGE_TOKEN && Date.now() - last > 30000) { last = Date.now(); try { await TOOLS.find((x) => x.name === 'forexia_sync').handler({ direction: 'pull' }); } catch (e) { /* passerelle injoignable */ } } return lh(a); }; }
 { const st = TOOLS.find((x) => x.name === 'save_strategy'), h = st.handler; st.handler = async (a) => { const r = await h(a); try { FX_TOOLS.logVersion(store.strategies().find((x) => x.name === r.saved), a.notes || 'Enregistrée'); } catch (e) { /* facultatif */ } return r; }; }
 
 // ---------------------------------------------------------------- protocole MCP (JSON-RPC 2.0)

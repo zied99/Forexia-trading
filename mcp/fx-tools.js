@@ -402,6 +402,18 @@ module.exports = function fxTools(ctx) {
     'Guide de recherche : celui choisi par l\'utilisateur (fx_method) ; en liberté, la Démarche Forexia reste une bonne base.',
   ];
 
+  // Données de la page : avec la passerelle configurée, l'agent les récupère d'abord (au plus toutes les 30 s), pour que
+  // ses listes (FX, batchs, versions, époques…) soient celles de l'utilisateur, à jour.
+  let lastPull = 0, pullNote = null;
+  async function autoPull() {
+    if (!process.env.FOREXIA_BRIDGE_TOKEN || Date.now() - lastPull < 30000) return pullNote;
+    lastPull = Date.now();
+    try { await callTool('forexia_sync', { direction: 'pull' }); pullNote = 'à jour avec la page Forexia (base de la passerelle)'; }
+    catch (e) { pullNote = 'page Forexia non jointe (' + e.message + ') : données locales de l\'agent'; }
+    return pullNote;
+  }
+  const withPull = (tool) => Object.assign(tool, { handler: ((h) => async (a) => { const note = await autoPull(); const r = await h(a); return note && r && typeof r === 'object' && !Array.isArray(r) ? Object.assign({ source: note }, r) : r; })(tool.handler) });
+
   const strategyArg = strategySchema, marketArg = marketSchema;
   const wArg = { description: 'Mécanique de retrait : nom ou id enregistré (list_withdraw_mechanics), ou {mode:"periodic", every:"month"|"days", days, type:"excess"|"fixed"|"pct", value} (excess = % du gain du mois au-dessus du capital, fixed = somme en €, pct = % du compte), ou {pct, share, when} (au seuil de gain), ou "none".' };
   const idx = { type: 'array', items: { type: 'number' }, description: 'Index des simulations du batch (défaut : toutes).' };
@@ -704,7 +716,7 @@ module.exports = function fxTools(ctx) {
       handler: async (a) => { const fx = getFx(a.id), c = Math.max(fx.capital, Number(a.capital) || fx.capital); return Object.assign({ minCapital: Math.round(fx.capital), note: Number(a.capital) < fx.capital ? 'capital relevé au minimum du FX' : undefined }, FC.fxProjection(fx, c, a.q)); },
     },
     {
-      name: 'list_fx', description: 'FX enregistrés (par l\'agent et, après forexia_sync pull, ceux de la page) : résumé de chacun.',
+      name: 'list_fx', description: 'FX enregistrés : ceux de l\'utilisateur (page Forexia, récupérés automatiquement par la passerelle si FOREXIA_BRIDGE_TOKEN est configuré) et ceux de l\'agent (champ by). Sans passerelle : seulement ceux de l\'agent — le dire à l\'utilisateur.',
       inputSchema: obj({}),
       handler: async () => fxs.get().filter((f) => f.v === 2).map((f) => { const v = fxView(f); return { id: v.id, name: v.name, by: f.by || 'page', pair: v.pair, leverage: v.leverage, capital: v.minCapital, recommendedMonths: v.recommendedMonths, winRatePct: v.winRatePct, usualBackEur: v.backAtEndEur.usual, riskNote: v.riskNote, confidence: v.confidence.score, income: v.income.desc }; }),
     },
@@ -1029,6 +1041,7 @@ module.exports = function fxTools(ctx) {
       },
     },
   ];
+  for (const t of tools) if (['fx_method', 'list_fx', 'get_fx', 'list_batches', 'get_batch', 'strategy_versions', 'get_eras', 'list_withdraw_mechanics', 'batches_by_era', 'fx_simulations', 'fx_ea', 'build_fx', 'time_analysis', 'compare_batches'].includes(t.name)) withPull(t);
   tools.logVersion = logVersion;
   return tools;
 };
