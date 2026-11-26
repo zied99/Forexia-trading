@@ -8,7 +8,7 @@
   const modals = () => [...document.querySelectorAll('.modal')];
   const minimized = () => modals().filter((m) => !m.hidden && m.classList.contains('win-min')).sort((a, b) => a.dataset.winAt - b.dataset.winAt);
   let minSeq = 0;
-  const anyOpenFull = () => modals().some((m) => !m.hidden && !m.classList.contains('win-min'));
+  const anyOpenFull = () => modals().some((m) => !m.hidden && !m.classList.contains('win-min') && !m.classList.contains('win-moved'));
   const titleOf = (m) => { const h = m.querySelector('.modal-head h2, .modal-head h3'); return h ? h.textContent.trim() : 'Fenêtre'; };
 
   function dock() {
@@ -61,11 +61,11 @@
       dx = Math.min(Math.max(dx, drag.dx - r.left - Math.max(0, r.width - 260)), drag.dx + W - r.right);
       dy = Math.min(Math.max(dy, drag.dy - r.top), drag.dy + H - r.top - 48);
       move(box, dx, dy);
-      m.classList.add('win-moved');
+      if (!m.classList.contains('win-moved')) { m.classList.add('win-moved'); dock(); }
     });
     const end = () => { if (drag) { drag = null; m.classList.remove('win-moving'); } };
     head.addEventListener('pointerup', end); head.addEventListener('pointercancel', end);
-    head.addEventListener('dblclick', (e) => { if (e.target.closest('button, input, select, textarea, a')) return; if (m.classList.contains('win-min')) return setMin(m, false); move(box, 0, 0); m.classList.remove('win-moved'); });
+    head.addEventListener('dblclick', (e) => { if (e.target.closest('button, input, select, textarea, a')) return; if (m.classList.contains('win-min')) return setMin(m, false); move(box, 0, 0); m.classList.remove('win-moved'); dock(); });
     // fenêtre réduite : un clic sur la barre la rouvre
     head.addEventListener('click', (e) => { if (m.classList.contains('win-min') && !e.target.closest('button')) setMin(m, false); });
     // à l'ouverture, la fenêtre revient en grand (à sa dernière position) ; à la fermeture, la barre disparaît

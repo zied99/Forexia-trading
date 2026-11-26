@@ -1217,13 +1217,21 @@
         }
         if (rq !== body && rq.to > F.data.iso(new Date())) rq = body;
       }
-      let r;
-      try { r = await bridgeCall('POST', '/bars', rq); } catch (e) {
-        throw new Error(e.code === 401 ? 'Code d\'appairage refusé : reconnectez la passerelle (section Données).' : 'Passerelle MT5 injoignable : la fenêtre de la passerelle est-elle ouverte ?');
+      const ask = async (q) => {
+        let r;
+        try { r = await bridgeCall('POST', '/bars', q); } catch (e) {
+          throw new Error(e.code === 401 ? 'Code d\'appairage refusé : reconnectez la passerelle (section Données).' : 'Passerelle MT5 injoignable : la fenêtre de la passerelle est-elle ouverte ?');
+        }
+        if (!r.ok) throw new Error(r.message || 'Données du courtier indisponibles.');
+        r.req = q; brokerCache.set(JSON.stringify(q), r);
+        return r;
+      };
+      let cov = null;
+      if (rq !== body) {
+        // demande groupée : si elle ne donne pas exactement ce qu'une demande seule donnerait (ex. pas de M1 si loin chez le courtier), on l'oublie
+        try { const g = await ask(rq); cov = brokerCover(body); if (!cov) { g.req = null; brokerCache.delete(JSON.stringify(rq)); brokerPlan = null; } } catch (e) { brokerPlan = null; }
       }
-      if (!r.ok) throw new Error(r.message || 'Données du courtier indisponibles.');
-      r.req = rq; brokerCache.set(JSON.stringify(rq), r);
-      if (rq !== body) { const cov = brokerCover(body); if (cov) brokerCache.set(key, cov); else { r.req = null; brokerCache.delete(JSON.stringify(rq)); throw new Error('Données du courtier incomplètes : relancez.'); } }
+      if (cov) brokerCache.set(key, cov); else await ask(body);
       // garde au plus 6 envois en mémoire (les détails M1 peuvent être lourds)
       while (brokerCache.size > 6) brokerCache.delete(brokerCache.keys().next().value);
     }
@@ -4421,12 +4429,28 @@
     return base;
   }
   const durDays = (d) => (d < 60 ? Math.round(d) + ' jours' : num1.format(d / 30.4375) + ' mois');
+  /** Peu d'évaluations : dire pourquoi et proposer un pas plus court ou une période plus longue. */
+  function deepFewHtml(pl) {
+    if (pl.starts.length >= 6) return '';
+    const span = (Date.parse(pl.to) - Date.parse(pl.from)) / DAY, room = span - pl.months * 30.4375, today = F.data.iso(new Date()), acts = [];
+    if (room > 14) { const st = Math.max(7, Math.floor(room / 11)); if (st < pl.step) acts.push('<button type="button" class="secondary small" data-deep-set="step:' + st + '">Une évaluation tous les ' + durDays(st) + ' (≈ ' + (Math.floor(room / st) + 1) + ' évaluations)</button>'); }
+    if (Date.parse(today) - Date.parse(pl.to) > 60 * DAY) acts.push('<button type="button" class="secondary small" data-deep-set="to:' + today + '">Prolonger jusqu\'à aujourd\'hui</button>');
+    return '<p class="val warn">Seulement ' + pl.starts.length + ' évaluation' + (pl.starts.length > 1 ? 's' : '') + ' : chacune dure ' + pl.months + ' mois (durée recommandée, jamais moins) et la période ne fait que ' + durDays(Math.max(0, span)) +
+      ', soit ' + durDays(Math.max(0, room)) + ' de marge pour décaler les départs, avec un pas de ' + durDays(pl.step) + '.</p>' + (acts.length ? '<div class="row buttons deep-few">' + acts.join('') + '</div>' : '');
+  }
   function openDeep() {
     if (!deepState.fxId || !fxList().some((x) => x.id === deepState.fxId && !x.archived)) { const a = fxList().filter((x) => !x.archived && x.v === 2); deepState.fxId = a.length ? a[a.length - 1].id : ''; }
     renderDeep();
     $('deepModal').hidden = false; document.body.style.overflow = 'hidden';
   }
-  function closeDeep() { if (checkRunning === 'deep') checkStop = true; $('deepModal').hidden = true; document.body.style.overflow = ''; }
+  function closeDeep() {
+    if (checkRunning === 'deep' && !checkStop) {
+      // fermer par erreur (clic à côté, Échap) ne doit pas arrêter la série : on propose de la réduire
+      if (!confirm('Une deep évaluation est en cours.\n\nOK : l\'arrêter et fermer la fenêtre.\nAnnuler : la laisser continuer (la fenêtre est réduite en bas de l\'écran).')) { if (window.ForexiaWindows) window.ForexiaWindows.minimize('deepModal'); return; }
+      checkStop = true;
+    }
+    $('deepModal').hidden = true; document.body.style.overflow = '';
+  }
   function renderDeep() {
     const list = fxList().filter((x) => x.v === 2 && !x.archived), fx = list.find((x) => x.id === deepState.fxId);
     if (!list.length) { $('deepBody').innerHTML = '<p class="eval-empty">Aucun FX actif. Créez un FX (« 💼 Créer un FX » sur un batch, ou dans l\'Évaluation), ou désarchivez-en un (fenêtre « 💼 FX » › Archivés).</p>'; return; }
@@ -4443,6 +4467,7 @@
         h += '<div class="deep-plan"><p>Stratégie <b>' + esc(fx.strategy.name) + '</b> · ' + esc(fx.strategy.pair) + ' · levier 1:' + esc(fx.strategy.leverage) + ' · capital ' + money0.format(fx.capital) + ' · retrait : ' + esc((fx.income && fx.income.desc) || 'aucun') + '</p>' +
           '<p>Période : <b>' + frDate(pl.from) + ' → ' + frDate(pl.to) + '</b> · une évaluation tous les <b>' + durDays(pl.step) + '</b> · chacune dure <b>' + pl.months + ' mois</b> → <b>' + pl.starts.length + ' évaluation' + (pl.starts.length > 1 ? 's' : '') + '</b>.</p>' +
           (pl.starts.length ? '' : '<p class="val ko">La période est plus courte que la durée recommandée (' + pl.months + ' mois) : aucune évaluation possible.</p>') +
+          deepFewHtml(pl) +
           '<div class="row buttons deep-acts"><button type="button" class="primary" id="deepRun"' + (deepState.status === 'run' || !pl.starts.length ? ' disabled' : '') + '>▶ Lancer la deep évaluation</button>' +
           (deepState.status === 'run' ? '<button type="button" class="secondary" id="deepStop">■ Arrêter</button>' : '') + '</div></div>';
       }
@@ -4558,6 +4583,8 @@
     if (t.id === 'deepRun') return runDeep();
     if (t.id === 'deepStop') { checkStop = true; return; }
     if (t.id === 'deepAuto') { deepState.custom = null; return renderDeep(); }
+    const ds = t.closest('[data-deep-set]');
+    if (ds) { const fx = fxList().find((x) => x.id === deepState.fxId), pl = fx && deepPlan(fx); if (!pl) return; const [k, v] = ds.dataset.deepSet.split(':'); deepState.custom = Object.assign({ from: pl.from, to: pl.to, step: pl.step }, { [k]: k === 'step' ? Number(v) : v }); return renderDeep(); }
     if (t.id === 'deepSave' && deepState.res) {
       const r = deepState.res, fx = fxList().find((x) => x.id === r.fxId);
       const name = (prompt('Nom de cette deep évaluation :', 'Deep éval ' + ((fx && fx.name) || '') + ' · ' + frDate(r.plan.from) + ' → ' + frDate(r.plan.to)) || '').trim().slice(0, 100);

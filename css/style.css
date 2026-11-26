@@ -264,7 +264,7 @@ pre.code { font-family: var(--mono); font-size: 11.5px; line-height: 1.45; backg
 .check small { color: var(--muted); display: block; }
 .banner.info { background: var(--accent-soft); border-color: transparent; }
 .val { font-size: 12px; margin-top: 3px; }
-.val.ok { color: var(--up); } .val.ko { color: var(--warn); }
+.val.ok { color: var(--up); } .val.ko { color: var(--warn); } .val.warn { color: var(--warn); font-size: 13px; }
 
 /* Passerelle MT5 */
 .bridge { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; background: var(--panel-2); }
@@ -1068,7 +1068,12 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 .win-acts { display: flex; gap: 4px; align-items: center; flex: none; }
 .win-min-btn { font-weight: 700; }
 .modal.win-moving .modal-box { transition: none; }
-.modal.win-moved .modal-backdrop { background: rgba(15, 23, 42, .18); }
+/* fenêtre déplacée : flottante, la page derrière reste visible et cliquable (un clic à côté ne la ferme plus) */
+.modal.win-moved { pointer-events: none; }
+.modal.win-moved .modal-backdrop { display: none; }
+.modal.win-moved .modal-box { pointer-events: auto; box-shadow: 0 12px 40px rgba(0, 0, 0, .35); border: 1px solid var(--border); }
+.deep-few { flex-wrap: wrap; gap: 8px; }
+.deep-few button { width: auto; }
 .modal.win-min { inset: auto auto calc(12px + var(--win-slot, 0) * 54px) 12px; padding: 0; pointer-events: none; z-index: 60; display: block; }
 .modal.win-min .modal-backdrop, .modal.win-min .modal-body, .modal.win-min .modal-foot, .modal.win-min .modal-head .hint, .modal.win-min .modal-head p { display: none; }
 .modal.win-min .modal-box { pointer-events: auto; width: min(340px, calc(100vw - 24px)); max-height: none; border-radius: 12px; transform: none !important; box-shadow: 0 6px 24px rgba(0, 0, 0, .3); border: 1px solid var(--border); }
