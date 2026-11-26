@@ -268,6 +268,13 @@ choisit un scénario (du pire au meilleur cas testé) : le gain au bout d'un an 
 
 Un FX construit sur des données simulées est signalé (« à refaire avec les cours réels MT5 avant de le présenter »).
 
+**🔬 Deep évaluation FX** (page d'accueil, à côté de « Lancer le lot ») : on choisit un FX ; il est rejoué sur toute sa
+période (de la première à la dernière date de ses simulations), une évaluation tous les « écart type » jours (écart
+entre ses simulations), chacune de la durée recommandée — jamais plus courte. Tableau de bord : part gagnante (comparée
+à celle annoncée par le FX), résultat médian (comparé au « le plus souvent » du FX), moyen, « si ça se passe mal »,
+pire / meilleur, baisse en cours de route, capital moyen à la fin, barres de chaque évaluation et tableau par année de
+départ. Les évaluations sont gardées dans un batch « 🔬 Deep éval · … ». Côté agent : `fx_deep_eval`.
+
 **Fenêtre des FX : filtres et archives** : en haut de la fenêtre « 💼 FX », filtres par nom, stratégie, paire, risque
 maximum, confiance minimum et type de retrait, et tri (plus récents, confiance, ce qui est le plus souvent récupéré,
 chances de gain, risque). « 🗄 Archiver » met un FX de côté sans le supprimer : onglet « 🗄 Archivés », d'où

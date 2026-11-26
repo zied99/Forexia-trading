@@ -1,12 +1,12 @@
 <!doctype html>
-<html lang="fr" data-version="1.2.94">
+<html lang="fr" data-version="1.2.95">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Forexia Backtest</title>
   <meta name="description" content="Backtesting de stratégies de trading Forex basées sur RSI, MACD, stochastique, moyennes mobiles…">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%232563eb'/><path d='M6 22l6-7 5 4 9-11' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
-  <link rel="stylesheet" href="css/style.css?v=1.2.94">
+  <link rel="stylesheet" href="css/style.css?v=1.2.95">
 </head>
 <body>
   <div class="auth-gate" id="authGate" hidden>
@@ -324,6 +324,7 @@
               <input id="randomYTo" type="number" min="1971" max="2100" step="1" placeholder="année" aria-label="Dernière année du lot">
             </label>
             <button type="button" class="secondary" id="batchRun">Lancer le lot</button>
+            <button type="button" class="primary deep-btn" id="deepBtn" title="Rejouer un FX sur toute sa période : une évaluation toutes les « écart type » jours, chacune de la durée recommandée">🔬 Deep évaluation FX</button>
           </div>
           <p class="hint" id="batchStatus">Lance plusieurs backtests de la stratégie, chacun sur une période aléatoire (avec la durée choisie ci-dessus), tous enregistrés dans « Évaluation » et dans un nouveau batch. Plage : années entre lesquelles les périodes sont tirées (vide = tout l'historique disponible), ex. de 1997 à 2005 pour tester une époque.</p>
           <div class="row date-range" id="customRange" hidden>
@@ -452,8 +453,8 @@
           <div class="bridge-head"><b>Passerelle MT5</b><span class="pill" id="brokerState">…</span></div>
           <div class="bridge-dl">
             <span>Télécharger la passerelle (version 1.6), les deux fichiers dans un même dossier :</span>
-            <a class="dl-link" href="bridge/forexia_bridge.py?v=1.2.94" download="forexia_bridge.py">⬇ forexia_bridge.py</a>
-            <a class="dl-link" href="bridge/demarrer-passerelle.bat?v=1.2.94" download="demarrer-passerelle.bat">⬇ demarrer-passerelle.bat</a>
+            <a class="dl-link" href="bridge/forexia_bridge.py?v=1.2.95" download="forexia_bridge.py">⬇ forexia_bridge.py</a>
+            <a class="dl-link" href="bridge/demarrer-passerelle.bat?v=1.2.95" download="demarrer-passerelle.bat">⬇ demarrer-passerelle.bat</a>
             <small>Double-cliquez ensuite sur <code>demarrer-passerelle.bat</code> (Python requis) et laissez la fenêtre ouverte.</small>
           </div>
           <div id="brokerConnectBox" hidden>
@@ -530,6 +531,15 @@
       <button type="button" class="primary small fx-miner-btn" id="fxMinerBtn">⛏️ Chercheur de FX</button></div>
       <button type="button" class="ghost close" data-close aria-label="Fermer">✕</button></header>
     <div class="modal-body"><div id="fxMiner" hidden></div><div id="fxBody"></div></div>
+    <footer class="modal-foot"><div></div><div class="modal-actions"><button type="button" class="primary" data-close>Fermer</button></div></footer>
+  </div>
+</div>
+<div class="modal" id="deepModal" hidden>
+  <div class="modal-backdrop" data-close></div>
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="deepTitle">
+    <header class="modal-head"><div><h2 id="deepTitle">🔬 Deep évaluation d'un FX</h2><p class="hint">Rejoue le FX sur toute sa période : une évaluation à intervalles réguliers (l'écart type entre ses simulations), chacune de la durée recommandée par le FX.</p></div>
+      <button type="button" class="ghost close" data-close aria-label="Fermer">✕</button></header>
+    <div class="modal-body" id="deepBody"></div>
     <footer class="modal-foot"><div></div><div class="modal-actions"><button type="button" class="primary" data-close>Fermer</button></div></footer>
   </div>
 </div>
@@ -777,7 +787,7 @@
             <p class="hint">La passerelle est un petit programme qui tourne sur votre PC : elle dépose l'EA dans MT5, le compile, lance le testeur et peut l'ouvrir sur un graphique. Installation unique :</p>
             <ol class="steps">
               <li>Installez <a href="https://www.python.org/downloads/" target="_blank" rel="noopener">Python</a> (cochez « Add python.exe to PATH »).</li>
-              <li>Téléchargez <a href="bridge/forexia_bridge.py?v=1.2.94" download="forexia_bridge.py">forexia_bridge.py</a> et <a href="bridge/demarrer-passerelle.bat?v=1.2.94" download="demarrer-passerelle.bat">demarrer-passerelle.bat</a> dans un même dossier.</li>
+              <li>Téléchargez <a href="bridge/forexia_bridge.py?v=1.2.95" download="forexia_bridge.py">forexia_bridge.py</a> et <a href="bridge/demarrer-passerelle.bat?v=1.2.95" download="demarrer-passerelle.bat">demarrer-passerelle.bat</a> dans un même dossier.</li>
               <li>Double-cliquez sur <code>demarrer-passerelle.bat</code> et laissez la fenêtre ouverte. Si le navigateur demande l'accès au « réseau local », acceptez.</li>
               <li>Collez le code d'appairage affiché dans cette fenêtre :</li>
             </ol>
@@ -852,23 +862,23 @@
     <br>Forexia <span id="appVersion">1.2</span>
   </footer>
 
-  <script src="js/cloud.js?v=1.2.94"></script>
-  <script src="js/indicators.js?v=1.2.94"></script>
-  <script src="js/expr.js?v=1.2.94"></script>
-  <script src="js/trade.js?v=1.2.94"></script>
-  <script src="js/advisor.js?v=1.2.94"></script>
-  <script src="js/events.js?v=1.2.94"></script>
-  <script src="js/confidence.js?v=1.2.94"></script>
-  <script src="js/backtest.js?v=1.2.94"></script>
-  <script src="js/data.js?v=1.2.94"></script>
-  <script src="js/presets.js?v=1.2.94"></script>
-  <script src="js/french.js?v=1.2.94"></script>
-  <script src="js/enhancer.js?v=1.2.94"></script>
-  <script src="js/analyzer.js?v=1.2.94"></script>
-  <script src="js/fxcore.js?v=1.2.94"></script>
-  <script src="js/mql5.js?v=1.2.94"></script>
-  <script src="js/broker.js?v=1.2.94"></script>
-  <script src="js/chart.js?v=1.2.94"></script>
-  <script src="js/app.js?v=1.2.94"></script>
+  <script src="js/cloud.js?v=1.2.95"></script>
+  <script src="js/indicators.js?v=1.2.95"></script>
+  <script src="js/expr.js?v=1.2.95"></script>
+  <script src="js/trade.js?v=1.2.95"></script>
+  <script src="js/advisor.js?v=1.2.95"></script>
+  <script src="js/events.js?v=1.2.95"></script>
+  <script src="js/confidence.js?v=1.2.95"></script>
+  <script src="js/backtest.js?v=1.2.95"></script>
+  <script src="js/data.js?v=1.2.95"></script>
+  <script src="js/presets.js?v=1.2.95"></script>
+  <script src="js/french.js?v=1.2.95"></script>
+  <script src="js/enhancer.js?v=1.2.95"></script>
+  <script src="js/analyzer.js?v=1.2.95"></script>
+  <script src="js/fxcore.js?v=1.2.95"></script>
+  <script src="js/mql5.js?v=1.2.95"></script>
+  <script src="js/broker.js?v=1.2.95"></script>
+  <script src="js/chart.js?v=1.2.95"></script>
+  <script src="js/app.js?v=1.2.95"></script>
 </body>
 </html>

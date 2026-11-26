@@ -4308,6 +4308,138 @@
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('agModal').hidden) closeAgent(); });
   updateAgBtn();
+
+  // ---------- 🔬 Deep évaluation d'un FX : une évaluation toutes les « écart type » jours, chacune de la durée recommandée ----------
+  let deepState = { fxId: '', status: 'idle', res: null };
+  const DAY = 864e5;
+  /** Plan de la deep évaluation : début et fin de la période du FX, pas (écart type entre ses simulations), durée. */
+  function deepPlan(fx) {
+    const S = (fx.sims || []).filter((x) => x.from && x.to);
+    if (S.length < 2) return { error: 'Ce FX ne garde pas les dates de ses simulations : recréez-le (« 💼 Créer un FX » sur un batch).' };
+    const g = fx.spacing || F.fxcore.spacingOf(S);
+    const from = S.map((x) => x.from).sort()[0], to0 = S.map((x) => x.to).sort().pop(), today = F.data.iso(new Date());
+    const to = to0 < today ? to0 : today, months = Math.max(1, (fx.duration && fx.duration.reco) || 12);
+    const step = Math.max(7, Math.round((g && g.sdDays) || 30));
+    const starts = [];
+    for (let t = Date.parse(from + 'T00:00:00Z'); ; t += step * DAY) {
+      const st = new Date(t), en = new Date(F.data.addMonths(st, months).getTime() - DAY);
+      if (F.data.iso(en) > to) break; // pas d'évaluation plus courte que la durée recommandée
+      starts.push({ from: F.data.iso(st), to: F.data.iso(en) });
+      if (starts.length > 2000) break;
+    }
+    return { from: from, to: to, step: step, months: months, starts: starts, spacing: g };
+  }
+  const durDays = (d) => (d < 60 ? Math.round(d) + ' jours' : num1.format(d / 30.4375) + ' mois');
+  function openDeep() {
+    if (!deepState.fxId || !fxList().some((x) => x.id === deepState.fxId)) { const a = fxList().filter((x) => !x.archived && x.v === 2); deepState.fxId = a.length ? a[a.length - 1].id : ''; }
+    renderDeep();
+    $('deepModal').hidden = false; document.body.style.overflow = 'hidden';
+  }
+  function closeDeep() { if (checkRunning === 'deep') checkStop = true; $('deepModal').hidden = true; document.body.style.overflow = ''; }
+  function renderDeep() {
+    const list = fxList().filter((x) => x.v === 2), fx = list.find((x) => x.id === deepState.fxId);
+    if (!list.length) { $('deepBody').innerHTML = '<p class="eval-empty">Aucun FX enregistré. Créez d\'abord un FX (« 💼 Créer un FX » sur un batch, ou dans l\'Évaluation).</p>'; return; }
+    let h = '<div class="deep-pick"><label class="field">FX à évaluer<select id="deepFx">' + list.map((x) => '<option value="' + esc(x.id) + '"' + (x.id === deepState.fxId ? ' selected' : '') + '>' + esc(x.name) + (x.archived ? ' (archivé)' : '') + '</option>').join('') + '</select></label></div>';
+    if (fx) {
+      const pl = deepPlan(fx);
+      if (pl.error) h += '<p class="val ko">' + esc(pl.error) + '</p>';
+      else {
+        h += '<div class="deep-plan"><p>Stratégie <b>' + esc(fx.strategy.name) + '</b> · ' + esc(fx.strategy.pair) + ' · levier 1:' + esc(fx.strategy.leverage) + ' · capital ' + money0.format(fx.capital) + ' · retrait : ' + esc((fx.income && fx.income.desc) || 'aucun') + '</p>' +
+          '<p>Période du FX : <b>' + frDate(pl.from) + ' → ' + frDate(pl.to) + '</b> · une évaluation tous les <b>' + durDays(pl.step) + '</b> (écart type entre ses simulations) · chacune dure <b>' + pl.months + ' mois</b> (durée recommandée) → <b>' + pl.starts.length + ' évaluation' + (pl.starts.length > 1 ? 's' : '') + '</b>.</p>' +
+          (pl.starts.length ? '' : '<p class="val ko">La période du FX est plus courte que sa durée recommandée : aucune évaluation possible.</p>') +
+          '<div class="row buttons deep-acts"><button type="button" class="primary" id="deepRun"' + (deepState.status === 'run' || !pl.starts.length ? ' disabled' : '') + '>▶ Lancer la deep évaluation</button>' +
+          (deepState.status === 'run' ? '<button type="button" class="secondary" id="deepStop">■ Arrêter</button>' : '') + '</div></div>';
+      }
+    }
+    if (deepState.status === 'run') h += '<div class="modal-loading"><span class="spinner"></span>' + esc(deepState.msg || '') + '</div>';
+    if (deepState.res && deepState.res.fxId === deepState.fxId) h += deepResultHtml(deepState.res, fx);
+    $('deepBody').innerHTML = h;
+    if (deepState.res && deepState.res.fxId === deepState.fxId && deepState.res.rows.length) mountDeepCharts(deepState.res);
+  }
+  async function runDeep() {
+    const fx = fxList().find((x) => x.id === deepState.fxId);
+    if (!fx || checkRunning || batchRunning) return toast('Un calcul est déjà en cours.', false);
+    if (!fx.strategy.data) return toast('Ce FX n\'a pas gardé sa stratégie.', false);
+    const pl = deepPlan(fx);
+    if (pl.error || !pl.starts.length) return;
+    if (pl.starts.length > 150 && !confirm(pl.starts.length + ' évaluations à lancer (une tous les ' + durDays(pl.step) + '). Cela peut prendre du temps. Continuer ?')) return;
+    const w = fx.income && fx.income.w, wOn = w && w.on !== false && w.mode !== 'none';
+    const e0 = { strategy: fx.strategy.data, config: Object.assign({}, currentConfig(), fx.strategy.config || {}, { capital: fx.capital, leverage: Number(fx.strategy.leverage) || currentConfig().leverage,
+      withdraw: wOn ? Object.assign({ on: true }, w) : { on: false } }) };
+    const saved = captureForm(), rows = [];
+    const b = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), at: new Date().toISOString(), auto: true, deep: fx.id, name: '🔬 Deep éval · ' + fx.name, entries: [] };
+    const bl = batchStore.get(); bl.push(b); batchStore.set(bl); updateBatchCount();
+    deepState.status = 'run'; deepState.res = null; checkRunning = 'deep'; checkStop = false;
+    try {
+      for (let i = 0; i < pl.starts.length && !checkStop; i++) {
+        const p = pl.starts[i];
+        deepState.msg = 'Évaluation ' + (i + 1) + ' / ' + pl.starts.length + ' : ' + frDate(p.from) + ' → ' + frDate(p.to); renderDeepProgress();
+        setRunLabel('Deep éval ' + (i + 1) + ' / ' + pl.starts.length);
+        const before = evalList().length;
+        const st = await rerunEntry(e0, dateOf(p.from), dateOf(p.to), '', false);
+        if (!st) continue;
+        const all = evalList(), e = all.length > before ? all[all.length - 1] : all.slice().reverse().find((x) => x.name === fx.strategy.name && Math.abs(Date.parse(x.from) - Date.parse(p.from)) <= 5 * DAY && Math.abs(Date.parse(x.to) - Date.parse(p.to)) <= 5 * DAY);
+        rows.push({ from: p.from, to: p.to, ret: st.returnPct, dd: st.maxDrawdownPct, trades: st.trades, withdrawn: st.totalWithdrawn || 0, key: e && e.key });
+        if (e) addToLotBatch(b, e);
+        await new Promise((r) => setTimeout(r, 10));
+      }
+    } finally {
+      checkRunning = ''; setRunLabel('');
+      restoring = true;
+      try { loadStrategy(saved.strat); applyConfig(saved.config); $('style').value = saved.style; $('preset').value = [...$('preset').options].some((o) => o.value === saved.preset) ? saved.preset : 'mine'; $('presetDesc').textContent = saved.desc; updateWithdrawUI(); syncFormState(); }
+      finally { restoring = false; }
+    }
+    if (!rows.length) { batchStore.set(batchStore.get().filter((x) => x.id !== b.id)); updateBatchCount(); }
+    deepState.status = 'done';
+    deepState.res = { fxId: fx.id, rows: rows, plan: pl, stopped: checkStop, batchId: rows.length ? b.id : null, at: new Date().toISOString() };
+    logEvent('fx.deep', 'Deep évaluation du FX « ' + fx.name + ' » : ' + rows.length + ' évaluations', { fx: fx.id });
+    renderDeep();
+  }
+  function renderDeepProgress() { const x = $('deepBody').querySelector('.modal-loading'); if (x) x.innerHTML = '<span class="spinner"></span>' + esc(deepState.msg || ''); else renderDeep(); }
+  function deepResultHtml(res, fx) {
+    const R = res.rows, n = R.length;
+    if (!n) return '<p class="val ko">Aucune évaluation n\'a pu être faite : ' + esc($('formError').textContent || 'données indisponibles') + '.</p>';
+    const ret = R.map((r) => r.ret), sorted = ret.slice().sort((a, b) => a - b), q = (p) => F.fxcore.pctile(ret, p), win = ret.filter((v) => v > 0).length;
+    const pc = (v) => '<span class="' + cls(v) + '">' + signed(v, num1) + ' %</span>';
+    const kpi = (label, value, sub, c) => '<div class="panel kpi"><div class="label">' + label + '</div><div class="value ' + (c || '') + '">' + value + '</div><div class="sub">' + (sub || '&nbsp;') + '</div></div>';
+    const fxWin = fx ? Math.round(fx.winRate) : null, fxMed = fx ? fx.scenarios.med - 100 : null;
+    const ddMed = F.fxcore.median(R.map((r) => r.dd)), ddMax = Math.max(...R.map((r) => r.dd));
+    // par année de départ
+    const byY = {}; R.forEach((r) => { const y = r.from.slice(0, 4); (byY[y] = byY[y] || []).push(r.ret); });
+    let h = '<section class="deep-res"><h3>Résultats' + (res.stopped ? ' (arrêtée avant la fin)' : '') + ' — ' + n + ' évaluation' + (n > 1 ? 's' : '') + ' de ' + res.plan.months + ' mois</h3>' +
+      '<div class="kpis deep-kpis">' +
+      kpi('Gagnantes', Math.round((win / n) * 100) + ' %', win + ' sur ' + n + (fxWin != null ? ' · FX : ' + fxWin + ' %' : ''), win * 2 >= n ? 'pos' : 'neg') +
+      kpi('Résultat médian', pc(q(0.5)), fxMed != null ? 'FX « le plus souvent » : ' + signed(fxMed, num1) + ' %' : '') +
+      kpi('Résultat moyen', pc(mean(ret)), 'de ' + signed(sorted[0], num1) + ' % à ' + signed(sorted[n - 1], num1) + ' %') +
+      kpi('Si ça se passe mal', pc(q(0.1)), '1 évaluation sur 10 fait pire') +
+      kpi('Pire', pc(sorted[0]), 'meilleur : ' + signed(sorted[n - 1], num1) + ' %') +
+      kpi('Baisse en cours de route', '−' + num1.format(ddMed) + ' %', 'en général · au pire −' + num1.format(ddMax) + ' %', 'neg') +
+      kpi('Capital moyen à la fin', money0.format(((fx ? fx.capital : 10000) * (100 + mean(ret))) / 100), 'pour ' + money0.format(fx ? fx.capital : 10000) + ' investis') +
+      '</div>' +
+      '<section class="eval-chart"><h4>Résultat de chaque évaluation</h4><p class="hint">Dans l\'ordre des dates de départ (une tous les ' + durDays(res.plan.step) + ').</p><div id="deepBars"></div></section>' +
+      '<section class="eval-chart"><h4>Par année de départ</h4><div class="table-wrap"><table class="eval deep-years"><thead><tr><th class="l">Année</th><th>Évaluations</th><th>Gagnantes</th><th>Médiane</th><th>Pire</th><th>Meilleure</th></tr></thead><tbody>' +
+      Object.keys(byY).sort().map((y) => { const L = byY[y], s = L.slice().sort((a, b) => a - b); return '<tr><td class="l">' + y + '</td><td>' + L.length + '</td><td>' + Math.round((L.filter((v) => v > 0).length / L.length) * 100) + ' %</td><td>' + pc(F.fxcore.median(L)) + '</td><td>' + pc(s[0]) + '</td><td>' + pc(s[s.length - 1]) + '</td></tr>'; }).join('') +
+      '</tbody></table></div></section>' +
+      (res.batchId ? '<p class="hint">Les ' + n + ' évaluations sont dans l\'Évaluation (batch « 🔬 Deep éval · ' + esc(fx ? fx.name : '') + ' »). <button type="button" class="link" id="deepOpenBatch">Les ouvrir</button></p>' : '') + '</section>';
+    return h;
+  }
+  function mountDeepCharts(res) {
+    const R = res.rows, el = $('deepBars');
+    if (!el) return;
+    const abs = R.map((r) => Math.abs(r.ret)).sort((a, b) => a - b), cap = Math.max(20, 2 * (abs[Math.floor(abs.length * 0.9)] || 20));
+    F.chart.mountBars(el, { labels: R.map((r) => frDate(r.from)), values: R.map((r) => Math.max(-cap, Math.min(cap, r.ret))), format: (v) => num1.format(v) + ' %', height: 220,
+      topLabels: R.length <= 60, titles: R.map((r) => frDate(r.from) + ' → ' + frDate(r.to) + ' : ' + signed(r.ret, num1) + ' % · baisse max −' + num1.format(r.dd) + ' % · ' + r.trades + ' trades') });
+  }
+  $('deepBtn').addEventListener('click', openDeep);
+  $('deepModal').addEventListener('click', (ev) => {
+    const t = ev.target;
+    if (t.closest('[data-close]')) return closeDeep();
+    if (t.id === 'deepRun') return runDeep();
+    if (t.id === 'deepStop') { checkStop = true; return; }
+    if (t.id === 'deepOpenBatch' && deepState.res && deepState.res.batchId) { const b = batchStore.get().find((x) => x.id === deepState.res.batchId); if (b) { closeDeep(); loadBatch(b); openEvaluation('charts'); } }
+  });
+  $('deepModal').addEventListener('change', (ev) => { if (ev.target.id === 'deepFx') { deepState.fxId = ev.target.value; renderDeep(); } });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('deepModal').hidden) closeDeep(); });
   updateFxCount();
   async function runWd() {
     const st = wdState;

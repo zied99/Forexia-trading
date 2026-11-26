@@ -447,7 +447,7 @@ module.exports = function fxTools(ctx) {
             'Levier au-delà de 1:30 : hors limite européenne pour les particuliers.',
           ],
           tools: ['modify_strategy', 'run_batch', 'vary_batch', 'improve_batch', 'subset_batch', 'list_batches', 'get_batch', 'compare_batches', 'time_analysis', 'get_eras', 'set_eras', 'market_events', 'analyze_simulation', 'apply_proposal', 'era_analysis',
-            'simulate_withdrawal', 'compare_withdrawals', 'save_withdraw_mechanic', 'list_withdraw_mechanics', 'build_fx', 'fx_projection', 'list_fx', 'get_fx', 'save_fx', 'rename_fx', 'delete_fx', 'mine_fx', 'note_add', 'note_list', 'forexia_sync', 'import_ea', 'agent_guide', 'fx_simulations', 'fx_ea', 'batches_by_era', 'resimulate_batch', 'restore_batch', 'strategy_versions', 'revert_strategy'],
+            'simulate_withdrawal', 'compare_withdrawals', 'save_withdraw_mechanic', 'list_withdraw_mechanics', 'build_fx', 'fx_projection', 'list_fx', 'get_fx', 'save_fx', 'rename_fx', 'delete_fx', 'mine_fx', 'note_add', 'note_list', 'forexia_sync', 'import_ea', 'agent_guide', 'fx_simulations', 'fx_ea', 'fx_deep_eval', 'batches_by_era', 'resimulate_batch', 'restore_batch', 'strategy_versions', 'revert_strategy'],
           currentEras: erasNow(),
         };
       },
@@ -936,6 +936,32 @@ module.exports = function fxTools(ctx) {
         return Object.assign({ fx: fx.name, capital: Math.round(fx.capital), withdrawal: fx.income.desc + ' (à faire à la main)',
           strategyVersion: newer ? (a.latest !== false ? 'version actuelle (plus récente que le FX : à signaler à l\'utilisateur, et refaire le FX pour qu\'il corresponde)' : 'version du FX (une version plus récente existe)') : 'version du FX (à jour)',
           changesSinceFx: newer ? versionDiff(fx.strategy.data, savedS).map((d) => d.t + ' ' + d.txt) : undefined }, r);
+      },
+    },
+    {
+      name: 'fx_deep_eval',
+      description: '« 🔬 Deep évaluation FX » : rejoue un FX sur toute sa période, une évaluation toutes les « écart type » jours (écart entre ses simulations, ou stepDays), chacune de la durée recommandée (jamais plus courte) ; enregistre le batch et renvoie les statistiques comparées à celles du FX.',
+      inputSchema: obj({ id: { type: 'string' }, stepDays: { type: 'number', description: 'pas entre deux évaluations (défaut : écart type entre les simulations du FX)' } }, ['id']),
+      handler: async (a) => {
+        const fx = getFx(a.id), S = (fx.sims || []).filter((x) => x.from && x.to);
+        if (!fx.strategy.data) fail('Ce FX n\'a pas gardé sa stratégie.');
+        if (S.length < 2) fail('Ce FX ne garde pas les dates de ses simulations.');
+        const g = fx.spacing || FC.spacingOf(S), from = S.map((x) => x.from).sort()[0], to = [S.map((x) => x.to).sort().pop(), iso(today())].sort()[0];
+        const months = Math.max(1, (fx.duration && fx.duration.reco) || 12), step = Math.max(7, Math.round(a.stepDays || (g && g.sdDays) || 30)), periods = [];
+        for (let t = Date.parse(from + 'T00:00:00Z'); periods.length < 2000; t += step * 864e5) {
+          const st = new Date(t), en = new Date(D.addMonths(st, months).getTime() - 864e5);
+          if (iso(en) > to) break;
+          periods.push({ from: iso(st), to: iso(en) });
+        }
+        if (!periods.length) fail('Période du FX plus courte que sa durée recommandée.');
+        const m = Object.assign(fx.strategy.config ? marketOfEntry({ config: fx.strategy.config, pair: fx.strategy.pair, data: fx.strategy.dataLabel }) : { pair: fx.strategy.pair, source: /simul/i.test(fx.strategy.dataLabel || '') ? 'synthetic' : 'online' }, { capital: fx.capital, leverage: Number(fx.strategy.leverage) || 10 });
+        const w = fx.income && fx.income.w; if (w && w.on !== false && w.mode !== 'none') m.withdraw = w.mode === 'periodic' ? { mode: 'periodic', every: w.every, days: w.days, type: w.type, value: w.value } : { pct: w.pct, share: w.share, when: w.when }; else delete m.withdraw;
+        const r = await runBatch({ strategy: Object.assign({}, fx.strategy.data, { name: fx.strategy.name }), market: m, periods: periods, name: '🔬 Deep éval · ' + fx.name });
+        const st = r.batch.stats;
+        return { fx: fx.name, period: from + ' → ' + to, stepDays: step, months: months, evaluations: r.simulations.length, batch: r.batch.id,
+          stats: { winRatePct: st.winRatePct, medianReturnPct: st.medianReturnPct, meanReturnPct: st.meanReturnPct, p10ReturnPct: st.p10ReturnPct, worstReturnPct: st.worstReturnPct, bestReturnPct: st.bestReturnPct, meanMaxDrawdownPct: st.meanMaxDrawdownPct, worstMaxDrawdownPct: st.worstMaxDrawdownPct },
+          fxClaims: { winRatePct: r2(fx.winRate), usualBackPct: r2(fx.scenarios.med - 100), badBackPct: r2(fx.scenarios.p10 - 100) },
+          hint: 'Comparer stats et fxClaims : un écart important signale un FX trop optimiste. time_analysis sur le batch pour le détail par année.' };
       },
     },
     {
