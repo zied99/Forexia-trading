@@ -81,6 +81,12 @@ sont réunies).
 page passe en arrière-plan ou se ferme), rien n'est renvoyé s'il n'a pas changé, le cache des résultats de retrait
 (recalculable) n'y est pas gardé, les simulations y sont envoyées sans leur liste de trades (gardée dans la base de la
 passerelle), et la synchronisation complète n'a lieu qu'à l'ouverture, à la connexion, ou au plus toutes les 10 minutes.
+**Synchronisation sans perte** : les listes (FX, batchs, mécaniques, versions…) sont réunies entre l'appareil, la base de
+la passerelle et le compte en ligne, au lieu d'être remplacées par la version la plus récente : rien n'est perdu, et les
+suppressions que vous faites sont transmises aux autres appareils (journal des suppressions). La page ouverte sur le PC
+relit la base de la passerelle chaque minute (et au retour sur la page) : ce que l'agent y enregistre arrive dans le
+compte en ligne, puis sur les autres appareils. Passerelle 1.7 : limite relevée pour les gros batchs (et un élément
+refusé n'empêche plus l'envoi des autres).
 **La base est la référence, le navigateur n'est qu'une copie.** Pendant la session, chaque donnée est gardée en
 mémoire et envoyée à la base ; le navigateur en garde une copie s'il a de la place. S'il est plein, rien n'échoue et
 rien n'est à supprimer : la donnée reste dans la base et revient à l'ouverture suivante. Sans base connectée, un

@@ -28,7 +28,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "1.6"
+VERSION = "1.7"
 DEFAULT_PORT = 8787
 PAGE_ORIGIN = "https://zied99.github.io"
 FILE_RE = re.compile(r"^Forexia_[A-Za-z0-9_]{1,60}\.mq5$")
@@ -630,7 +630,7 @@ def db_action(args, path, body):
                         raise ValueError("Clé invalide.")
                     data = body.get("data")
                     conn.execute("INSERT INTO kv (key, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at",
-                                 (key, _text(data, 6000000) if data is not None else None, str(body.get("updatedAt") or now_iso())[:40]))
+                                 (key, _text(data, 80000000) if data is not None else None, str(body.get("updatedAt") or now_iso())[:40]))
                     return {"ok": True}
                 if path == "kv/delete":
                     conn.execute("DELETE FROM kv WHERE key = ?", (str(body.get("key", "")),))
@@ -750,7 +750,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0") or 0)
-                if length > MAX_BODY * 4:
+                if length > MAX_BODY * 60:  # base : données de la page (batchs, FX…) jusqu'à ~120 Mo
                     raise ValueError("Requête trop volumineuse.")
                 body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
                 return self._send(200, db_action(self.server.args, path[4:], body))

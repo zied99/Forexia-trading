@@ -19,7 +19,7 @@
   // ---------- Toutes les données dans la base : passerelle (base SQLite sur votre PC) et compte en ligne ----------
   // Chaque donnée gardée dans le navigateur est aussi enregistrée dans la base dès qu'elle change, et récupérée
   // à la connexion (la version la plus récente l'emporte ; à la première connexion d'un appareil, les listes sont réunies).
-  const SYNC_KEYS = ['forexia.stratVersions', 'forexia.agentGuide', 'forexia.fx', 'forexia.batches', 'forexia.eras', 'forexia.events', 'forexia.wdPresets', 'forexia.wdResults', 'forexia.drawings', 'forexia.lastRun'];
+  const SYNC_KEYS = ['forexia.syncTomb', 'forexia.stratVersions', 'forexia.agentGuide', 'forexia.fx', 'forexia.batches', 'forexia.eras', 'forexia.events', 'forexia.wdPresets', 'forexia.wdResults', 'forexia.drawings', 'forexia.lastRun'];
   const SYNC_META = 'forexia.syncMeta';
   const syncMeta = () => { try { return JSON.parse(localStorage.getItem(SYNC_META)) || {}; } catch (e) { return {}; } };
   let syncMuted = false, syncTimer = null, kvOldBridge = false;
@@ -35,7 +35,9 @@
     const ours = (st, k) => st === window.localStorage && String(k).startsWith('forexia.');
     P.setItem = function (k, v) {
       if (!ours(this, k)) return set.call(this, k, v);
-      v = String(v); lsMem.set(k, v);
+      v = String(v);
+      if (!syncMuted && SYNC_KEYS.includes(k) && k !== TOMB_KEY) noteRemoved(k, lsMem.has(k) ? lsMem.get(k) : get.call(this, k), v);
+      lsMem.set(k, v);
       try { set.call(this, k, v); lsFullKeys.delete(k); }
       catch (e) {
         if (!isQuota(e)) throw e;
@@ -47,6 +49,30 @@
     P.getItem = function (k) { return ours(this, k) && lsMem.has(k) ? lsMem.get(k) : get.call(this, k); };
     P.removeItem = function (k) { if (ours(this, k)) { lsMem.delete(k); lsFullKeys.delete(k); } rem.call(this, k); if (!syncMuted && SYNC_KEYS.includes(k) && this === window.localStorage) kvDirty(k); };
   })();
+  // Suppressions dans les listes synchronisées : [{id: 'forexia.fx|<id>', at}] — sans elles, la fusion des listes
+  // (qui ne perd jamais rien) ferait réapparaître un élément supprimé sur un autre appareil.
+  const TOMB_KEY = 'forexia.syncTomb';
+  const itemId = (x) => (x && (x.id || x.key || x.name)) || JSON.stringify(x);
+  function tombSet() { try { const t = JSON.parse(localStorage.getItem(TOMB_KEY)); return new Set((Array.isArray(t) ? t : []).map((x) => x.id)); } catch (e) { return new Set(); } }
+  function noteRemoved(k, before, after) {
+    let a, b;
+    try { a = JSON.parse(before); b = JSON.parse(after); } catch (e) { return; }
+    if (!Array.isArray(a) || !Array.isArray(b)) return;
+    const keep = new Set(b.map(itemId)), gone = a.map(itemId).filter((id) => !keep.has(id));
+    if (!gone.length) return;
+    let t = []; try { t = JSON.parse(localStorage.getItem(TOMB_KEY)) || []; } catch (e) { /* ignoré */ }
+    const at = new Date().toISOString(), have = new Set(t.map((x) => x.id));
+    for (const id of gone) if (!have.has(k + '|' + id)) t.push({ id: k + '|' + id, at: at });
+    localStorage.setItem(TOMB_KEY, JSON.stringify(t.slice(-5000)));
+  }
+  /** Fusion de deux listes : rien n'est perdu (réunion par identifiant, « prio » l'emporte pour un même élément), sauf
+   *  ce qui a été supprimé (sur n'importe quel appareil). */
+  function kvMerge(k, prio, other) {
+    if (!Array.isArray(prio) || !Array.isArray(other)) return prio;
+    const map = new Map(), dead = tombSet();
+    other.forEach((x) => map.set(itemId(x), x)); prio.forEach((x) => map.set(itemId(x), x));
+    return [...map.values()].filter((x) => !dead.has(k + '|' + itemId(x)));
+  }
   /** Stockage du navigateur plein : sans base connectée, les nouvelles données seraient perdues au rechargement. */
   let storageNoticeAt = 0;
   function storageFullNotice() {
@@ -75,7 +101,11 @@
     if (!dbOn || kvOldBridge) return;
     for (const it of items) {
       try { await dbCall('kv/put', it); }
-      catch (e) { if (/Inconnu/.test(e.message)) { kvOldBridge = true; toast('Mettez à jour la passerelle MT5 (version 1.6) pour enregistrer aussi les FX, batchs, époques… dans la base.', false); } return; }
+      catch (e) {
+        if (/Inconnu/.test(e.message)) { kvOldBridge = true; toast('Mettez à jour la passerelle MT5 (version 1.6) pour enregistrer aussi les FX, batchs, époques… dans la base.', false); return; }
+        console.warn('Base de la passerelle : « ' + it.key + ' » non enregistré (' + e.message + ')'); // les autres données continuent
+        if (/volumineu/i.test(e.message)) toast('La base de la passerelle refuse « ' + it.key.replace('forexia.', '') + ' » (trop volumineux) : mettez à jour la passerelle (git pull puis relancez-la). Les autres données sont bien enregistrées.', false);
+      }
     }
   }
   // Compte en ligne (Supabase) : économe en écritures disque. Les caches recalculables n'y vont pas, les envois sont
@@ -126,6 +156,9 @@
     else if (typeof cloudOn === 'function' && cloudOn() && Date.now() - cloudPullAt > 2 * 60000) { cloudPullAt = Date.now(); cloudFlushNow(); kvSyncCloud().then(() => setSync('ok')).catch(cloudFail); }
   });
   let cloudPullAt = Date.now();
+  // la base de la passerelle (où l'agent enregistre ses FX, batchs…) est relue chaque minute, et au retour sur la page
+  setInterval(() => { if (document.visibilityState === 'visible' && typeof dbOn !== 'undefined' && dbOn) kvSyncBridge().catch(() => {}); }, 60000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && typeof dbOn !== 'undefined' && dbOn) kvSyncBridge().catch(() => {}); });
   // page ouverte longtemps : nouvelle synchronisation complète toutes les 10 minutes (envois en attente compris)
   setInterval(() => { if (document.visibilityState === 'visible' && typeof cloudOn === 'function' && cloudOn()) { cloudPullAt = Date.now(); cloudFlushNow(); kvSyncCloud().then(() => setSync('ok')).catch(cloudFail); } }, 10 * 60000);
   // listes d'objets identifiés (FX, batchs, époques, mécaniques…) : réunion des deux côtés
@@ -137,21 +170,31 @@
   }
   /** Fusion avec une base : remote = [{key, data, updatedAt}] ; push(items) enregistre côté base. */
   async function kvSync(remote, push) {
-    const m = syncMeta(), out = [];
+    const m = syncMeta(), out = [], got = [];
     let changed = false;
     for (const k of SYNC_KEYS) {
       const r = remote.find((x) => x.key === k), l = kvRead(k), lAt = m[k];
       if (!r) { if (l != null) out.push({ key: k, data: l, updatedAt: lAt || new Date().toISOString() }); continue; }
       if (!lAt) {
         // jamais synchronisée sur cet appareil : on réunit
-        const d = l == null ? r.data : kvUnion(l, r.data);
-        kvWrite(k, d, r.updatedAt || new Date().toISOString()); changed = true;
+        const d = l == null ? (Array.isArray(r.data) ? kvMerge(k, r.data, []) : r.data) : k === TOMB_KEY ? kvMerge(k, l, r.data) : Array.isArray(l) ? kvMerge(k, l, r.data) : kvUnion(l, r.data);
+        kvWrite(k, d, r.updatedAt || new Date().toISOString()); changed = true; got.push(k);
         if (JSON.stringify(d) !== JSON.stringify(r.data)) { const at = new Date().toISOString(); kvWrite(k, d, at); out.push({ key: k, data: d, updatedAt: at }); }
-      } else if ((r.updatedAt || '') > lAt || (l == null && r.data != null)) { kvWrite(k, r.data, r.updatedAt); changed = true; }
-      else if (lAt > (r.updatedAt || '')) out.push({ key: k, data: l, updatedAt: lAt });
+      } else if ((r.updatedAt || '') > lAt || (l == null && r.data != null)) {
+        // la base est plus récente : pour une liste, on réunit (la base l'emporte pour un même élément) ; rien n'est perdu
+        const d = Array.isArray(r.data) && Array.isArray(l) ? kvMerge(k, r.data, l) : r.data;
+        kvWrite(k, d, r.updatedAt); changed = true; got.push(k);
+        if (JSON.stringify(d) !== JSON.stringify(r.data)) { const at = new Date().toISOString(); kvWrite(k, d, at); out.push({ key: k, data: d, updatedAt: at }); }
+      } else if (lAt > (r.updatedAt || '')) {
+        // l'appareil est plus récent : on envoie la réunion (ce que la base a en plus n'est pas perdu)
+        const d = Array.isArray(r.data) && Array.isArray(l) ? kvMerge(k, l, r.data) : l;
+        if (JSON.stringify(d) !== JSON.stringify(l)) kvWrite(k, d, lAt);
+        out.push({ key: k, data: d, updatedAt: lAt });
+      }
     }
     if (out.length) await push(out);
     if (changed) kvRefreshUi();
+    return got;
   }
   function kvRefreshUi() {
     try { updateFxCount(); refreshWdPresetPick(); updateBatchCount(); updateAgBtn(); } catch (e) { /* ignoré */ }
@@ -164,7 +207,9 @@
     let r;
     try { r = await dbCall('kv/list'); } catch (e) { if (/Inconnu/.test(e.message)) kvOldBridge = true; return; }
     kvOldBridge = false;
-    await kvSync(r.items || [], kvToBridge);
+    const got = await kvSync(r.items || [], kvToBridge);
+    // données arrivées par la passerelle (ex. FX créés par l'agent) : envoyées aussi au compte en ligne, pour les autres appareils
+    if (got.length && cloudOn()) { const m = syncMeta(); for (const k of got) if (!CLOUD_SKIP.includes(k)) cloudQueue.set(k, { key: k, data: kvRead(k), updatedAt: m[k] || new Date().toISOString() }); cloudSchedule(); }
   }
   async function kvSyncCloud() {
     if (!cloudOn()) return;

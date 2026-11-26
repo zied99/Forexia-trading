@@ -386,7 +386,9 @@ module.exports = function fxTools(ctx) {
   // ---------------------------------------------------------------- synchronisation avec la page (passerelle MT5, table kv)
   const SYNC = { 'forexia.stratVersions': verStore, 'forexia.agentGuide': guideStore, 'forexia.fx': fxs, 'forexia.batches': batches, 'forexia.eras': eraStore, 'forexia.wdPresets': wdp, 'forexia.events': evStore };
   const idOf = (x) => (x && (x.id || x.key || x.name)) || JSON.stringify(x);
-  function union(a, b) { const map = new Map(); (a || []).forEach((x) => map.set(idOf(x), x)); (b || []).forEach((x) => map.set(idOf(x), x)); return [...map.values()]; }
+  let deadIds = new Set(); // suppressions faites dans la page (clé « forexia.syncTomb » de la base)
+  let curKey = '';
+  function union(a, b) { const map = new Map(); (a || []).forEach((x) => map.set(idOf(x), x)); (b || []).forEach((x) => map.set(idOf(x), x)); return [...map.values()].filter((x) => !deadIds.has(curKey + '|' + idOf(x))); }
 
   // Ce que l'utilisateur a mis en place dans la page et attend aussi de l'agent (rappelé par fx_method)
   const NOTIONS = [
@@ -1016,8 +1018,9 @@ module.exports = function fxTools(ctx) {
         const dir = a.direction || 'both', r = await bridge('POST', '/db/kv/list', {});
         if (r.ok === false) fail(r.message || 'Base de la passerelle indisponible (version 1.6 requise).');
         const remote = new Map((r.items || []).map((x) => [x.key, x])), out = {};
+        const tomb = remote.get('forexia.syncTomb'); deadIds = new Set(((tomb && tomb.data) || []).map((x) => x.id));
         for (const [k, st] of Object.entries(SYNC)) {
-          const rv = remote.get(k), rd = rv ? rv.data : null, local = st.get();
+          const rv = remote.get(k), rd = rv ? rv.data : null, local = st.get(); curKey = k;
           let merged;
           if (k === 'forexia.events') merged = { items: union(rd && rd.items, local.items), edits: Object.assign({}, rd && rd.edits, local.edits), scanned: Object.assign({}, rd && rd.scanned, local.scanned) };
           else if (k === 'forexia.agentGuide') merged = rd && (dir !== 'push' || !local.updatedAt || (rd.updatedAt || '') >= local.updatedAt) ? rd : local; // le choix fait dans la page prime
@@ -1026,7 +1029,7 @@ module.exports = function fxTools(ctx) {
           if (dir !== 'push') st.set(merged);
           if (dir !== 'pull') {
             const send = dir === 'push' && Array.isArray(merged) && Array.isArray(rd) ? union(rd, merged) : merged;
-            if (JSON.stringify(send) !== JSON.stringify(rd)) { const p = await bridge('POST', '/db/kv/put', { key: k, data: send, updatedAt: new Date().toISOString() }); if (p.ok === false) fail(p.message || 'Écriture refusée.'); }
+            if (JSON.stringify(send) !== JSON.stringify(rd)) { const p = await bridge('POST', '/db/kv/put', { key: k, data: send, updatedAt: new Date().toISOString() }); if (p.ok === false) (out.refused = out.refused || {})[k.replace('forexia.', '')] = p.message || 'écriture refusée'; }
           }
           out[k.replace('forexia.', '')] = k === 'forexia.agentGuide' ? (merged.active || 'free') : Array.isArray(merged) ? merged.length : (merged.items || []).length;
         }
@@ -1037,7 +1040,8 @@ module.exports = function fxTools(ctx) {
         if (dir !== 'push') store.setStrategies(localS);
         if (dir !== 'pull') for (const l of localS) { const r = remoteS.get(l.name); if (!r || (l.savedAt || '') > (r.data.savedAt || r.updatedAt || '')) { const d = Object.assign({}, l, { savedAt: l.savedAt || new Date().toISOString() }); if (d.config && !d.config.withdraw) delete d.config; await bridge('POST', '/db/strategies/put', { name: d.name, data: d, updatedAt: d.savedAt }); pushed++; } }
         out.strategies = { pulled: pulled, pushed: pushed, total: localS.length };
-        return { direction: dir, counts: out, note: 'La page reprend ces données à sa prochaine connexion à la passerelle (ou en rechargeant la page).' };
+        const refused = out.refused; delete out.refused;
+        return { direction: dir, counts: out, refused: refused, refusedHint: refused ? 'Les autres données sont bien envoyées. « trop volumineuse » : mettre à jour la passerelle (git pull, puis la relancer).' : undefined, note: 'La page reprend ces données à sa prochaine connexion à la passerelle (ou en rechargeant la page).' };
       },
     },
   ];
