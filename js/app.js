@@ -4331,15 +4331,16 @@
   }
   const durDays = (d) => (d < 60 ? Math.round(d) + ' jours' : num1.format(d / 30.4375) + ' mois');
   function openDeep() {
-    if (!deepState.fxId || !fxList().some((x) => x.id === deepState.fxId)) { const a = fxList().filter((x) => !x.archived && x.v === 2); deepState.fxId = a.length ? a[a.length - 1].id : ''; }
+    if (!deepState.fxId || !fxList().some((x) => x.id === deepState.fxId && !x.archived)) { const a = fxList().filter((x) => !x.archived && x.v === 2); deepState.fxId = a.length ? a[a.length - 1].id : ''; }
     renderDeep();
     $('deepModal').hidden = false; document.body.style.overflow = 'hidden';
   }
   function closeDeep() { if (checkRunning === 'deep') checkStop = true; $('deepModal').hidden = true; document.body.style.overflow = ''; }
   function renderDeep() {
-    const list = fxList().filter((x) => x.v === 2), fx = list.find((x) => x.id === deepState.fxId);
-    if (!list.length) { $('deepBody').innerHTML = '<p class="eval-empty">Aucun FX enregistré. Créez d\'abord un FX (« 💼 Créer un FX » sur un batch, ou dans l\'Évaluation).</p>'; return; }
-    let h = '<div class="deep-pick"><label class="field">FX à évaluer<select id="deepFx">' + list.map((x) => '<option value="' + esc(x.id) + '"' + (x.id === deepState.fxId ? ' selected' : '') + '>' + esc(x.name) + (x.archived ? ' (archivé)' : '') + '</option>').join('') + '</select></label></div>';
+    const list = fxList().filter((x) => x.v === 2 && !x.archived), fx = list.find((x) => x.id === deepState.fxId);
+    if (!list.length) { $('deepBody').innerHTML = '<p class="eval-empty">Aucun FX actif. Créez un FX (« 💼 Créer un FX » sur un batch, ou dans l\'Évaluation), ou désarchivez-en un (fenêtre « 💼 FX » › Archivés).</p>'; return; }
+    if (!fx) { deepState.fxId = list[list.length - 1].id; return renderDeep(); }
+    let h = '<div class="deep-pick"><label class="field">FX à évaluer<select id="deepFx">' + list.map((x) => '<option value="' + esc(x.id) + '"' + (x.id === deepState.fxId ? ' selected' : '') + '>' + esc(x.name) + '</option>').join('') + '</select></label></div>';
     if (fx) {
       const pl = deepPlan(fx);
       if (pl.error) h += '<p class="val ko">' + esc(pl.error) + '</p>';

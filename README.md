@@ -268,7 +268,7 @@ choisit un scénario (du pire au meilleur cas testé) : le gain au bout d'un an 
 
 Un FX construit sur des données simulées est signalé (« à refaire avec les cours réels MT5 avant de le présenter »).
 
-**🔬 Deep évaluation FX** (page d'accueil, à côté de « Lancer le lot ») : on choisit un FX ; il est rejoué sur toute sa
+**🔬 Deep éval FX** (en haut de la page, à côté de « 💼 FX ») : on choisit un FX actif (les FX archivés n'y sont pas) ; il est rejoué sur toute sa
 période (de la première à la dernière date de ses simulations), une évaluation tous les « écart type » jours (écart
 entre ses simulations), chacune de la durée recommandée — jamais plus courte. Tableau de bord : part gagnante (comparée
 à celle annoncée par le FX), résultat médian (comparé au « le plus souvent » du FX), moyen, « si ça se passe mal »,

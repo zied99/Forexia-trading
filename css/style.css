@@ -1038,6 +1038,7 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 .deep-plan { margin: 10px 0; }
 .deep-plan p { margin: 6px 0; }
 .deep-acts { display: flex; gap: 8px; flex-wrap: wrap; }
-.deep-acts button, .deep-btn { width: auto; }
+.deep-acts button { width: auto; }
 .deep-res h3 { margin: 16px 0 10px; }
 .deep-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+@media (max-width: 700px) { #deepBtn { font-size: 0; gap: 4px; padding: 6px 8px; } #deepBtn .deep-ico { font-size: 15px; } }
