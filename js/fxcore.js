@@ -90,6 +90,18 @@
     return Object.assign({}, r, { curve: curve, b: { ret: target, dd: dd }, w: Object.assign({}, r.w, { ret: target, dd: dd, final: r.capital * (1 + target / 100) - (r.w.wd || 0) }) });
   }
 
+  /** Écart dans le temps entre deux simulations (dates de début rangées) : moyenne, écart type, extrêmes (jours), part
+   *  des simulations qui chevauchent la suivante. L : [{from, to}]. */
+  function spacingOf(L) {
+    const S = L.filter((x) => x && x.from && x.to).slice().sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0));
+    if (S.length < 3) return null;
+    const d = [];
+    let over = 0;
+    for (let i = 1; i < S.length; i++) { d.push(durationDays(S[i - 1].from, S[i].from)); if (S[i].from <= S[i - 1].to) over++; }
+    const m = mean(d), sd = Math.sqrt(d.reduce((a, v) => a + (v - m) * (v - m), 0) / Math.max(1, d.length - 1));
+    return { meanDays: m, sdDays: sd, minDays: Math.min(...d), maxDays: Math.max(...d), overlapPct: (over / d.length) * 100, from: S[0].from, to: S[S.length - 1].to };
+  }
+
   // ---------- FX ----------
   function fxPrinciple(strat, pair) {
     const [a, b] = String(pair || '').toUpperCase().split('/'), na = CUR_NAME[a] || a, nb = CUR_NAME[b] || b;
@@ -185,6 +197,7 @@
       income: { name: mech.name, w: w, desc: wdDesc(w), perMonthPct: (agg.perMonth / capital) * 100, fixedPct: fixedPct, yearly: agg.yearly, kept: agg.kept, other: other.name },
       path: path,
       solidity: { score: solidity, parts: parts, synthetic: synthetic, eras: eraKeys.length, eraWin: eraWin, unit: eraUnit },
+      spacing: spacingOf(R),
       conditions: { leverage: first.leverage || cfg.leverage || null, spread: cfg.spreadPips != null ? cfg.spreadPips : null, commission: cfg.commission || 0, source: first.data || '' },
     };
   }
@@ -350,7 +363,7 @@
 
   F.fxcore = {
     pctile, mean, median, durationDays, CUR_NAME, RISK_TXT, MINER_LEV,
-    wdApply, wdKey, wdDesc, withdrawLabel, wdRow, wdDerive, wdAgg, fxRowFromRecord,
+    wdApply, wdKey, wdDesc, withdrawLabel, wdRow, wdDerive, wdAgg, fxRowFromRecord, spacingOf,
     fxPrinciple, fxRiskNote, fxSimsFromRows, fxFromRows, simsOf, fxPoint, fxConfidence, fxProjection,
     minerMechs, minerScore, minePair, minerPick,
   };

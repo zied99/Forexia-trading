@@ -3713,6 +3713,14 @@
   // capital choisi pour la carte : au moins le capital du plan (montant minimum testé)
   const fxInvest = (fx) => Math.max(fx.capital, Number(fx.invest) || fx.capital);
   const fxStep = (c) => (c >= 20000 ? 1000 : c >= 2000 ? 100 : 10);
+  /** Écart dans le temps entre les simulations du FX (calculé à la création, sinon à partir de ses simulations). */
+  function fxSpacingHtml(fx) {
+    const g = fx.spacing || F.fxcore.spacingOf(fx.sims || []);
+    if (!g) return '';
+    const t = (days) => (days < 60 ? Math.round(days) + ' j' : num1.format(days / 30.4375) + ' mois');
+    return '<p class="fx-spacing" title="Dates de début des simulations du FX rangées dans l\'ordre du temps, écart entre chacune et la suivante. Écart type faible : simulations régulièrement réparties ; élevé : regroupées par endroits avec des trous. Des simulations qui se chevauchent regardent en partie les mêmes mois.">' +
+      '⏱ Écart entre deux simulations : <b>' + t(g.meanDays) + '</b> en moyenne, écart type <b>' + t(g.sdDays) + '</b> (de ' + t(g.minDays) + ' à ' + t(g.maxDays) + ') · ' + Math.round(g.overlapPct) + ' % chevauchent la suivante</p>';
+  }
   function fxCardHtml(fx) {
     if (fx.v !== 2) return fxCardHtmlV1(fx);
     FX_BASE = fxInvest(fx); // tous les montants de la carte sont pour le capital choisi (au moins le capital du plan)
@@ -3733,7 +3741,7 @@
         (noWd ? kf('Capital au bout d\'un an', fxY1Html(pt0), '', 'y1') + kf('Revenu régulier', 'Aucun', 'pas de retrait partiel : tout reste sur le compte jusqu\'à la fin') :
         kf('Capital au bout d\'un an, avec retrait', fxY1Html(pt0), fxY1Sub(pt0), 'y1') +
         kf('Revenu régulier', fxSims(fx) ? '≈ ' + fxMoney(pt0.inc) + ' / mois' : incomeTxt, esc(fxMethodLabel(inc.w)), 'inc')) + '</div>' +
-      '<section class="fx-sec"><h5>Chances de gain</h5><div class="fx-ten-row">' + fxTenSvg(fx.winRate) + '<span><b>' + Math.round(fx.winRate / 10) + ' fois sur 10</b> le plan finit gagnant<small>' + Math.round((fx.winRate * fx.n) / 100) + ' essais gagnants sur ' + fx.n + ' faits sur des périodes passées</small></span></div></section>' +
+      '<section class="fx-sec"><h5>Chances de gain</h5><div class="fx-ten-row">' + fxTenSvg(fx.winRate) + '<span><b>' + Math.round(fx.winRate / 10) + ' fois sur 10</b> le plan finit gagnant<small>' + Math.round((fx.winRate * fx.n) / 100) + ' essais gagnants sur ' + fx.n + ' faits sur des périodes passées</small></span></div>' + fxSpacingHtml(fx) + '</section>' +
       '<section class="fx-sec"><h5>Ce que vous récupérez au bout de la durée recommandée (' + fx.duration.reco + ' mois)</h5><p class="hint">Pour ' + money0.format(FX_BASE) + ' investis, compte + revenus déjà touchés.</p>' + fxScenarioSvg(sc, fx) + '</section>' +
       '<section class="fx-sec"><h5>Évolution typique</h5>' + fxPathSvg(fx.path) + '</section>' +
       '<section class="fx-sec fx-two"><div><h5>Risque</h5>' + fxRiskScale(fx.riskNote) + '<small>' + RISK_TXT[fx.riskNote] + ' · pire moment en cours de route : en général <b>−' + num1.format(fx.drawdown.med) + ' %</b>, au pire −' + num1.format(fx.drawdown.max) + ' %</small></div>' +

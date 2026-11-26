@@ -361,6 +361,7 @@ module.exports = function fxTools(ctx) {
       capitalAfterOneYear: { withWithdrawalEur: med.oneYearEur, withWithdrawalPct: r2(med.oneYearPct), withoutWithdrawalPct: r2(med.oneYearNoWithdrawPct), estimated: med.estimated },
       drawdown: { medianPct: r2(fx.drawdown.med), maxPct: r2(fx.drawdown.max) }, solidity: fx.solidity.score + '/100' + (fx.solidity.synthetic ? ' (données simulées : à refaire sur cours réels)' : ''),
       erasWon: fx.solidity.eraWin + ' / ' + fx.solidity.eras,
+      gapBetweenSimulations: (() => { const g = fx.spacing || FC.spacingOf(fx.sims || []); return g ? { meanDays: r2(g.meanDays), stdDays: r2(g.sdDays), minDays: g.minDays, maxDays: g.maxDays, overlapPct: r2(g.overlapPct) } : null; })(),
     };
     if (detail) {
       o.scenarios = [0, 0.1, 0.25, 0.5, 0.75, 0.9, 1].map((q) => { const p = pr(q); return { q: q, backEur: p.backEur, backPct: r2(p.backPct), incomePerMonthEur: p.incomePerMonthEur, accountEur: p.accountEur, oneYearPct: r2(p.oneYearPct) }; });
