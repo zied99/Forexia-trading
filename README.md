@@ -274,6 +274,11 @@ entre ses simulations), chacune de la durée recommandée — jamais plus courte
 à celle annoncée par le FX), résultat médian (comparé au « le plus souvent » du FX), moyen, « si ça se passe mal »,
 pire / meilleur, baisse en cours de route, capital moyen à la fin, barres de chaque évaluation et tableau par année de
 départ. Les évaluations sont gardées dans un batch « 🔬 Deep éval · … ». Côté agent : `fx_deep_eval`.
+La carte **🔁 Reprise du gain** dit, après une évaluation perdante, au bout de combien de pas (1 pas = l'écart choisi entre deux
+évaluations) une évaluation redevient gagnante : en moyenne, le plus souvent, au plus, et la chance que l'évaluation juste après une
+perte gagne. **💾 Enregistrer** garde la deep évaluation (liste « 📚 Deep évaluations enregistrées », synchronisée dans le compte) ;
+**📌 Envoyer la référence au FX** affiche son résumé sur la carte du FX, avec un lien pour la rouvrir. Côté agent :
+`fx_deep_eval` renvoie `recovery` et accepte `save` (nom) et `attachToFx`.
 
 **Fenêtre des FX : filtres et archives** : en haut de la fenêtre « 💼 FX », filtres par nom, stratégie, paire, risque
 maximum, confiance minimum et type de retrait, et tri (plus récents, confiance, ce qui est le plus souvent récupéré,

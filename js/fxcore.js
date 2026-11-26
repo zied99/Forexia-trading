@@ -361,7 +361,18 @@
     return { found: found, pick: pick.slice(0, max || 6) };
   }
 
+  /** Reprise du gain (deep évaluation) : rets = résultats (%) des évaluations dans l'ordre des dates.
+   * runs = longueurs des séries d'évaluations perdantes terminées par une gagnante (en pas), ongoing = série perdante en cours à la fin. */
+  function deepRecovery(rets) {
+    const runs = [];
+    let cur = 0, a = 0, b = 0;
+    rets.forEach((r, i) => { if (r > 0) { if (cur) runs.push(cur); cur = 0; } else cur++; if (r <= 0 && i + 1 < rets.length) { a++; if (rets[i + 1] > 0) b++; } });
+    return { runs: runs, ongoing: cur, losses: rets.filter((r) => r <= 0).length, nextWinAfterLoss: a ? (b / a) * 100 : NaN,
+      avg: runs.length ? mean(runs) : NaN, median: runs.length ? median(runs) : NaN, max: runs.length ? Math.max(...runs) : NaN };
+  }
+
   F.fxcore = {
+    deepRecovery,
     pctile, mean, median, durationDays, CUR_NAME, RISK_TXT, MINER_LEV,
     wdApply, wdKey, wdDesc, withdrawLabel, wdRow, wdDerive, wdAgg, fxRowFromRecord, spacingOf,
     fxPrinciple, fxRiskNote, fxSimsFromRows, fxFromRows, simsOf, fxPoint, fxConfidence, fxProjection,

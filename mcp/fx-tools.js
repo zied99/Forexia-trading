@@ -53,7 +53,7 @@ module.exports = function fxTools(ctx) {
   const VER_RULES = ['longEntry', 'longExit', 'shortEntry', 'shortExit'];
   const RULE_LABEL = { longEntry: 'Entrée achat', longExit: 'Sortie achat', shortEntry: 'Entrée vente', shortExit: 'Sortie vente' };
   const TM_LABEL = { stopLossPips: 'stop-loss (pips)', takeProfitPips: 'objectif (pips)', stopAtr: 'stop (ATR)', takeAtr: 'objectif (ATR)', atrPeriod: 'période ATR', trailPips: 'stop suiveur (pips)', trailAtr: 'stop suiveur (ATR)', breakevenPips: 'break-even (pips)', breakevenAtr: 'break-even (ATR)', maxBars: 'durée max (bougies)', pauseLosses: 'pause après pertes', pauseBars: 'pause (bougies)' };
-  const verStore = S('stratVersions.json', []);
+  const verStore = S('stratVersions.json', []), deepStore = S('deepEvals.json', []);
   const verSig = (st) => [...VER_RULES.map((k) => st[k] || ''), ...VER_TM.map((k) => Number(st[k]) || 0)].join('|');
   function logVersion(strat, note, at) {
     if (!strat || !strat.name || (!strat.longEntry && !strat.shortEntry)) return;
@@ -385,7 +385,7 @@ module.exports = function fxTools(ctx) {
   let lastMine = null;
 
   // ---------------------------------------------------------------- synchronisation avec la page (passerelle MT5, table kv)
-  const SYNC = { 'forexia.stratVersions': verStore, 'forexia.agentGuide': guideStore, 'forexia.fx': fxs, 'forexia.batches': batches, 'forexia.eras': eraStore, 'forexia.wdPresets': wdp, 'forexia.events': evStore };
+  const SYNC = { 'forexia.deepEvals': deepStore, 'forexia.stratVersions': verStore, 'forexia.agentGuide': guideStore, 'forexia.fx': fxs, 'forexia.batches': batches, 'forexia.eras': eraStore, 'forexia.wdPresets': wdp, 'forexia.events': evStore };
   const idOf = (x) => (x && (x.id || x.key || x.name)) || JSON.stringify(x);
   let deadIds = new Set(); // suppressions faites dans la page (clé « forexia.syncTomb » de la base)
   let curKey = '';
@@ -941,7 +941,7 @@ module.exports = function fxTools(ctx) {
     {
       name: 'fx_deep_eval',
       description: '« 🔬 Deep évaluation FX » : rejoue un FX sur toute sa période, une évaluation toutes les « écart type » jours (écart entre ses simulations, ou stepDays), chacune de la durée recommandée (jamais plus courte) ; enregistre le batch et renvoie les statistiques comparées à celles du FX.',
-      inputSchema: obj({ id: { type: 'string' }, from: { type: 'string', description: 'AAAA-MM-JJ (défaut : début des simulations du FX)' }, to: { type: 'string', description: 'AAAA-MM-JJ (défaut : fin des simulations du FX)' }, stepDays: { type: 'number', description: 'pas entre deux évaluations (défaut : écart type entre les simulations du FX)' } }, ['id']),
+      inputSchema: obj({ id: { type: 'string' }, from: { type: 'string', description: 'AAAA-MM-JJ (défaut : début des simulations du FX)' }, to: { type: 'string', description: 'AAAA-MM-JJ (défaut : fin des simulations du FX)' }, stepDays: { type: 'number', description: 'pas entre deux évaluations (défaut : écart type entre les simulations du FX)' }, save: { type: 'string', description: 'nom : enregistre la deep évaluation (liste « 📚 Deep évaluations enregistrées » de la page)' }, attachToFx: { type: 'boolean', description: 'avec save : envoie la référence au FX (« 📌 Envoyer la référence au FX », résumé affiché sur la carte du FX)' } }, ['id']),
       handler: async (a) => {
         const fx = getFx(a.id), S = (fx.sims || []).filter((x) => x.from && x.to);
         if (!fx.strategy.data) fail('Ce FX n\'a pas gardé sa stratégie.');
@@ -959,11 +959,23 @@ module.exports = function fxTools(ctx) {
         const m = Object.assign(fx.strategy.config ? marketOfEntry({ config: fx.strategy.config, pair: fx.strategy.pair, data: fx.strategy.dataLabel }) : { pair: fx.strategy.pair, source: /simul/i.test(fx.strategy.dataLabel || '') ? 'synthetic' : 'online' }, { capital: fx.capital, leverage: Number(fx.strategy.leverage) || 10 });
         const w = fx.income && fx.income.w; if (w && w.on !== false && w.mode !== 'none') m.withdraw = w.mode === 'periodic' ? { mode: 'periodic', every: w.every, days: w.days, type: w.type, value: w.value } : { pct: w.pct, share: w.share, when: w.when }; else delete m.withdraw;
         const r = await runBatch({ strategy: Object.assign({}, fx.strategy.data, { name: fx.strategy.name }), market: m, periods: periods, name: '🔬 Deep éval · ' + fx.name });
-        const st = r.batch.stats;
-        return { fx: fx.name, period: from + ' → ' + to, stepDays: step, months: months, evaluations: r.simulations.length, batch: r.batch.id,
+        const st = r.batch.stats, rows = r.simulations.map((e) => ({ from: e.from, to: e.to, ret: e.returnPct, dd: e.maxDrawdownPct, trades: e.trades, withdrawn: e.withdrawn || 0, key: e.key }));
+        const rets = rows.map((x) => x.ret), rc = FC.deepRecovery(rets), fin = (v) => (Number.isFinite(v) ? r2(v) : null);
+        const recovery = { stepDays: step, lossSeries: rc.runs.length, avgSteps: fin(rc.avg), medianSteps: fin(rc.median), maxSteps: fin(rc.max), avgDays: fin(rc.avg * step), maxDays: fin(rc.max * step), nextWinAfterLossPct: fin(rc.nextWinAfterLoss), ongoingLossSteps: rc.ongoing, runs: rc.runs };
+        let saved;
+        if (a.save) {
+          const d = { id: 'd' + Date.now().toString(36), name: String(a.save).slice(0, 100), at: new Date().toISOString(), fxId: fx.id, fxName: fx.name, plan: { from: from, to: to, step: step, months: months }, rows: rows, stopped: false, batchId: r.batch.id };
+          deepStore.set(deepStore.get().concat(d)); saved = { id: d.id, name: d.name };
+          if (a.attachToFx) {
+            const l = fxs.get(), f = l.find((x) => x.id === fx.id), srt = rets.slice().sort((x, y) => x - y);
+            f.deepRef = { id: d.id, name: d.name, at: d.at, from: from, to: to, step: step, months: months, n: rets.length, winPct: Math.round((rets.filter((v) => v > 0).length / Math.max(1, rets.length)) * 100), medianPct: median(rets), p10Pct: FC.pctile(srt, 0.1), recoAvg: rc.avg, recoMax: rc.max, nextWinPct: rc.nextWinAfterLoss };
+            fxs.set(l); saved.attachedToFx = fx.name;
+          }
+        }
+        return { fx: fx.name, period: from + ' → ' + to, stepDays: step, months: months, evaluations: r.simulations.length, batch: r.batch.id, recovery: recovery, saved: saved,
           stats: { winRatePct: st.winRatePct, medianReturnPct: st.medianReturnPct, meanReturnPct: st.meanReturnPct, p10ReturnPct: st.p10ReturnPct, worstReturnPct: st.worstReturnPct, bestReturnPct: st.bestReturnPct, meanMaxDrawdownPct: st.meanMaxDrawdownPct, worstMaxDrawdownPct: st.worstMaxDrawdownPct },
           fxClaims: { winRatePct: r2(fx.winRate), usualBackPct: r2(fx.scenarios.med - 100), badBackPct: r2(fx.scenarios.p10 - 100) },
-          hint: 'Comparer stats et fxClaims : un écart important signale un FX trop optimiste. time_analysis sur le batch pour le détail par année.' };
+          hint: 'Comparer stats et fxClaims : un écart important signale un FX trop optimiste. recovery = après une évaluation perdante, combien de pas (1 pas = stepDays) avant une gagnante. time_analysis sur le batch pour le détail par année. save + attachToFx pour garder la deep évaluation et l\'afficher sur la carte du FX.' };
       },
     },
     {

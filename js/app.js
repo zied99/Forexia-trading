@@ -19,7 +19,7 @@
   // ---------- Toutes les données dans la base : passerelle (base SQLite sur votre PC) et compte en ligne ----------
   // Chaque donnée gardée dans le navigateur est aussi enregistrée dans la base dès qu'elle change, et récupérée
   // à la connexion (la version la plus récente l'emporte ; à la première connexion d'un appareil, les listes sont réunies).
-  const SYNC_KEYS = ['forexia.syncTomb', 'forexia.stratVersions', 'forexia.agentGuide', 'forexia.fx', 'forexia.batches', 'forexia.eras', 'forexia.events', 'forexia.wdPresets', 'forexia.wdResults', 'forexia.drawings', 'forexia.lastRun'];
+  const SYNC_KEYS = ['forexia.deepEvals', 'forexia.syncTomb', 'forexia.stratVersions', 'forexia.agentGuide', 'forexia.fx', 'forexia.batches', 'forexia.eras', 'forexia.events', 'forexia.wdPresets', 'forexia.wdResults', 'forexia.drawings', 'forexia.lastRun'];
   const SYNC_META = 'forexia.syncMeta';
   const syncMeta = () => { try { return JSON.parse(localStorage.getItem(SYNC_META)) || {}; } catch (e) { return {}; } };
   let syncMuted = false, syncTimer = null, kvOldBridge = false;
@@ -3721,6 +3721,15 @@
     return '<p class="fx-spacing" title="Dates de début des simulations du FX rangées dans l\'ordre du temps, écart entre chacune et la suivante. Écart type faible : simulations régulièrement réparties ; élevé : regroupées par endroits avec des trous. Des simulations qui se chevauchent regardent en partie les mêmes mois.">' +
       '⏱ Écart entre deux simulations : <b>' + t(g.meanDays) + '</b> en moyenne, écart type <b>' + t(g.sdDays) + '</b> (de ' + t(g.minDays) + ' à ' + t(g.maxDays) + ') · ' + Math.round(g.overlapPct) + ' % chevauchent la suivante</p>';
   }
+  function fxDeepRefHtml(fx) {
+    const d = fx.deepRef;
+    if (!d) return '';
+    const st = d.step < 60 ? d.step + ' jours' : num1.format(d.step / 30.4375) + ' mois', nn = (v) => (Number.isFinite(v) ? num1.format(v) : '—');
+    return '<section class="fx-sec fx-deep"><h5>🔬 Deep évaluation de référence</h5><p><b>' + esc(d.name) + '</b><small> · ' + frDate(d.from) + ' → ' + frDate(d.to) + ', une évaluation de ' + d.months + ' mois tous les ' + st + '</small></p>' +
+      '<p>' + d.n + ' évaluations : <b>' + d.winPct + ' % gagnantes</b>, médiane <b class="' + cls(d.medianPct) + '">' + signed(d.medianPct, num1) + ' %</b>' + (Number.isFinite(d.p10Pct) ? ', 1 sur 10 fait pire que ' + signed(d.p10Pct, num1) + ' %' : '') + '.' +
+      (Number.isFinite(d.recoAvg) ? ' Après une perte, le gain reprend en ' + nn(d.recoAvg) + ' pas en moyenne (au plus ' + d.recoMax + ').' : '') + '</p>' +
+      '<p class="fx-deep-acts"><button type="button" class="link" data-fx-deep="' + esc(d.id) + '">Ouvrir la deep évaluation</button> · <button type="button" class="link" data-fx-deep-off="' + esc(fx.id) + '">Retirer la référence</button></p></section>';
+  }
   function fxCardHtml(fx) {
     if (fx.v !== 2) return fxCardHtmlV1(fx);
     FX_BASE = fxInvest(fx); // tous les montants de la carte sont pour le capital choisi (au moins le capital du plan)
@@ -3750,7 +3759,7 @@
       '<section class="fx-sec"><h5>Revenu régulier</h5><p class="fx-inc">' + (noWd ? '<b>' + esc(NO_WD.charAt(0).toUpperCase() + NO_WD.slice(1)) + '</b> — le capital et les gains restent sur le compte ; vous récupérez le tout à la fin (ou quand vous sortez).' :
         '<b>' + (inc.w.mode === 'periodic' && inc.w.type === 'fixed' ? fxMoney(inc.fixedPct) + ' chaque mois' : esc(inc.desc)) + '</b> — ' + incomeSub + '.') + (inc.other && inc.other !== '—' ? ' <small>Choisi par comparaison : meilleur que « ' + esc(inc.other) + ' ».</small>' : '') + '</p></section>' +
       '<section class="fx-sec"><h5>Conditions</h5><p class="fx-cond">' + [cd.leverage ? 'Levier 1:' + cd.leverage : '', cd.spread != null ? 'spread ' + num1.format(cd.spread) + ' pip' + (cd.spread > 1 ? 's' : '') + ' par trade' : '', cd.commission ? 'commission ' + num1.format(cd.commission) + ' par lot' : 'sans commission', 'données : ' + (cd.source || '—'), 'sortie possible à tout moment (positions fermées au prix du marché)'].filter(Boolean).map(esc).join(' · ') + '</p></section>' +
-      '<p class="fx-disclaimer">Résultats de simulations passées, sans garantie pour l\'avenir. Vous pouvez perdre tout ou partie du capital investi.</p>' +
+      fxDeepRefHtml(fx) + '<p class="fx-disclaimer">Résultats de simulations passées, sans garantie pour l\'avenir. Vous pouvez perdre tout ou partie du capital investi.</p>' +
       '<footer><span class="hint">créé le ' + new Date(fx.createdAt).toLocaleDateString('fr-FR') + '</span><span class="fx-acts">' + (fx.strategy.data ? '<button type="button" class="secondary small" data-fx-load="' + esc(fx.id) + '" title="Charger la stratégie et ouvrir les simulations de ce FX dans l\'évaluation (recalculées si besoin)">📂 Voir les simulations</button>' +
         '<button type="button" class="secondary small" data-fx-ea="' + esc(fx.id) + '" title="Télécharger l\'Expert Advisor MetaTrader 5 de ce FX (stratégie, paire, levier, capital)">⬇ EA (.mq5)</button>' : '') +
       '<button type="button" class="ghost small fx-arch-btn" data-fx-arch="' + esc(fx.id) + '" title="' + (fx.archived ? 'Remettre ce FX avec les autres' : 'Mettre ce FX de côté (archives) sans le supprimer') + '">' + (fx.archived ? '📤 Désarchiver' : '🗄 Archiver') + '</button>' +
@@ -3821,6 +3830,11 @@
       toast(fx.archived ? 'FX « ' + fx.name + ' » archivé : onglet « 🗄 Archivés ».' : 'FX « ' + fx.name + ' » remis avec les FX actifs.', false);
       return openFx();
     }
+    const fd = t.closest('[data-fx-deep]');
+    if (fd) { const d = deepList().find((x) => x.id === fd.dataset.fxDeep); if (!d) return toast('Cette deep évaluation a été supprimée.', true);
+      closeFx(); openDeep(); if (fxList().some((x) => x.id === d.fxId && !x.archived)) deepState.fxId = d.fxId; deepState.res = { fxId: deepState.fxId, rows: d.rows, plan: d.plan, stopped: d.stopped, batchId: d.batchId, at: d.at, savedId: d.id, name: d.name }; deepState.status = 'done'; renderDeep(); return; }
+    const fo = t.closest('[data-fx-deep-off]');
+    if (fo) { const l = fxList(), fx = l.find((x) => x.id === fo.dataset.fxDeepOff); if (fx && confirm('Retirer la deep évaluation de référence de ce FX ? (elle reste enregistrée)')) { delete fx.deepRef; setFxList(l); openFx(); } return; }
     const del = t.closest('[data-fx-del]');
     if (del) { const fx = fxList().find((x) => x.id === del.dataset.fxDel); if (fx && confirm('Supprimer le FX « ' + fx.name + ' » ?')) { setFxList(fxList().filter((x) => x.id !== fx.id)); openFx(); } return; }
     const ld = t.closest('[data-fx-load]');
@@ -4311,6 +4325,17 @@
 
   // ---------- 🔬 Deep évaluation d'un FX : une évaluation toutes les « écart type » jours, chacune de la durée recommandée ----------
   let deepState = { fxId: '', status: 'idle', res: null };
+  const DEEP_KEY = 'forexia.deepEvals';
+  const deepList = () => { try { const l = JSON.parse(localStorage.getItem(DEEP_KEY)); return Array.isArray(l) ? l : []; } catch (e) { return []; } };
+  const setDeepList = (l) => localStorage.setItem(DEEP_KEY, JSON.stringify(l));
+  /** Résumé d'une deep évaluation enregistrée, gardé sur le FX (fx.deepRef). */
+  function deepRefOf(d) {
+    const r = d.rows.map((x) => x.ret), rc = F.fxcore.deepRecovery(r);
+    return { id: d.id, name: d.name, at: new Date().toISOString(), from: d.plan.from, to: d.plan.to, step: d.plan.step, months: d.plan.months, n: r.length,
+      winPct: Math.round((r.filter((v) => v > 0).length / Math.max(1, r.length)) * 100), medianPct: F.fxcore.median(r), p10Pct: F.fxcore.pctile(r.slice().sort((a, b) => a - b), 0.1),
+      recoAvg: rc.avg, recoMax: rc.max, nextWinPct: rc.nextWinAfterLoss };
+  }
+  const deepRecovery = (rows) => F.fxcore.deepRecovery(rows.map((r) => r.ret));
   const DAY = 864e5;
   /** Plan de la deep évaluation : début et fin de la période du FX, pas (écart type entre ses simulations), durée. */
   /** Plan de la deep évaluation : période et pas du FX (ou ceux choisis : deepState.custom = {from, to, step}), durée recommandée. */
@@ -4360,6 +4385,11 @@
           (deepState.status === 'run' ? '<button type="button" class="secondary" id="deepStop">■ Arrêter</button>' : '') + '</div></div>';
       }
     }
+    const saved = deepList().slice().reverse();
+    if (saved.length) h += '<details class="deep-saved"' + (deepState.showSaved ? ' open' : '') + '><summary>📚 Deep évaluations enregistrées (' + saved.length + ')</summary><div class="table-wrap"><table class="eval"><thead><tr><th class="l">Nom</th><th class="l">FX</th><th class="l">Période</th><th>Évaluations</th><th>Gagnantes</th><th>Médiane</th><th></th></tr></thead><tbody>' +
+      saved.map((d) => { const r = d.rows.map((x) => x.ret), w = r.filter((v) => v > 0).length; return '<tr><td class="l"><b>' + esc(d.name) + '</b><small class="eval-tag">' + new Date(d.at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) + '</small></td><td class="l">' + esc(d.fxName || '') + '</td><td class="l">' + frDate(d.plan.from) + ' → ' + frDate(d.plan.to) + '<small class="eval-tag">tous les ' + durDays(d.plan.step) + ' · ' + d.plan.months + ' mois</small></td><td>' + r.length + '</td><td>' + Math.round((w / Math.max(1, r.length)) * 100) + ' %</td><td><span class="' + cls(F.fxcore.median(r)) + '">' + signed(F.fxcore.median(r), num1) + ' %</span></td>' +
+        '<td class="deep-row-acts"><button type="button" class="reload" data-deep-open="' + esc(d.id) + '">Voir</button>' + (fxList().some((x) => x.id === d.fxId && !(x.deepRef && x.deepRef.id === d.id)) ? '<button type="button" class="ghost small" data-deep-link="' + esc(d.id) + '" title="Envoyer la référence de cette deep évaluation au FX">📌</button>' : '') + '<button type="button" class="ghost small" data-deep-del="' + esc(d.id) + '" title="Supprimer" aria-label="Supprimer">🗑</button></td></tr>'; }).join('') +
+      '</tbody></table></div></details>';
     if (deepState.status === 'run') h += '<div class="modal-loading"><span class="spinner"></span>' + esc(deepState.msg || '') + '</div>';
     if (deepState.res && deepState.res.fxId === deepState.fxId) h += deepResultHtml(deepState.res, fx);
     $('deepBody').innerHTML = h;
@@ -4424,13 +4454,33 @@
       kpi('Pire', pc(sorted[0]), 'meilleur : ' + signed(sorted[n - 1], num1) + ' %') +
       kpi('Baisse en cours de route', '−' + num1.format(ddMed) + ' %', 'en général · au pire −' + num1.format(ddMax) + ' %', 'neg') +
       kpi('Capital moyen à la fin', money0.format(((fx ? fx.capital : 10000) * (100 + mean(ret))) / 100), 'pour ' + money0.format(fx ? fx.capital : 10000) + ' investis') +
-      '</div>' +
+      '</div>' + deepRecoveryHtml(res) +
+      '<div class="deep-save">' + (res.savedId ? '<span class="hint">✅ Deep évaluation enregistrée' + (res.name ? ' : « ' + esc(res.name) + ' »' : '') + '.</span> ' + (fx ? (fx.deepRef && fx.deepRef.id === res.savedId ? '<span class="hint">📌 Référence affichée sur le FX « ' + esc(fx.name) + ' ».</span>' : '<button type="button" class="secondary small" data-deep-link="' + esc(res.savedId) + '" title="Afficher le résumé de cette deep évaluation sur la carte du FX, avec un lien pour la rouvrir">📌 Envoyer la référence au FX</button>') : '') : '<button type="button" class="primary small" id="deepSave">💾 Enregistrer cette deep évaluation</button>') + '</div>' +
       '<section class="eval-chart"><h4>Résultat de chaque évaluation</h4><p class="hint">Dans l\'ordre des dates de départ (une tous les ' + durDays(res.plan.step) + ').</p><div id="deepBars"></div></section>' +
       '<section class="eval-chart"><h4>Par année de départ</h4><div class="table-wrap"><table class="eval deep-years"><thead><tr><th class="l">Année</th><th>Évaluations</th><th>Gagnantes</th><th>Médiane</th><th>Pire</th><th>Meilleure</th></tr></thead><tbody>' +
       Object.keys(byY).sort().map((y) => { const L = byY[y], s = L.slice().sort((a, b) => a - b); return '<tr><td class="l">' + y + '</td><td>' + L.length + '</td><td>' + Math.round((L.filter((v) => v > 0).length / L.length) * 100) + ' %</td><td>' + pc(F.fxcore.median(L)) + '</td><td>' + pc(s[0]) + '</td><td>' + pc(s[s.length - 1]) + '</td></tr>'; }).join('') +
       '</tbody></table></div></section>' +
       (res.batchId ? '<p class="hint">Les ' + n + ' évaluations sont dans l\'Évaluation (batch « 🔬 Deep éval · ' + esc(fx ? fx.name : '') + ' »). <button type="button" class="link" id="deepOpenBatch">Les ouvrir</button></p>' : '') + '</section>';
     return h;
+  }
+  function deepRecoveryHtml(res) {
+    const R = res.rows, rc = deepRecovery(R), step = res.plan.step, n = rc.runs.length;
+    const t = (k) => durDays(k * step);
+    let body;
+    if (!rc.losses) body = '<p><b>Aucune évaluation perdante</b> : le gain n\'a jamais eu à reprendre.</p>';
+    else if (!n) body = '<p>Le gain n\'a pas repris : les ' + rc.ongoing + ' dernière' + (rc.ongoing > 1 ? 's' : '') + ' évaluation' + (rc.ongoing > 1 ? 's sont perdantes' : ' est perdante') + ' (' + t(rc.ongoing) + ').</p>';
+    else {
+      const avg = rc.avg, med = rc.median, mx = rc.max, dist = {};
+      rc.runs.forEach((k) => { dist[k] = (dist[k] || 0) + 1; });
+      body = '<div class="deep-rec-grid">' +
+        '<div><span>En moyenne</span><b>' + num1.format(avg) + ' pas</b><small>≈ ' + t(avg) + '</small></div>' +
+        '<div><span>Le plus souvent</span><b>' + num1.format(med) + ' pas</b><small>≈ ' + t(med) + '</small></div>' +
+        '<div><span>Au plus</span><b>' + mx + ' pas</b><small>≈ ' + t(mx) + '</small></div>' +
+        '<div><span>Juste après une perte</span><b>' + (Number.isFinite(rc.nextWinAfterLoss) ? Math.round(rc.nextWinAfterLoss) + ' %' : '—') + '</b><small>de chances que l\'évaluation suivante gagne</small></div></div>' +
+        '<p class="hint">' + n + ' série' + (n > 1 ? 's' : '') + ' de pertes, puis reprise : ' + Object.keys(dist).sort((a, b) => a - b).map((k) => dist[k] + ' fois après ' + k + ' pas').join(', ') + '.' +
+        (rc.ongoing ? ' Série en cours à la fin de la période : ' + rc.ongoing + ' pas sans gain.' : '') + '</p>';
+    }
+    return '<section class="panel deep-rec"><h4>🔁 Reprise du gain</h4><p class="hint">Après une évaluation perdante, combien de pas (1 pas = ' + durDays(step) + ' entre deux évaluations) avant qu\'une évaluation soit de nouveau gagnante.</p>' + body + '</section>';
   }
   function mountDeepCharts(res) {
     const R = res.rows, el = $('deepBars');
@@ -4446,6 +4496,23 @@
     if (t.id === 'deepRun') return runDeep();
     if (t.id === 'deepStop') { checkStop = true; return; }
     if (t.id === 'deepAuto') { deepState.custom = null; return renderDeep(); }
+    if (t.id === 'deepSave' && deepState.res) {
+      const r = deepState.res, fx = fxList().find((x) => x.id === r.fxId);
+      const name = (prompt('Nom de cette deep évaluation :', 'Deep éval ' + ((fx && fx.name) || '') + ' · ' + frDate(r.plan.from) + ' → ' + frDate(r.plan.to)) || '').trim().slice(0, 100);
+      if (!name) return;
+      const d = { id: 'd' + Date.now().toString(36), name: name, at: r.at || new Date().toISOString(), fxId: r.fxId, fxName: fx ? fx.name : '', plan: { from: r.plan.from, to: r.plan.to, step: r.plan.step, months: r.plan.months }, rows: r.rows, stopped: !!r.stopped, batchId: r.batchId };
+      setDeepList(deepList().concat(d)); r.savedId = d.id; r.name = name; deepState.showSaved = true;
+      toast('Deep évaluation « ' + name + ' » enregistrée.', false);
+      return renderDeep();
+    }
+    const op = t.closest('[data-deep-open]');
+    if (op) { const d = deepList().find((x) => x.id === op.dataset.deepOpen); if (d) { if (fxList().some((x) => x.id === d.fxId)) deepState.fxId = d.fxId; deepState.res = { fxId: deepState.fxId, rows: d.rows, plan: d.plan, stopped: d.stopped, batchId: d.batchId, at: d.at, savedId: d.id, name: d.name }; if (deepState.res.fxId !== d.fxId) deepState.res.fxId = deepState.fxId; deepState.status = 'done'; renderDeep(); const x = $('deepBody').querySelector('.deep-res'); if (x) x.scrollIntoView({ block: 'start' }); } return; }
+    const lk = t.closest('[data-deep-link]');
+    if (lk) { const d = deepList().find((x) => x.id === lk.dataset.deepLink), l = fxList(), fx = d && l.find((x) => x.id === d.fxId); if (!fx) return toast('Le FX de cette deep évaluation n\'existe plus.', true);
+      if (fx.deepRef && fx.deepRef.id !== d.id && !confirm('Le FX « ' + fx.name + ' » référence déjà « ' + fx.deepRef.name + ' ». La remplacer par « ' + d.name + ' » ?')) return;
+      fx.deepRef = deepRefOf(d); setFxList(l); toast('Référence envoyée au FX « ' + fx.name + ' » : visible sur sa carte (fenêtre « 💼 FX »).', false); return renderDeep(); }
+    const dl = t.closest('[data-deep-del]');
+    if (dl) { const d = deepList().find((x) => x.id === dl.dataset.deepDel); if (d && confirm('Supprimer la deep évaluation « ' + d.name + ' » ?' + (fxList().some((x) => x.deepRef && x.deepRef.id === d.id) ? ' (sa référence sera retirée du FX)' : ''))) { setDeepList(deepList().filter((x) => x.id !== d.id)); { const l = fxList(); if (l.some((x) => x.deepRef && x.deepRef.id === d.id)) { l.forEach((x) => { if (x.deepRef && x.deepRef.id === d.id) delete x.deepRef; }); setFxList(l); } } if (deepState.res && deepState.res.savedId === d.id) deepState.res.savedId = null; deepState.showSaved = true; renderDeep(); } return; }
     if (t.id === 'deepOpenBatch' && deepState.res && deepState.res.batchId) { const b = batchStore.get().find((x) => x.id === deepState.res.batchId); if (b) { closeDeep(); loadBatch(b); openEvaluation('charts'); } }
   });
   $('deepModal').addEventListener('change', (ev) => {
