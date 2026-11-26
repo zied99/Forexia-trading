@@ -112,6 +112,15 @@ function csvHistory(file) {
   }
   return cache.get(key);
 }
+// Code d'appairage : variable FOREXIA_BRIDGE_TOKEN, sinon celui que la passerelle a enregistré sur ce PC
+// (%APPDATA%\Forexia\bridge.json) — l'agent qui tourne sur le PC de l'utilisateur se branche alors tout seul.
+if (!process.env.FOREXIA_BRIDGE_TOKEN) {
+  try {
+    const f = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'Forexia', 'bridge.json');
+    const t = JSON.parse(fs.readFileSync(f, 'utf8')).token;
+    if (/^[A-Z2-9]{4}-[A-Z2-9]{4}$/.test(String(t))) process.env.FOREXIA_BRIDGE_TOKEN = t;
+  } catch (e) { /* pas de passerelle installée sur cette machine */ }
+}
 const BRIDGE = process.env.FOREXIA_BRIDGE_URL || 'http://127.0.0.1:8787';
 async function bridge(method, p, body) {
   const token = process.env.FOREXIA_BRIDGE_TOKEN;

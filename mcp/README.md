@@ -69,7 +69,7 @@ node mcp/forexia-mcp.js --http 3333 --token UN_SECRET_LONG
 |---|---|---|
 | `FOREXIA_MCP_DATA` | dossier des stratégies et de l'historique des simulations | `~/.forexia-mcp` |
 | `FOREXIA_BRIDGE_URL` | adresse de la passerelle MT5 | `http://127.0.0.1:8787` |
-| `FOREXIA_BRIDGE_TOKEN` | code d'appairage de la passerelle (outils `mt5_*`, source `broker`) | — |
+| `FOREXIA_BRIDGE_TOKEN` | code d'appairage de la passerelle (outils `mt5_*`, source `broker`, échange avec la page) | lu automatiquement dans `%APPDATA%\Forexia\bridge.json` si la passerelle est installée sur la même machine |
 | `FOREXIA_MCP_TOKEN` | jeton du mode HTTP (équivaut à `--token`) | — |
 
 ## Outils
