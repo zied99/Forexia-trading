@@ -1012,7 +1012,7 @@
     if (batchRunning) { batchStop = true; $('batchRun').textContent = 'Arrêt…'; return; }
     const n = Math.max(1, Math.min(100, Math.round(Number($('batchCount').value) || 10)));
     $('batchCount').value = n;
-    batchRunning = true; batchStop = false;
+    batchRunning = true; batchStop = false; resetRunTimes();
     $('batchRun').textContent = 'Arrêter';
     const res = [];
     let lot = null, fails = 0, attempts = 0;
@@ -1043,7 +1043,7 @@
       $('batchStatus').innerHTML = '<b>' + res.length + ' test' + (res.length > 1 ? 's' : '') + ' enregistré' + (res.length > 1 ? 's' : '') + '</b> dans « Évaluation » : ' +
         pos + ' gagnant' + (pos > 1 ? 's' : '') + ' sur ' + res.length + ', résultat moyen <span class="' + cls(avg) + '">' + signed(avg, num1) + ' %</span> (de ' + signed(Math.min(...res), num1) + ' à ' + signed(Math.max(...res), num1) + ' %). ' +
         '<br>Nouveau batch : <b id="lotName">« ' + esc(lot.name) + ' »</b> · <button type="button" class="link" id="batchOpenLot">Voir le batch</button> · ' +
-        '<button type="button" class="link" id="batchOpenEval">Recommandations</button> · <button type="button" class="link" id="batchRenLot">Renommer</button>';
+        '<button type="button" class="link" id="batchOpenEval">Recommandations</button> · <button type="button" class="link" id="batchRenLot">Renommer</button><br>' + runTimesHtml();
       $('batchOpenLot').addEventListener('click', () => openEvaluation('charts'));
       $('batchOpenEval').addEventListener('click', () => openEvaluation('reco'));
       $('batchRenLot').addEventListener('click', () => {
@@ -1155,6 +1155,7 @@
   });
   const TF_MINUTES = { M15: 15, M30: 30, H1: 60, H4: 240, D1: 1440 };
   const brokerCache = new Map();
+  let brokerPlan = null; // périodes à venir d'une série (deep évaluation) : [{from, to}] en AAAA-MM-JJ
   function toBar(r, intraday) {
     const iso = new Date(r[0] * 1000).toISOString();
     return { t: r[0], date: intraday ? iso.slice(0, 10) + ' ' + iso.slice(11, 16) : iso.slice(0, 10), open: r[1], high: r[2], low: r[3], close: r[4], spread: r[5] };
@@ -1166,6 +1167,28 @@
     const out = new Array(sub.t.length);
     for (let i = 0; i < sub.t.length; i++) out[i] = { t: sub.t[i], open: sub.open[i], high: sub.high[i], low: sub.low[i], close: sub.close[i], spread: sub.spread[i] };
     return out;
+  }
+  /** Bougies fines que la passerelle choisirait pour une période (même règle que forexia_bridge.py : M1, sinon M5 / M15 si trop long). */
+  function brokerSubTf(body) {
+    if (!body.intrabar) return null;
+    const MIN = { M1: 1, M5: 5, M15: 15, M30: 30, H1: 60, H4: 240, D1: 1440 }, mins = (Date.parse(body.to) - Date.parse(body.testFrom)) / 60000;
+    for (const c of ['M1', 'M5', 'M15']) { if (MIN[c] >= (MIN[body.timeframe] || 1440)) return null; if ((mins / MIN[c]) * 5 / 7 <= 1600000) return c; }
+    return null;
+  }
+  /** Données déjà reçues de la passerelle qui couvrent la période demandée (mêmes symbole, unité de temps et détail) : découpées sans nouvel envoi. */
+  function brokerCover(body) {
+    const want = brokerSubTf(body), f = Date.parse(body.from) / 1000, t = Date.parse(body.to) / 1000, tf = Date.parse(body.testFrom) / 1000;
+    for (const r of brokerCache.values()) {
+      const q = r.req;
+      if (!q || q.terminalId !== body.terminalId || q.symbol !== body.symbol || q.timeframe !== body.timeframe || q.intrabar !== body.intrabar) continue;
+      if (q.from > body.from || q.to < body.to || (body.intrabar && q.testFrom > body.testFrom) || (r.subTimeframe || null) !== want) continue;
+      const out = Object.assign({}, r, { bars: r.bars.filter((b) => b[0] >= f && b[0] <= t), req: null });
+      if (out.bars.length < 30) continue;
+      if (r.sub) { const k = []; r.sub.t.forEach((x, i) => { if (x >= tf && x <= t) k.push(i); }); out.sub = {}; Object.keys(r.sub).forEach((c) => { out.sub[c] = k.map((i) => r.sub[c][i]); }); }
+      if (r.conv) out.conv = Object.assign({}, r.conv, { rates: r.conv.rates.filter((x) => x[0] >= f && x[0] <= t) });
+      return out;
+    }
+    return null;
   }
   async function loadBrokerBars(range, opt) {
     if (!bridgeToken) throw new Error('Connectez la passerelle MT5 (section Données) pour utiliser les données de votre courtier.');
@@ -1180,13 +1203,29 @@
     const body = { terminalId: (bridgeTerms[0] || {}).id, symbol: symbol, timeframe: tf, from: F.data.iso(from), to: F.data.iso(to),
       testFrom: F.data.iso(range.start), intrabar: $('brokerIntrabar').checked };
     const key = JSON.stringify(body);
+    if (!brokerCache.has(key)) { const cov = brokerCover(body); if (cov) brokerCache.set(key, cov); }
     if (!brokerCache.has(key)) {
+      // série en cours (deep évaluation) : une seule demande couvre aussi les simulations suivantes (3 ans au plus, même détail)
+      let rq = body;
+      if (brokerPlan && brokerPlan.length) {
+        for (const p of brokerPlan) {
+          if (p.from < body.testFrom || p.to < body.to) continue;
+          const e = new Date(p.to + 'T00:00:00Z'); e.setUTCDate(e.getUTCDate() + 1);
+          const cand = Object.assign({}, rq, { to: F.data.iso(e) });
+          if (Date.parse(cand.to) - Date.parse(body.testFrom) > 3 * 366 * 864e5 || brokerSubTf(cand) !== brokerSubTf(body)) break;
+          rq = cand;
+        }
+        if (rq !== body && rq.to > F.data.iso(new Date())) rq = body;
+      }
       let r;
-      try { r = await bridgeCall('POST', '/bars', body); } catch (e) {
+      try { r = await bridgeCall('POST', '/bars', rq); } catch (e) {
         throw new Error(e.code === 401 ? 'Code d\'appairage refusé : reconnectez la passerelle (section Données).' : 'Passerelle MT5 injoignable : la fenêtre de la passerelle est-elle ouverte ?');
       }
       if (!r.ok) throw new Error(r.message || 'Données du courtier indisponibles.');
-      brokerCache.set(key, r);
+      r.req = rq; brokerCache.set(JSON.stringify(rq), r);
+      if (rq !== body) { const cov = brokerCover(body); if (cov) brokerCache.set(key, cov); else { r.req = null; brokerCache.delete(JSON.stringify(rq)); throw new Error('Données du courtier incomplètes : relancez.'); } }
+      // garde au plus 6 envois en mémoire (les détails M1 peuvent être lourds)
+      while (brokerCache.size > 6) brokerCache.delete(brokerCache.keys().next().value);
     }
     const r = brokerCache.get(key), intraday = tf !== 'D1';
     return {
@@ -1223,6 +1262,15 @@
       if (F.data.iso(range.end) < F.data.ECB_FIRST_DATE) throw new Error('Les cours BCE commencent le 04/01/1999 : choisissez une période plus récente.');
       const key = pair + '|' + F.data.iso(range.fetchStart) + '|' + F.data.iso(range.end);
       try {
+        // tout l'historique BCE de la paire est téléchargé une seule fois, puis découpé pour chaque simulation (au lieu d'un téléchargement par simulation)
+        const allKey = pair + '|tout|' + F.data.iso(today);
+        if (!onlineCache.has(key) && !onlineCache.has(allKey)) {
+          try { onlineCache.set(allKey, await F.data.fetchFrankfurter(pair, new Date(F.data.ECB_FIRST_DATE + 'T00:00:00Z'), today)); } catch (e) { /* repli : période seule */ }
+        }
+        if (!onlineCache.has(key) && onlineCache.has(allKey)) {
+          const a = F.data.iso(range.fetchStart), z = F.data.iso(range.end), part = onlineCache.get(allKey).filter((b) => b.date >= a && b.date <= z);
+          if (part.length >= 30) { part[0] = Object.assign({}, part[0], { open: part[0].close, high: part[0].close, low: part[0].close }); onlineCache.set(key, part); }
+        }
         if (!onlineCache.has(key)) onlineCache.set(key, await F.data.fetchFrankfurter(pair, range.fetchStart, range.end));
         const est = $('estimateWicks').checked;
         return {
@@ -1273,6 +1321,15 @@
     if (batchRunning) $('batchRun').textContent = 'Arrêt…';
   });
   /** Lance le backtest du formulaire. Renvoie true si la simulation a abouti. */
+  /** Temps passé par étape (téléchargement des données, calcul, affichage + enregistrement), cumulé pendant un lot / une deep évaluation. */
+  let runTimes = { data: 0, calc: 0, show: 0, n: 0 };
+  const resetRunTimes = () => { runTimes = { data: 0, calc: 0, show: 0, n: 0 }; };
+  function runTimesHtml() {
+    const T = runTimes, tot = T.data + T.calc + T.show;
+    if (!T.n || !tot) return '';
+    const s = (ms) => (ms < 10000 ? num1.format(ms / 1000) : Math.round(ms / 1000)) + ' s', pc = (ms) => Math.round((ms / tot) * 100) + ' %';
+    return '<span class="run-times" title="Temps cumulé sur ' + T.n + ' simulation' + (T.n > 1 ? 's' : '') + '">⏱ ' + s(tot) + ' pour ' + T.n + ' simulation' + (T.n > 1 ? 's' : '') + ' (' + s(tot / T.n) + ' chacune) : données ' + pc(T.data) + ', calcul ' + pc(T.calc) + ', affichage et enregistrement ' + pc(T.show) + '</span>';
+  }
   async function runFromForm(opts) {
     // « ne pas enregistrer » est décidé au lancement, pour ce calcul-là (une autre simulation en parallèle ne le change pas)
     const noRecord = !!((opts && opts.noRecord) || evalNoRecord);
@@ -1291,6 +1348,8 @@
     const pair = $('pair').value, periodKey = periodValue(), leverage = Number($('leverage').value);
     const btn = $('runBtn');
     btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>' + (runLabel ? esc(runLabel) + ' · calcul en cours…' : 'Calcul en cours…');
+    const tm0 = performance.now();
+    let tm1 = 0, tm2 = 0;
     try {
       const loaded = await loadBars(pair, periodKey);
       const endIso = F.data.iso(loaded.range.end);
@@ -1334,7 +1393,9 @@
           maxLots: Number($('brokerMaxLots').value) || 1, maxSpreadPips: Number($('brokerMaxSpread').value) || 0,
         });
       }
+      tm1 = performance.now();
       const result = loaded.broker ? F.broker.runBrokerBacktest(bars, strat, settings, loaded.broker) : F.backtest.runBacktest(bars, strat, settings);
+      tm2 = performance.now();
       const warnings = [];
       if (loaded.warning) warnings.push(loaded.warning);
       if (loaded.info) warnings.push({ info: true, html: loaded.info });
@@ -1377,6 +1438,7 @@
       const lastRunRec = { at: new Date().toISOString(), strategy: strat, config: config };
       try { localStorage.setItem('forexia.lastRun', JSON.stringify(lastRunRec)); } catch (e) { /* ignoré */ }
       refreshPresetSelect($('preset').value);
+      runTimes.data += tm1 - tm0; runTimes.calc += tm2 - tm1; runTimes.show += performance.now() - tm2; runTimes.n++;
       return true;
     } catch (err) {
       $('formError').textContent = err.message;
@@ -4408,7 +4470,7 @@
     const saved = captureForm(), rows = [];
     const b = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), at: new Date().toISOString(), auto: true, deep: fx.id, name: '🔬 Deep éval · ' + fx.name, entries: [] };
     const bl = batchStore.get(); bl.push(b); batchStore.set(bl); updateBatchCount();
-    deepState.status = 'run'; deepState.res = null; checkRunning = 'deep'; checkStop = false;
+    deepState.status = 'run'; deepState.res = null; checkRunning = 'deep'; checkStop = false; resetRunTimes(); brokerPlan = pl.starts;
     try {
       for (let i = 0; i < pl.starts.length && !checkStop; i++) {
         const p = pl.starts[i];
@@ -4423,14 +4485,14 @@
         await new Promise((r) => setTimeout(r, 10));
       }
     } finally {
-      checkRunning = ''; setRunLabel('');
+      checkRunning = ''; brokerPlan = null; setRunLabel('');
       restoring = true;
       try { loadStrategy(saved.strat); applyConfig(saved.config); $('style').value = saved.style; $('preset').value = [...$('preset').options].some((o) => o.value === saved.preset) ? saved.preset : 'mine'; $('presetDesc').textContent = saved.desc; updateWithdrawUI(); syncFormState(); }
       finally { restoring = false; }
     }
     if (!rows.length) { batchStore.set(batchStore.get().filter((x) => x.id !== b.id)); updateBatchCount(); }
     deepState.status = 'done';
-    deepState.res = { fxId: fx.id, rows: rows, plan: pl, stopped: checkStop, batchId: rows.length ? b.id : null, at: new Date().toISOString() };
+    deepState.res = { fxId: fx.id, rows: rows, plan: pl, stopped: checkStop, batchId: rows.length ? b.id : null, at: new Date().toISOString(), times: runTimesHtml() };
     logEvent('fx.deep', 'Deep évaluation du FX « ' + fx.name + ' » : ' + rows.length + ' évaluations', { fx: fx.id });
     renderDeep();
   }
@@ -4455,7 +4517,7 @@
       kpi('Baisse en cours de route', '−' + num1.format(ddMed) + ' %', 'en général · au pire −' + num1.format(ddMax) + ' %', 'neg') +
       kpi('Capital moyen à la fin', money0.format(((fx ? fx.capital : 10000) * (100 + mean(ret))) / 100), 'pour ' + money0.format(fx ? fx.capital : 10000) + ' investis') +
       '</div>' + deepRecoveryHtml(res) +
-      '<div class="deep-save">' + (res.savedId ? '<span class="hint">✅ Deep évaluation enregistrée' + (res.name ? ' : « ' + esc(res.name) + ' »' : '') + '.</span> ' + (fx ? (fx.deepRef && fx.deepRef.id === res.savedId ? '<span class="hint">📌 Référence affichée sur le FX « ' + esc(fx.name) + ' ».</span>' : '<button type="button" class="secondary small" data-deep-link="' + esc(res.savedId) + '" title="Afficher le résumé de cette deep évaluation sur la carte du FX, avec un lien pour la rouvrir">📌 Envoyer la référence au FX</button>') : '') : '<button type="button" class="primary small" id="deepSave">💾 Enregistrer cette deep évaluation</button>') + '</div>' +
+      (res.times ? '<p class="hint">' + res.times + '</p>' : '') + '<div class="deep-save">' + (res.savedId ? '<span class="hint">✅ Deep évaluation enregistrée' + (res.name ? ' : « ' + esc(res.name) + ' »' : '') + '.</span> ' + (fx ? (fx.deepRef && fx.deepRef.id === res.savedId ? '<span class="hint">📌 Référence affichée sur le FX « ' + esc(fx.name) + ' ».</span>' : '<button type="button" class="secondary small" data-deep-link="' + esc(res.savedId) + '" title="Afficher le résumé de cette deep évaluation sur la carte du FX, avec un lien pour la rouvrir">📌 Envoyer la référence au FX</button>') : '') : '<button type="button" class="primary small" id="deepSave">💾 Enregistrer cette deep évaluation</button>') + '</div>' +
       '<section class="eval-chart"><h4>Résultat de chaque évaluation</h4><p class="hint">Dans l\'ordre des dates de départ (une tous les ' + durDays(res.plan.step) + ').</p><div id="deepBars"></div></section>' +
       '<section class="eval-chart"><h4>Par année de départ</h4><div class="table-wrap"><table class="eval deep-years"><thead><tr><th class="l">Année</th><th>Évaluations</th><th>Gagnantes</th><th>Médiane</th><th>Pire</th><th>Meilleure</th></tr></thead><tbody>' +
       Object.keys(byY).sort().map((y) => { const L = byY[y], s = L.slice().sort((a, b) => a - b); return '<tr><td class="l">' + y + '</td><td>' + L.length + '</td><td>' + Math.round((L.filter((v) => v > 0).length / L.length) * 100) + ' %</td><td>' + pc(F.fxcore.median(L)) + '</td><td>' + pc(s[0]) + '</td><td>' + pc(s[s.length - 1]) + '</td></tr>'; }).join('') +

@@ -616,3 +616,14 @@ la page par la base de la passerelle (`forexia_sync`). Ces calculs sont partagé
   test sur d'autres paires.
 - 3 nouveaux modèles : SuperTrend + ADX, cassure de Donchian, Ichimoku Tenkan / Kijun.
 - Retraits réguliers : chaque mois ou tous les X jours, en %, en somme fixe ou sur l'excédent.
+
+### Fenêtres déplaçables et réductibles
+Toutes les fenêtres (popups) se déplacent en glissant leur barre de titre (double-clic : recentrer). Le bouton **—** les réduit en
+une petite barre en bas de l'écran : la page derrière (simulations, résultats) redevient visible et utilisable ; un clic sur la barre
+(ou **▢**) rouvre la fenêtre à sa place. Un calcul lancé dans une fenêtre réduite continue.
+
+### Vitesse des lots et deep évaluations
+À la fin d'un lot ou d'une deep évaluation, la ligne **⏱** donne le temps total et sa répartition : données (téléchargement BCE ou
+passerelle MT5), calcul, affichage et enregistrement. Les données sont réutilisées autant que possible : l'historique BCE d'une paire
+est téléchargé une seule fois ; les bougies MT5 déjà reçues qui couvrent une période sont découpées sans nouvel envoi, et une deep
+évaluation demande d'un coup jusqu'à 3 ans de bougies pour les évaluations suivantes (même détail M1 / M5 / M15 qu'une demande seule).
