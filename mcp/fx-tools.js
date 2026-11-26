@@ -941,12 +941,14 @@ module.exports = function fxTools(ctx) {
     {
       name: 'fx_deep_eval',
       description: '« 🔬 Deep évaluation FX » : rejoue un FX sur toute sa période, une évaluation toutes les « écart type » jours (écart entre ses simulations, ou stepDays), chacune de la durée recommandée (jamais plus courte) ; enregistre le batch et renvoie les statistiques comparées à celles du FX.',
-      inputSchema: obj({ id: { type: 'string' }, stepDays: { type: 'number', description: 'pas entre deux évaluations (défaut : écart type entre les simulations du FX)' } }, ['id']),
+      inputSchema: obj({ id: { type: 'string' }, from: { type: 'string', description: 'AAAA-MM-JJ (défaut : début des simulations du FX)' }, to: { type: 'string', description: 'AAAA-MM-JJ (défaut : fin des simulations du FX)' }, stepDays: { type: 'number', description: 'pas entre deux évaluations (défaut : écart type entre les simulations du FX)' } }, ['id']),
       handler: async (a) => {
         const fx = getFx(a.id), S = (fx.sims || []).filter((x) => x.from && x.to);
         if (!fx.strategy.data) fail('Ce FX n\'a pas gardé sa stratégie.');
-        if (S.length < 2) fail('Ce FX ne garde pas les dates de ses simulations.');
-        const g = fx.spacing || FC.spacingOf(S), from = S.map((x) => x.from).sort()[0], to = [S.map((x) => x.to).sort().pop(), iso(today())].sort()[0];
+        const g = S.length >= 2 ? fx.spacing || FC.spacingOf(S) : null;
+        const from = a.from || (S.length ? S.map((x) => x.from).sort()[0] : fail('Ce FX ne garde pas les dates de ses simulations : indiquez from, to et stepDays.'));
+        const to = [a.to || (S.length ? S.map((x) => x.to).sort().pop() : iso(today())), iso(today())].sort()[0];
+        if (!a.stepDays && !g) fail('Indiquez stepDays (pas entre deux évaluations, en jours).');
         const months = Math.max(1, (fx.duration && fx.duration.reco) || 12), step = Math.max(7, Math.round(a.stepDays || (g && g.sdDays) || 30)), periods = [];
         for (let t = Date.parse(from + 'T00:00:00Z'); periods.length < 2000; t += step * 864e5) {
           const st = new Date(t), en = new Date(D.addMonths(st, months).getTime() - 864e5);

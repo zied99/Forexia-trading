@@ -4313,21 +4313,25 @@
   let deepState = { fxId: '', status: 'idle', res: null };
   const DAY = 864e5;
   /** Plan de la deep évaluation : début et fin de la période du FX, pas (écart type entre ses simulations), durée. */
+  /** Plan de la deep évaluation : période et pas du FX (ou ceux choisis : deepState.custom = {from, to, step}), durée recommandée. */
   function deepPlan(fx) {
-    const S = (fx.sims || []).filter((x) => x.from && x.to);
-    if (S.length < 2) return { error: 'Ce FX ne garde pas les dates de ses simulations : recréez-le (« 💼 Créer un FX » sur un batch).' };
-    const g = fx.spacing || F.fxcore.spacingOf(S);
-    const from = S.map((x) => x.from).sort()[0], to0 = S.map((x) => x.to).sort().pop(), today = F.data.iso(new Date());
-    const to = to0 < today ? to0 : today, months = Math.max(1, (fx.duration && fx.duration.reco) || 12);
-    const step = Math.max(7, Math.round((g && g.sdDays) || 30));
-    const starts = [];
+    const S = (fx.sims || []).filter((x) => x.from && x.to), c = deepState.custom || {};
+    const g = S.length >= 2 ? fx.spacing || F.fxcore.spacingOf(S) : null, today = F.data.iso(new Date());
+    const auto = { from: S.length ? S.map((x) => x.from).sort()[0] : '', to: S.length ? S.map((x) => x.to).sort().pop() : '', step: g ? Math.max(7, Math.round(g.sdDays)) : 0 };
+    const okD = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d || '');
+    const from = okD(c.from) ? c.from : auto.from, to0 = okD(c.to) ? c.to : auto.to, to = to0 && to0 < today ? to0 : today;
+    const step = Math.max(1, Math.round(Number(c.step) || auto.step || 0)), months = Math.max(1, (fx.duration && fx.duration.reco) || 12);
+    const base = { from: from, to: to, step: step, months: months, auto: auto, spacing: g, starts: [] };
+    if (!from) return Object.assign(base, { error: 'Indiquez la date de début (ce FX ne garde pas les dates de ses simulations).' });
+    if (!step) return Object.assign(base, { error: 'Indiquez le pas entre deux évaluations (en jours), par exemple l\'écart type entre les simulations.' });
+    if (from >= to) return Object.assign(base, { error: 'La date de fin doit être après la date de début.' });
     for (let t = Date.parse(from + 'T00:00:00Z'); ; t += step * DAY) {
       const st = new Date(t), en = new Date(F.data.addMonths(st, months).getTime() - DAY);
       if (F.data.iso(en) > to) break; // pas d'évaluation plus courte que la durée recommandée
-      starts.push({ from: F.data.iso(st), to: F.data.iso(en) });
-      if (starts.length > 2000) break;
+      base.starts.push({ from: F.data.iso(st), to: F.data.iso(en) });
+      if (base.starts.length > 2000) break;
     }
-    return { from: from, to: to, step: step, months: months, starts: starts, spacing: g };
+    return base;
   }
   const durDays = (d) => (d < 60 ? Math.round(d) + ' jours' : num1.format(d / 30.4375) + ' mois');
   function openDeep() {
@@ -4343,11 +4347,15 @@
     let h = '<div class="deep-pick"><label class="field">FX à évaluer<select id="deepFx">' + list.map((x) => '<option value="' + esc(x.id) + '"' + (x.id === deepState.fxId ? ' selected' : '') + '>' + esc(x.name) + '</option>').join('') + '</select></label></div>';
     if (fx) {
       const pl = deepPlan(fx);
+      h += '<div class="deep-dates"><label class="field">Du<input type="date" id="deepFrom" value="' + esc(pl.from) + '"></label><label class="field">Au<input type="date" id="deepTo" value="' + esc(pl.to) + '"></label>' +
+        '<label class="field">Une évaluation tous les (jours)<input type="number" id="deepStep" min="1" step="1" value="' + esc(pl.step || '') + '" placeholder="ex. 90"></label>' +
+        '<p class="hint">' + (pl.auto.from ? 'Proposé à partir du FX : ' + frDate(pl.auto.from) + ' → ' + frDate(pl.auto.to) + ', une évaluation tous les ' + pl.auto.step + ' jours (écart type entre ses simulations). ' : 'Ce FX ne garde pas les dates de ses simulations : indiquez la période et le pas. ') +
+        'Chaque évaluation dure <b>' + pl.months + ' mois</b> (durée recommandée du FX).' + (deepState.custom ? ' <button type="button" class="link" id="deepAuto">Revenir aux valeurs du FX</button>' : '') + '</p></div>';
       if (pl.error) h += '<p class="val ko">' + esc(pl.error) + '</p>';
       else {
         h += '<div class="deep-plan"><p>Stratégie <b>' + esc(fx.strategy.name) + '</b> · ' + esc(fx.strategy.pair) + ' · levier 1:' + esc(fx.strategy.leverage) + ' · capital ' + money0.format(fx.capital) + ' · retrait : ' + esc((fx.income && fx.income.desc) || 'aucun') + '</p>' +
-          '<p>Période du FX : <b>' + frDate(pl.from) + ' → ' + frDate(pl.to) + '</b> · une évaluation tous les <b>' + durDays(pl.step) + '</b> (écart type entre ses simulations) · chacune dure <b>' + pl.months + ' mois</b> (durée recommandée) → <b>' + pl.starts.length + ' évaluation' + (pl.starts.length > 1 ? 's' : '') + '</b>.</p>' +
-          (pl.starts.length ? '' : '<p class="val ko">La période du FX est plus courte que sa durée recommandée : aucune évaluation possible.</p>') +
+          '<p>Période : <b>' + frDate(pl.from) + ' → ' + frDate(pl.to) + '</b> · une évaluation tous les <b>' + durDays(pl.step) + '</b> · chacune dure <b>' + pl.months + ' mois</b> → <b>' + pl.starts.length + ' évaluation' + (pl.starts.length > 1 ? 's' : '') + '</b>.</p>' +
+          (pl.starts.length ? '' : '<p class="val ko">La période est plus courte que la durée recommandée (' + pl.months + ' mois) : aucune évaluation possible.</p>') +
           '<div class="row buttons deep-acts"><button type="button" class="primary" id="deepRun"' + (deepState.status === 'run' || !pl.starts.length ? ' disabled' : '') + '>▶ Lancer la deep évaluation</button>' +
           (deepState.status === 'run' ? '<button type="button" class="secondary" id="deepStop">■ Arrêter</button>' : '') + '</div></div>';
       }
@@ -4437,9 +4445,14 @@
     if (t.closest('[data-close]')) return closeDeep();
     if (t.id === 'deepRun') return runDeep();
     if (t.id === 'deepStop') { checkStop = true; return; }
+    if (t.id === 'deepAuto') { deepState.custom = null; return renderDeep(); }
     if (t.id === 'deepOpenBatch' && deepState.res && deepState.res.batchId) { const b = batchStore.get().find((x) => x.id === deepState.res.batchId); if (b) { closeDeep(); loadBatch(b); openEvaluation('charts'); } }
   });
-  $('deepModal').addEventListener('change', (ev) => { if (ev.target.id === 'deepFx') { deepState.fxId = ev.target.value; renderDeep(); } });
+  $('deepModal').addEventListener('change', (ev) => {
+    const id = ev.target.id;
+    if (id === 'deepFx') { deepState.fxId = ev.target.value; deepState.custom = null; return renderDeep(); }
+    if (['deepFrom', 'deepTo', 'deepStep'].includes(id)) { deepState.custom = { from: $('deepFrom').value, to: $('deepTo').value, step: $('deepStep').value }; renderDeep(); }
+  });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('deepModal').hidden) closeDeep(); });
   updateFxCount();
   async function runWd() {

@@ -1042,3 +1042,6 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 .deep-res h3 { margin: 16px 0 10px; }
 .deep-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
 @media (max-width: 700px) { #deepBtn { font-size: 0; gap: 4px; padding: 6px 8px; } #deepBtn .deep-ico { font-size: 15px; } }
+
+.deep-dates { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px 12px; align-items: end; margin-top: 10px; }
+.deep-dates .hint { grid-column: 1 / -1; margin: 2px 0 0; }
