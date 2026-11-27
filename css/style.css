@@ -1088,3 +1088,7 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
   .modal.win-min { left: 8px; right: 8px; bottom: calc(8px + var(--win-slot, 0) * 54px); }
   .modal.win-min .modal-box { width: 100%; }
 }
+.bridge-notice { position: fixed; z-index: 70; left: 50%; top: 12px; transform: translateX(-50%); width: min(620px, calc(100vw - 24px)); background: var(--panel); color: var(--text); border: 2px solid var(--warn); border-radius: 12px; padding: 12px 40px 10px 14px; box-shadow: 0 10px 30px rgba(0,0,0,.25); font-size: 13.5px; }
+.bridge-notice p { margin: 0 0 6px; }
+.bridge-notice ol { margin: 4px 0 6px 18px; padding: 0; }
+.bridge-notice > button { position: absolute; top: 8px; right: 8px; width: auto; padding: 2px 8px; }

@@ -97,6 +97,25 @@
       const m = syncMeta(); m[k] = at; localStorage.setItem(SYNC_META, JSON.stringify(m));
     } catch (e) { /* ignoré */ } finally { syncMuted = false; }
   }
+  /** Donnée refusée par la passerelle (trop grosse) : dire quelle version tourne et quoi faire, dans un bandeau qui reste. */
+  let tooBigShown = false;
+  async function bridgeTooBig(it) {
+    if (tooBigShown) return;
+    tooBigShown = true;
+    let v = '';
+    try { v = (await bridgeCall('GET', '/status')).version || ''; } catch (e) { /* ignorée */ }
+    const mb = Math.round((JSON.stringify(it.data || '').length / 1e6) * 10) / 10, name = it.key.replace('forexia.', ''), old = !v || v < '1.7';
+    const n = document.createElement('div');
+    n.className = 'bridge-notice'; n.setAttribute('role', 'alert');
+    n.innerHTML = '<p><b>La passerelle MT5 refuse « ' + esc(name) + ' » (' + num1.format(mb) + ' Mo).</b> ' +
+      (old ? 'Elle est en version <b>' + esc(v || 'ancienne') + '</b>, qui accepte au plus 6 Mo ; la version 1.7 accepte 80 Mo.</p>' +
+        '<ol><li>Téléchargez la nouvelle passerelle : <a href="bridge/forexia_bridge.py?v=' + esc(document.documentElement.dataset.version || '') + '" download="forexia_bridge.py">forexia_bridge.py</a>, et remplacez l\'ancien fichier <b>dans le dossier d\'où vous lancez la passerelle</b> (souvent Téléchargements : un « git pull » ne la met à jour que si elle est lancée depuis C:\\Forexia-trading\\bridge).</li>' +
+        '<li>Fermez la fenêtre noire de la passerelle, puis relancez <b>demarrer-passerelle.bat</b>.</li><li>Rechargez cette page.</li></ol>'
+        : 'Elle est pourtant à jour (v' + esc(v) + ', 80 Mo au plus) : vos ' + esc(name) + ' sont très volumineux. Supprimez des batchs inutiles (fenêtre « Batchs »).</p>') +
+      '<p class="hint">Rien n\'est perdu : les autres données sont bien enregistrées, et « ' + esc(name) + ' » reste dans la page et dans le compte en ligne.</p><button type="button" class="ghost small" aria-label="Fermer">✕</button>';
+    n.querySelector('button').addEventListener('click', () => n.remove());
+    document.body.appendChild(n);
+  }
   async function kvToBridge(items) {
     if (!dbOn || kvOldBridge) return;
     for (const it of items) {
@@ -104,7 +123,8 @@
       catch (e) {
         if (/Inconnu/.test(e.message)) { kvOldBridge = true; toast('Mettez à jour la passerelle MT5 (version 1.6) pour enregistrer aussi les FX, batchs, époques… dans la base.', false); return; }
         console.warn('Base de la passerelle : « ' + it.key + ' » non enregistré (' + e.message + ')'); // les autres données continuent
-        if (/volumineu/i.test(e.message)) toast('La base de la passerelle refuse « ' + it.key.replace('forexia.', '') + ' » (trop volumineux) : mettez à jour la passerelle (git pull puis relancez-la). Les autres données sont bien enregistrées.', false);
+        // trop gros : refus explicite, ou connexion coupée par une ancienne passerelle (au-delà de 8 Mo)
+        if (/volumineu/i.test(e.message) || (/fetch|network|reset/i.test(e.message) && JSON.stringify(it.data || '').length > 6e6)) bridgeTooBig(it);
       }
     }
   }
@@ -232,7 +252,7 @@
 
   let lastFocusedRule = $('longEntry');
   const BRIDGE_URL = 'http://127.0.0.1:8787';
-  const BRIDGE_MIN = '1.6'; // version minimale de la passerelle attendue par cette page
+  const BRIDGE_MIN = '1.7'; // version minimale de la passerelle attendue par cette page
   let bridgeToken = '';
   try { bridgeToken = localStorage.getItem('forexia.bridgeToken') || ''; } catch (e) { /* ignoré */ }
   let csvBars = null, csvName = '';
