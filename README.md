@@ -631,11 +631,13 @@ est téléchargé une seule fois ; les bougies MT5 déjà reçues qui couvrent u
 
 ### ⭐ Plans mis en avant et page client
 Sur la carte d'un FX (fenêtre « 💼 FX »), **⭐ Mettre en avant** publie le FX comme plan d'investissement : nom et phrase
-de présentation pour le client, réinvestissement possible tous les N mois, aperçu de la carte client. Le client ne voit
+de présentation pour le client, aperçu de la carte et du détail. Le délai de réinvestissement est calculé à partir du FX
+(pas de sa deep évaluation de référence, sinon écart type entre ses simulations). Le client ne voit
 que le résumé (`F.fxcore.fxPublic`) : capital minimum, valeur au bout d'un an (avec les niveaux), période recommandée,
 estimation à la fin avec et sans retrait, type de retrait, arrêt du robot, risque (pires périodes), confiance,
 réinvestissement ; ni levier, ni règles, ni stratégie.
 
-La page client est **client.html** : connexion (comptes Supabase), plans disponibles (table `plans`, à créer en relançant
-`supabase/schema.sql`), montant ajustable, « Choisir ce plan », portefeuille (gardé dans le navigateur en attendant le back
+La page client est **client.html** : connexion (comptes Supabase), plans disponibles en cartes compactes (table `plans`, à
+créer en relançant `supabase/schema.sql`), détail dans un panneau (montant, trois scénarios à un an, fin de période avec
+et sans retrait, risque, confiance, conditions), « Choisir ce plan », portefeuille (gardé dans le navigateur en attendant le back
 office). **client.html?apercu** montre sans connexion les plans mis en avant depuis ce navigateur.

@@ -3858,8 +3858,8 @@
   }
   // ---------- ⭐ Mettre en avant (page client) ----------
   let pubFx = null;
-  function pubOpts() { return { title: $('pubName').value.trim() || pubFx.name, pitch: $('pubPitch').value.trim(), reinvestMonths: Number($('pubReinv').value) || 3 }; }
-  function renderPubPreview() { const p = F.fxcore.fxPublic(pubFx, pubOpts()); $('pubPreview').innerHTML = F.planview.cardHtml(p, p.minCapital, { preview: true }); }
+  function pubOpts() { return { title: $('pubName').value.trim() || pubFx.name, pitch: $('pubPitch').value.trim() }; }
+  function renderPubPreview() { const p = F.fxcore.fxPublic(pubFx, pubOpts()); $('pubPreview').innerHTML = '<p class="pv-cap">Dans la liste des plans</p>' + F.planview.summaryHtml(p) + '<p class="pv-cap">Quand le client ouvre le détail</p>' + F.planview.detailHtml(p, p.minCapital, { preview: true }); }
   function openPub(id) {
     pubFx = fxList().find((x) => x.id === id);
     if (!pubFx) return toast('Enregistrez d\'abord ce FX.', false);
@@ -3867,11 +3867,11 @@
     const o = pubFx.publishOpt || {};
     $('pubBody').innerHTML = '<div class="pub-form"><label class="field">Nom du plan (vu par le client)<input id="pubName" maxlength="80" value="' + esc(o.title || pubFx.name) + '"></label>' +
       '<label class="field">Phrase de présentation (facultative)<textarea id="pubPitch" rows="2" maxlength="280" placeholder="ex. Un plan prudent pour faire fructifier une épargne sur 18 mois.">' + esc(o.pitch || '') + '</textarea></label>' +
-      '<label class="field">Réinvestissement sur le même plan : accessible tous les (mois)<input id="pubReinv" type="number" min="1" max="24" step="1" value="' + esc(o.reinvestMonths || 3) + '"></label>' +
+      (() => { const r = F.fxcore.reinvestOf(pubFx); return '<p class="pub-info"><b>Réinvestissement sur le même plan : tous les ' + r.months + ' mois</b><br><span class="hint">' + (r.from === 'deep' ? 'Calculé à partir du pas de la deep évaluation de référence du FX.' : r.from === 'spacing' ? 'Calculé à partir de l\'écart type entre les simulations du FX.' : 'Valeur par défaut : ce FX ne garde pas les dates de ses simulations.') + '</span></p>'; })() +
       (pubFx.publicPlan ? '<p class="hint">Publié le ' + new Date(pubFx.publicPlan.publishedAt).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) + '. « Publier » met à jour le plan avec les chiffres actuels du FX.</p>' : '') +
       (pubFx.solidity && pubFx.solidity.synthetic ? '<p class="val ko">⚠ Ce FX est construit sur des données simulées : à refaire sur les cours réels avant de le proposer à des clients.</p>' : '') +
       (cloudOn() ? '' : '<p class="val ko">Vous n\'êtes pas connecté au compte en ligne : le plan n\'apparaîtra que dans l\'aperçu de ce navigateur, pas chez les clients.</p>') +
-      '</div><div class="pub-preview"><p class="hint">Aperçu de la carte client (pour le capital minimum) :</p><div id="pubPreview" class="pv-scope"></div></div>';
+      '</div><div class="pub-preview"><div id="pubPreview" class="pv-scope"></div></div>';
     $('pubOff').hidden = !pubFx.publicPlan;
     renderPubPreview();
     $('pubModal').hidden = false; document.body.style.overflow = 'hidden';

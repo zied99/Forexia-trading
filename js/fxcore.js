@@ -411,8 +411,14 @@
   /**
    * Plan d'investissement présenté à un client (« ⭐ Mettre en avant ») : seulement ce qu'un client doit voir, en % du capital
    * investi (la page client le convertit pour le montant choisi). Pas de levier, de règles ni de nom de stratégie.
-   * opt = {title, pitch, reinvestMonths}
+   * opt = {title, pitch}. Réinvestissement : calculé (pas de la deep évaluation de référence, sinon écart type entre les simulations).
    */
+  /** Délai de réinvestissement sur le même plan, tiré du FX : pas de sa deep évaluation de référence, sinon écart type entre ses simulations. */
+  function reinvestOf(fx) {
+    const g = fx.spacing || spacingOf((simsOf(fx) || []).filter((x) => x.from && x.to));
+    const days = fx.deepRef && fx.deepRef.step ? fx.deepRef.step : g && g.sdDays ? g.sdDays : null;
+    return days ? { months: Math.max(1, Math.round(days / 30.4375)), from: fx.deepRef && fx.deepRef.step ? 'deep' : 'spacing' } : { months: 3, from: 'default' };
+  }
   function fxPublic(fx, opt) {
     opt = opt || {};
     const S = (simsOf(fx) || []).slice(), q = (k, x) => pctile(S.map((s) => s[k]).filter(Number.isFinite), x), w = fx.income && fx.income.w;
@@ -431,15 +437,16 @@
       withWithdrawal: noWd ? null : { kept: r1(q('acc', 0.5)), withdrawn: r1(q('tot', 0.5)), total: r1(q('b', 0.5)), bad: r1(q('b', 0.1)), good: r1(q('b', 0.9)) },
       withoutWithdrawal: noWdEnd ? { usual: r1(noWdEnd.usual), bad: r1(noWdEnd.bad), good: r1(noWdEnd.good), estimated: noWdEnd.estimated } : null,
       withdrawal: { possible: !noWd, text: wdClient(w) },
-      stop: { anytime: true, aboveMedian: r1(noWd ? q('b', 0.5) : q('acc', 0.5)) },
+      // arrêt conseillé quand le compte dépasse son niveau habituel de fin de période (seulement si ce niveau est au-dessus du capital investi)
+      stop: { anytime: true, aboveMedian: (() => { const v = noWd ? q('b', 0.5) : q('acc', 0.5); return v > 100.5 ? r1(v) : null; })() },
       risk: { note: fx.riskNote, text: RISK_TXT[fx.riskNote] || '', worstEnd: r1(q('b', 0)), badEnd: r1(q('b', 0.1)), usualDip: r1(fx.drawdown ? fx.drawdown.med : null), worstDip: r1(fx.drawdown ? fx.drawdown.max : null) },
       confidence: { score: conf.score, periods: fx.n, won: sol.eraWin, of: sol.eras, unit: sol.unit || 'époque', years: fx.years, synthetic: !!sol.synthetic },
-      reinvestMonths: Math.max(1, Math.round(Number(opt.reinvestMonths) || 3)),
+      reinvestMonths: reinvestOf(fx).months, reinvestFrom: reinvestOf(fx).from,
     };
   }
 
   F.fxcore = {
-    wdClient, fxPublic,
+    wdClient, fxPublic, reinvestOf,
     deepRecovery, deepStarts, deepFew, deepRef,
     pctile, mean, median, durationDays, CUR_NAME, RISK_TXT, MINER_LEV,
     wdApply, wdKey, wdDesc, withdrawLabel, wdRow, wdDerive, wdAgg, fxRowFromRecord, spacingOf,

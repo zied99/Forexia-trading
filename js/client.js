@@ -25,9 +25,17 @@
   }
   function renderPlans() {
     const chosen = new Set(folio().map((x) => x.planId));
-    $('clGrid').innerHTML = plans.length ? plans.map((p) => PV.cardHtml(p, amounts[p.fxId] || p.minCapital, { chosen: !PREVIEW && chosen.has(p.fxId), preview: PREVIEW })).join('')
+    $('clGrid').innerHTML = plans.length ? plans.map((p) => PV.summaryHtml(p, { chosen: !PREVIEW && chosen.has(p.fxId) })).join('')
       : '<div class="cl-empty"><b>Aucun plan disponible pour le moment.</b><br>' + (PREVIEW ? 'Dans Forexia, ouvrez « 💼 FX » et cliquez « ⭐ Mettre en avant » sur un FX.' : 'Revenez bientôt : de nouveaux plans seront proposés.') + '</div>';
   }
+  let detailId = null;
+  function renderDetail() {
+    const p = plans.find((x) => x.fxId === detailId);
+    if (!p) return closeDetail();
+    $('clDetailBody').innerHTML = PV.detailHtml(p, amounts[p.fxId] || p.minCapital, { chosen: !PREVIEW && folio().some((x) => x.planId === p.fxId), preview: PREVIEW });
+  }
+  function openDetail(id) { detailId = id; renderDetail(); $('clDetail').hidden = false; document.body.style.overflow = 'hidden'; $('clDetailBody').scrollTop = 0; }
+  function closeDetail() { $('clDetail').hidden = true; detailId = null; document.body.style.overflow = ''; }
   function renderFolio() {
     const L = folio(), byId = new Map(plans.map((p) => [p.fxId, p]));
     if (!L.length) { $('clFolio').innerHTML = '<div class="cl-intro"><h1>Mon portefeuille</h1></div><div class="cl-empty"><b>Votre portefeuille est vide.</b><br>Choisissez un plan dans « Plans disponibles ».</div>'; return; }
@@ -87,18 +95,23 @@
 
   // ---------- plans et portefeuille ----------
   document.querySelectorAll('.cl-tab').forEach((b) => b.addEventListener('click', () => go(b.dataset.view)));
-  $('clGrid').addEventListener('change', (ev) => {
+  $('clDetailBody').addEventListener('change', (ev) => {
     const id = ev.target.dataset && ev.target.dataset.pvAmount;
     if (!id) return;
     const p = plans.find((x) => x.fxId === id), v = Number(ev.target.value);
     if (!p) return;
-    if (!(v >= p.minCapital)) { toast('Montant minimum : ' + PV.money.format(p.minCapital) + '.'); amounts[id] = p.minCapital; }
-    else amounts[id] = Math.round(v);
-    const y = ev.target.closest('.pv-card').getBoundingClientRect().top;
-    renderPlans();
-    const c = $('clGrid').querySelector('[data-plan="' + CSS.escape(id) + '"]'); if (c) window.scrollBy(0, c.getBoundingClientRect().top - y);
+    const next = v >= p.minCapital ? Math.round(v) : p.minCapital;
+    if (!(v >= p.minCapital)) toast('Montant minimum : ' + PV.money.format(p.minCapital) + '.');
+    if (next === amounts[id] && v >= p.minCapital) return;
+    amounts[id] = next;
+    // après l'événement en cours (évite de remplacer le champ pendant qu'il perd le focus)
+    setTimeout(() => { const top = $('clDetailBody').scrollTop; renderDetail(); $('clDetailBody').scrollTop = top; }, 0);
   });
-  $('clGrid').addEventListener('click', (ev) => {
+  $('clDetailBody').addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && ev.target.dataset && ev.target.dataset.pvAmount) ev.target.blur(); });
+  $('clDetail').addEventListener('click', (ev) => { if (ev.target.closest('[data-close]')) closeDetail(); });
+  function onChoose(ev) {
+    const o = ev.target.closest('[data-pv-open]');
+    if (o) return openDetail(o.dataset.pvOpen);
     const b = ev.target.closest('[data-pv-choose]');
     if (!b) return;
     const p = plans.find((x) => x.fxId === b.dataset.pvChoose);
@@ -107,9 +120,11 @@
     choosing = p;
     const A = amounts[p.fxId] || p.minCapital;
     $('clChooseBody').innerHTML = '<p><b>' + PV.esc(p.title) + '</b></p><label class="cl-field">Montant à investir<span class="pv-input"><input type="number" id="clChooseAmt" min="' + p.minCapital + '" value="' + A + '"><b>€</b></span></label>' +
-      '<p class="cl-hint">Minimum ' + PV.money.format(p.minCapital) + ' · période recommandée ' + PV.months(p.recoMonths) + ' · risque ' + p.risk.note + '/7. Vous pourrez retirer ce plan de votre portefeuille tant qu\'il n\'est pas activé.</p>';
+      '<p class="cl-hint">Minimum ' + PV.money.format(p.minCapital) + ' · durée conseillée ' + PV.months(p.recoMonths) + ' · risque ' + p.risk.note + '/7. Vous pourrez retirer ce plan de votre portefeuille tant qu\'il n\'est pas activé.</p>';
     $('clChoose').hidden = false; $('clChooseAmt').focus();
-  });
+  }
+  $('clGrid').addEventListener('click', onChoose);
+  $('clDetailBody').addEventListener('click', onChoose);
   $('clChooseOk').addEventListener('click', () => {
     const p = choosing, v = Number($('clChooseAmt').value);
     if (!p) return;
@@ -117,10 +132,10 @@
     setFolio(folio().concat({ id: 'c' + Date.now().toString(36), planId: p.fxId, amount: Math.round(v), at: new Date().toISOString(), plan: p }));
     $('clChoose').hidden = true; choosing = null;
     toast('« ' + p.title + ' » ajouté à votre portefeuille.');
-    renderPlans();
+    amounts[p.fxId] = Math.round(v); closeDetail(); renderPlans();
   });
   $('clChoose').addEventListener('click', (ev) => { if (ev.target.closest('[data-close]')) { $('clChoose').hidden = true; choosing = null; } });
-  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && !$('clChoose').hidden) { $('clChoose').hidden = true; choosing = null; } });
+  document.addEventListener('keydown', (ev) => { if (ev.key !== 'Escape') return; if (!$('clChoose').hidden) { $('clChoose').hidden = true; choosing = null; } else if (!$('clDetail').hidden) closeDetail(); });
   $('clFolio').addEventListener('click', (ev) => {
     const r = ev.target.closest('[data-remove]');
     if (!r) return;

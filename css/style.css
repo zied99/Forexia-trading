@@ -1098,8 +1098,8 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
   --pv-bg: #f5f3ee; --pv-panel: #ffffff; --pv-soft: #f1efe9; --pv-text: #13231f; --pv-muted: #5f6b67; --pv-border: #e4e0d6;
   --pv-accent: #0f6e56; --pv-accent-ink: #ffffff; --pv-accent-ink2: #0f6e56; --pv-accent-soft: #d5ece4;
   --pv-up: #0f7a50; --pv-up-soft: #d6efe2; --pv-down: #b42318; --pv-down-soft: #fbe1dd; --pv-warn: #a15c07; --pv-warn-soft: #fbecd2;
-  --pv-shadow: 0 1px 2px rgba(19, 35, 31, .04), 0 8px 24px rgba(19, 35, 31, .06);
-  background: var(--pv-bg); color: var(--pv-text); padding: 14px; border-radius: 14px; font-size: 15px;
+  --pv-shadow: 0 1px 2px rgba(19, 35, 31, .04), 0 8px 24px rgba(19, 35, 31, .06); --pv-shadow-hi: var(--pv-shadow);
+  display: grid; gap: 12px; background: var(--pv-bg); color: var(--pv-text); padding: 14px; border-radius: 14px; font-size: 15px;
 }
 .pub-body { grid-template-columns: minmax(0, 340px) minmax(0, 1fr); align-items: start; gap: 18px; }
 .pub-form { display: grid; gap: 10px; }
@@ -1110,3 +1110,6 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 @media (max-width: 860px) { .pub-body { grid-template-columns: 1fr; } }
 .pub-open { border: 1px solid var(--border); background: var(--panel-2); color: var(--text); font-weight: 500; font-size: 13.5px; }
 #pubModal { z-index: 64; }
+.pv-cap { margin: 4px 0 -4px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--pv-muted); }
+.pub-info { margin: 0; padding: 10px 12px; background: var(--panel-2); border-radius: 10px; font-size: 13.5px; }
+.pub-preview { max-height: 70vh; overflow: auto; border-radius: 14px; }

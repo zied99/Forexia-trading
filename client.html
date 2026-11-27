@@ -1,11 +1,11 @@
 <!doctype html>
-<html lang="fr" data-version="1.2.106">
+<html lang="fr" data-version="1.2.107">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Forexia — Plans d'investissement</title>
   <meta name="description" content="Choisissez vos plans d'investissement Forexia.">
-  <link rel="stylesheet" href="css/client.css?v=1.2.106">
+  <link rel="stylesheet" href="css/client.css?v=1.2.107">
 </head>
 <body>
   <header class="cl-top">
@@ -42,13 +42,22 @@
 
     <!-- plans -->
     <section id="clPlans" hidden>
-      <div class="cl-intro"><h1>Plans disponibles</h1><p>Indiquez le montant que vous envisagez : tous les chiffres s'adaptent. Choisissez un ou plusieurs plans pour composer votre portefeuille.</p></div>
+      <div class="cl-intro"><h1>Plans disponibles</h1><p>Comparez les plans, ouvrez le détail pour simuler votre montant, puis choisissez-en un ou plusieurs pour composer votre portefeuille.</p></div>
       <div class="cl-grid" id="clGrid"></div>
     </section>
 
     <!-- portefeuille -->
     <section id="clFolio" hidden></section>
   </main>
+
+  <!-- détail d'un plan -->
+  <div class="cl-drawer" id="clDetail" hidden>
+    <div class="cl-drawer-bg" data-close></div>
+    <aside class="cl-drawer-box" role="dialog" aria-modal="true" aria-label="Détail du plan">
+      <div class="cl-drawer-bar"><button type="button" class="cl-ghost" data-close>← Tous les plans</button></div>
+      <div class="cl-drawer-body" id="clDetailBody"></div>
+    </aside>
+  </div>
 
   <!-- confirmation du choix -->
   <div class="cl-modal" id="clChoose" hidden>
@@ -61,11 +70,11 @@
   </div>
   <div class="cl-toast" id="clToast" hidden></div>
 
-  <script src="js/indicators.js?v=1.2.106"></script>
-  <script src="js/confidence.js?v=1.2.106"></script>
-  <script src="js/fxcore.js?v=1.2.106"></script>
-  <script src="js/cloud.js?v=1.2.106"></script>
-  <script src="js/planview.js?v=1.2.106"></script>
-  <script src="js/client.js?v=1.2.106"></script>
+  <script src="js/indicators.js?v=1.2.107"></script>
+  <script src="js/confidence.js?v=1.2.107"></script>
+  <script src="js/fxcore.js?v=1.2.107"></script>
+  <script src="js/cloud.js?v=1.2.107"></script>
+  <script src="js/planview.js?v=1.2.107"></script>
+  <script src="js/client.js?v=1.2.107"></script>
 </body>
 </html>
