@@ -260,3 +260,9 @@ l'agent applique le guide choisi dans la page.
   des périodes plutôt qu'un seul gros résultat, et tout EA doit être testé en démo avant un compte réel.
 - `mt5_run_test` ferme MetaTrader 5 pendant le test si `closeTerminal` vaut `true`.
 - Test du serveur : `npm run test:mcp`.
+
+### Envoi automatique à la page
+Après chaque outil qui crée, modifie ou supprime des données partagées (FX, batchs, deep évaluations, versions, époques,
+mécaniques de retrait, stratégies), le serveur les envoie aussitôt à la base de la passerelle : le champ `page` de la réponse
+le confirme. La page ouverte sur le PC les reprend dans la minute et les envoie au compte (téléphone). Les suppressions faites
+par l'agent sont inscrites comme celles de la page (`forexia.syncTomb`) : elles ne reviennent pas d'un autre appareil.

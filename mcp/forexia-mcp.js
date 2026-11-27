@@ -730,6 +730,23 @@ TOOLS.push(...FX_TOOLS);
 const INSTRUCTIONS = 'Forexia : backtests de stratégies Forex. IMPORTANT : pour toute recherche de stratégie ou de FX, appelez d\'abord fx_method : il indique le guide de recherche choisi par l\'utilisateur dans la page (à suivre étape par étape) ou la liberté de l\'agent (par défaut : votre propre méthode). Commencez par forexia_help. Une stratégie se donne en règles techniques, en français (frenchText), ' +
   'par un modèle (preset) ou par une stratégie enregistrée (saved). Utilisez random_batch pour juger la robustesse avant de conclure, et méfiez-vous de la sur-optimisation. ' +
   'Pour chercher un FX (plan d\'investissement : stratégie, capital, durée, retrait), lisez fx_method : batchs sur les mêmes périodes (run_batch sameAs), compare_batches, time_analysis, era_analysis, compare_withdrawals, build_fx, mine_fx, note_add.';
+// Envoi automatique à la page : après un outil (appelé par le client, pas depuis un autre outil) qui a modifié des données
+// partagées, elles partent vers la base de la passerelle (champ « page » de la réponse).
+{ let depth = 0;
+  for (const t of TOOLS) {
+    if (t.name === 'forexia_sync') continue;
+    const h = t.handler;
+    t.handler = async (a) => {
+      const top = depth === 0, before = top ? JSON.stringify(store.strategies()) : null;
+      depth++;
+      let out;
+      try { out = await h(a); } finally { depth--; }
+      if (top) { const sent = await FX_TOOLS.afterCall(t.name, JSON.stringify(store.strategies()) !== before); if (sent && out && typeof out === 'object' && !Array.isArray(out)) out.page = sent; }
+      return out;
+    };
+  }
+}
+
 async function handle(msg) {
   const { id, method, params } = msg;
   const reply = (result) => ({ jsonrpc: '2.0', id: id, result: result });

@@ -19,7 +19,7 @@
   // ---------- Toutes les données dans la base : passerelle (base SQLite sur votre PC) et compte en ligne ----------
   // Chaque donnée gardée dans le navigateur est aussi enregistrée dans la base dès qu'elle change, et récupérée
   // à la connexion (la version la plus récente l'emporte ; à la première connexion d'un appareil, les listes sont réunies).
-  const SYNC_KEYS = ['forexia.deepEvals', 'forexia.syncTomb', 'forexia.stratVersions', 'forexia.agentGuide', 'forexia.fx', 'forexia.batches', 'forexia.eras', 'forexia.events', 'forexia.wdPresets', 'forexia.wdResults', 'forexia.drawings', 'forexia.lastRun'];
+  const SYNC_KEYS = ['forexia.syncTomb', 'forexia.deepEvals', 'forexia.stratVersions', 'forexia.agentGuide', 'forexia.fx', 'forexia.batches', 'forexia.eras', 'forexia.events', 'forexia.wdPresets', 'forexia.wdResults', 'forexia.drawings', 'forexia.lastRun'];
   const SYNC_META = 'forexia.syncMeta';
   const syncMeta = () => { try { return JSON.parse(localStorage.getItem(SYNC_META)) || {}; } catch (e) { return {}; } };
   let syncMuted = false, syncTimer = null, kvOldBridge = false;

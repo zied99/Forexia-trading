@@ -16,7 +16,22 @@ module.exports = function fxTools(ctx) {
   const path = require('path');
 
   // ---------------------------------------------------------------- stockage (mêmes formats que la page)
-  const S = (name, def) => ({ get: () => readJson(name, def), set: (v) => writeJson(name, v) });
+  // Listes partagées avec la page : toute modification par l'agent est notée (envoi automatique à la page après l'outil),
+  // et ce qu'il supprime est inscrit dans les « tombes » (comme la page), pour que la suppression ne revienne pas d'un autre appareil.
+  const KEY_OF = { 'batches.json': 'forexia.batches', 'fx.json': 'forexia.fx', 'eras.json': 'forexia.eras', 'wdPresets.json': 'forexia.wdPresets', 'events.json': 'forexia.events',
+    'stratVersions.json': 'forexia.stratVersions', 'deepEvals.json': 'forexia.deepEvals', 'agentGuide.json': 'forexia.agentGuide' };
+  const TOMB_LISTS = ['forexia.batches', 'forexia.fx', 'forexia.wdPresets', 'forexia.deepEvals', 'forexia.stratVersions'];
+  let dirty = false, syncing = false;
+  const itemKey = (x) => (x && (x.id || x.key || x.name)) || JSON.stringify(x);
+  function tombDiff(key, before, after) {
+    if (!TOMB_LISTS.includes(key) || !Array.isArray(before) || !Array.isArray(after)) return;
+    const keep = new Set(after.map(itemKey)), gone = before.map(itemKey).filter((id) => !keep.has(id));
+    if (!gone.length) return;
+    const t = readJson('syncTomb.json', []), have = new Set(t.map((x) => x.id)), at = new Date().toISOString();
+    for (const id of gone) if (!have.has(key + '|' + id)) t.push({ id: key + '|' + id, at: at });
+    writeJson('syncTomb.json', t.slice(-5000));
+  }
+  const S = (name, def) => ({ get: () => readJson(name, def), set: (v) => { const k = KEY_OF[name]; if (k && !syncing) { tombDiff(k, readJson(name, def), v); dirty = true; } writeJson(name, v); } });
   const batches = S('batches.json', []), fxs = S('fx.json', []), eraStore = S('eras.json', []), wdp = S('wdPresets.json', []);
   const evStore = S('events.json', { items: [], edits: {}, scanned: {} }), notes = S('notes.json', []);
   const uid = (p) => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -1120,7 +1135,13 @@ module.exports = function fxTools(ctx) {
         const dir = a.direction || 'both', r = await bridge('POST', '/db/kv/list', {});
         if (r.ok === false) fail(r.message || 'Base de la passerelle indisponible (version 1.6 requise).');
         const remote = new Map((r.items || []).map((x) => [x.key, x])), out = {};
-        const tomb = remote.get('forexia.syncTomb'); deadIds = new Set(((tomb && tomb.data) || []).map((x) => x.id));
+        const tomb = remote.get('forexia.syncTomb'), rTomb = (tomb && Array.isArray(tomb.data) ? tomb.data : []), lTomb = readJson('syncTomb.json', []);
+        const allTomb = [...new Map(rTomb.concat(lTomb).map((x) => [x.id, x])).values()].slice(-5000);
+        deadIds = new Set(allTomb.map((x) => x.id));
+        writeJson('syncTomb.json', allTomb);
+        if (dir !== 'pull' && allTomb.length !== rTomb.length) await bridge('POST', '/db/kv/put', { key: 'forexia.syncTomb', data: allTomb, updatedAt: new Date().toISOString() });
+        syncing = true;
+        try {
         for (const [k, st] of Object.entries(SYNC)) {
           const rv = remote.get(k), rd = rv ? rv.data : null, local = st.get(); curKey = k;
           let merged;
@@ -1142,6 +1163,8 @@ module.exports = function fxTools(ctx) {
         if (dir !== 'push') store.setStrategies(localS);
         if (dir !== 'pull') for (const l of localS) { const r = remoteS.get(l.name); if (!r || (l.savedAt || '') > (r.data.savedAt || r.updatedAt || '')) { const d = Object.assign({}, l, { savedAt: l.savedAt || new Date().toISOString() }); if (d.config && !d.config.withdraw) delete d.config; await bridge('POST', '/db/strategies/put', { name: d.name, data: d, updatedAt: d.savedAt }); pushed++; } }
         out.strategies = { pulled: pulled, pushed: pushed, total: localS.length };
+        } finally { syncing = false; }
+        if (dir !== 'pull') dirty = false;
         const refused = out.refused; delete out.refused;
         return { direction: dir, counts: out, refused: refused, refusedHint: refused ? 'Les autres données sont bien envoyées. « trop volumineuse » : mettre à jour la passerelle (git pull, puis la relancer).' : undefined, note: 'La page reprend ces données à sa prochaine connexion à la passerelle (ou en rechargeant la page).' };
       },
@@ -1149,5 +1172,12 @@ module.exports = function fxTools(ctx) {
   ];
   for (const t of tools) if (['fx_method', 'list_fx', 'get_fx', 'list_batches', 'get_batch', 'strategy_versions', 'get_eras', 'list_withdraw_mechanics', 'batches_by_era', 'fx_simulations', 'fx_ea', 'build_fx', 'time_analysis', 'compare_batches'].includes(t.name)) withPull(t);
   tools.logVersion = logVersion;
+  /** Après chaque outil : si l'agent a modifié des données partagées (ou des stratégies), elles sont envoyées tout de suite à
+   *  la base de la passerelle ; la page ouverte sur le PC les reprend (au plus 1 min) puis les envoie au compte (téléphone). */
+  tools.afterCall = async (name, strategiesChanged) => {
+    if (name === 'forexia_sync' || !(dirty || strategiesChanged) || !process.env.FOREXIA_BRIDGE_TOKEN) return null;
+    try { const r = await callTool('forexia_sync', { direction: 'push' }); dirty = false; return r.refused ? 'envoyé à la page sauf : ' + Object.keys(r.refused).join(', ') : 'envoyé à la page Forexia (visible sur le PC dans la minute, puis sur le téléphone si la page est ouverte sur le PC)'; }
+    catch (e) { return 'pas encore envoyé à la page (' + e.message + ') : forexia_sync push plus tard'; }
+  };
   return tools;
 };
