@@ -28,7 +28,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "1.7"
+VERSION = "1.8"
 DEFAULT_PORT = 8787
 PAGE_ORIGIN = "https://zied99.github.io"
 FILE_RE = re.compile(r"^Forexia_[A-Za-z0-9_]{1,60}\.mq5$")
@@ -793,6 +793,18 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"ok": False, "message": str(e)})
 
 
+class ExclusiveServer(ThreadingHTTPServer):
+    """Serveur qui refuse de partager son port (sous Windows, SO_REUSEADDR laisserait une ancienne passerelle garder les requêtes)."""
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self):
+        if os.name == "nt":
+            import socket
+            if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 def main():
     ap = argparse.ArgumentParser(description="Passerelle Forexia <-> MetaTrader 5")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
@@ -808,8 +820,22 @@ def main():
     args = ap.parse_args()
 
     cfg = load_config()
+    # Sous Windows, Python laisse deux programmes écouter le même port sans erreur : une ancienne passerelle restée ouverte
+    # garderait alors les requêtes de la page. On vérifie d'abord qu'aucune passerelle ne répond déjà, et on demande l'exclusivité.
     try:
-        server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+        import urllib.request
+        with urllib.request.urlopen("http://127.0.0.1:%d/ping" % args.port, timeout=2) as r:
+            running = json.loads(r.read().decode("utf-8")).get("version", "?")
+        print("")
+        print("!!! Une autre passerelle Forexia (version %s) tourne déjà sur ce PC, sur le port %d : c'est elle que la page voit." % (running, args.port))
+        print("!!! Arrêtez-la : fermez sa fenêtre noire, ou dans le Gestionnaire des tâches terminez tous les « Python »,")
+        print("!!! ou tapez dans une invite de commandes :  for /f \"tokens=5\" %%a in ('netstat -ano ^| findstr :%d ^| findstr LISTENING') do taskkill /F /PID %%a" % args.port)
+        print("!!! Puis relancez demarrer-passerelle.bat.")
+        sys.exit(1)
+    except (OSError, ValueError):
+        pass  # rien ne répond : le port est libre
+    try:
+        server = ExclusiveServer(("127.0.0.1", args.port), Handler)
     except OSError:
         # le port est pris : le plus souvent une ancienne passerelle encore ouverte (c'est elle que la page voit)
         other = "?"
