@@ -808,7 +808,24 @@ def main():
     args = ap.parse_args()
 
     cfg = load_config()
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    except OSError:
+        # le port est pris : le plus souvent une ancienne passerelle encore ouverte (c'est elle que la page voit)
+        other = "?"
+        try:
+            import urllib.request
+            with urllib.request.urlopen("http://127.0.0.1:%d/ping" % args.port, timeout=3) as r:
+                other = json.loads(r.read().decode("utf-8")).get("version", "?")
+        except Exception:  # noqa: BLE001
+            pass
+        print("")
+        print("!!! Impossible de démarrer la passerelle %s : le port %d est déjà utilisé." % (VERSION, args.port))
+        if other != "?":
+            print("!!! Une autre passerelle Forexia (version %s) tourne déjà sur ce PC : c'est elle que la page voit." % other)
+        print("!!! Fermez l'autre fenêtre noire de la passerelle (ou, dans le Gestionnaire des tâches, terminez « Python »),")
+        print("!!! puis relancez demarrer-passerelle.bat.")
+        sys.exit(1)
     server.args, server.token = args, cfg["token"]
     terms = find_terminals(args)
     print("Passerelle Forexia %s : http://127.0.0.1:%d" % (VERSION, args.port))
