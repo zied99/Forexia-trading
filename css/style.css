@@ -1092,3 +1092,21 @@ table.eval.batch-table td.name { white-space: normal; max-width: 220px; min-widt
 .bridge-notice p { margin: 0 0 6px; }
 .bridge-notice ol { margin: 4px 0 6px 18px; padding: 0; }
 .bridge-notice > button { position: absolute; top: 8px; right: 8px; width: auto; padding: 2px 8px; }
+
+/* ⭐ Mettre en avant : la carte client (css/planview.css) avec les couleurs de la page client */
+.pv-scope {
+  --pv-bg: #f5f3ee; --pv-panel: #ffffff; --pv-soft: #f1efe9; --pv-text: #13231f; --pv-muted: #5f6b67; --pv-border: #e4e0d6;
+  --pv-accent: #0f6e56; --pv-accent-ink: #ffffff; --pv-accent-ink2: #0f6e56; --pv-accent-soft: #d5ece4;
+  --pv-up: #0f7a50; --pv-up-soft: #d6efe2; --pv-down: #b42318; --pv-down-soft: #fbe1dd; --pv-warn: #a15c07; --pv-warn-soft: #fbecd2;
+  --pv-shadow: 0 1px 2px rgba(19, 35, 31, .04), 0 8px 24px rgba(19, 35, 31, .06);
+  background: var(--pv-bg); color: var(--pv-text); padding: 14px; border-radius: 14px; font-size: 15px;
+}
+.pub-body { grid-template-columns: minmax(0, 340px) minmax(0, 1fr); align-items: start; gap: 18px; }
+.pub-form { display: grid; gap: 10px; }
+.pub-form textarea { width: 100%; font: inherit; resize: vertical; }
+.pub-preview .hint { margin: 0 0 6px; }
+.pub-open { display: inline-flex; align-items: center; text-decoration: none; padding: 8px 14px; border-radius: 10px; margin-right: auto; }
+.fx-pub-btn { width: auto; }
+@media (max-width: 860px) { .pub-body { grid-template-columns: 1fr; } }
+.pub-open { border: 1px solid var(--border); background: var(--panel-2); color: var(--text); font-weight: 500; font-size: 13.5px; }
+#pubModal { z-index: 64; }

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="fr" data-version="1.2.106">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Forexia — Plans d'investissement</title>
+  <meta name="description" content="Choisissez vos plans d'investissement Forexia.">
+  <link rel="stylesheet" href="css/client.css?v=1.2.106">
+</head>
+<body>
+  <header class="cl-top">
+    <div class="cl-brand"><span class="cl-logo" aria-hidden="true"></span>Forexia <small>Plans d'investissement</small></div>
+    <nav class="cl-nav" id="clNav" hidden>
+      <button type="button" class="cl-tab" data-view="plans" aria-pressed="true">Plans disponibles</button>
+      <button type="button" class="cl-tab" data-view="folio" aria-pressed="false">Mon portefeuille <span class="cl-count" id="clCount">0</span></button>
+    </nav>
+    <div class="cl-user" id="clUser" hidden><span id="clName"></span><button type="button" class="cl-ghost" id="clOut">Se déconnecter</button></div>
+  </header>
+
+  <div class="cl-preview" id="clPreview" hidden>👁 <b>Aperçu</b> : les FX que vous avez mis en avant dans Forexia, tels qu'un client les verra. Rien n'est enregistré.</div>
+
+  <main class="cl-main">
+    <!-- connexion -->
+    <section class="cl-login" id="clLogin" hidden>
+      <div class="cl-login-card">
+        <h1>Bienvenue</h1>
+        <p>Connectez-vous pour consulter les plans d'investissement disponibles et composer votre portefeuille.</p>
+        <form id="clForm" autocomplete="on">
+          <label>Identifiant ou e-mail<input id="clLoginId" autocomplete="username" required></label>
+          <label>Mot de passe<input id="clPw" type="password" autocomplete="current-password" required minlength="6"></label>
+          <p class="cl-err" id="clErr" role="alert"></p>
+          <button type="submit" class="cl-primary" id="clSubmit">Se connecter</button>
+          <p class="cl-switch"><span id="clSwitchTxt">Pas encore de compte ?</span> <button type="button" class="cl-link" id="clSwitch">Créer un compte</button></p>
+        </form>
+      </div>
+      <ul class="cl-points">
+        <li><b>Des plans testés</b>Sur des dizaines de périodes passées, avec leurs bons et leurs mauvais moments.</li>
+        <li><b>Des chiffres clairs</b>Ce que vous pouvez récupérer, le risque, la confiance.</li>
+        <li><b>Vous gardez la main</b>Arrêt possible à tout moment.</li>
+      </ul>
+    </section>
+
+    <!-- plans -->
+    <section id="clPlans" hidden>
+      <div class="cl-intro"><h1>Plans disponibles</h1><p>Indiquez le montant que vous envisagez : tous les chiffres s'adaptent. Choisissez un ou plusieurs plans pour composer votre portefeuille.</p></div>
+      <div class="cl-grid" id="clGrid"></div>
+    </section>
+
+    <!-- portefeuille -->
+    <section id="clFolio" hidden></section>
+  </main>
+
+  <!-- confirmation du choix -->
+  <div class="cl-modal" id="clChoose" hidden>
+    <div class="cl-modal-bg" data-close></div>
+    <div class="cl-modal-box" role="dialog" aria-modal="true" aria-labelledby="clChooseTitle">
+      <h2 id="clChooseTitle">Ajouter à mon portefeuille</h2>
+      <div id="clChooseBody"></div>
+      <div class="cl-modal-acts"><button type="button" class="cl-ghost" data-close>Annuler</button><button type="button" class="cl-primary" id="clChooseOk">Ajouter</button></div>
+    </div>
+  </div>
+  <div class="cl-toast" id="clToast" hidden></div>
+
+  <script src="js/indicators.js?v=1.2.106"></script>
+  <script src="js/confidence.js?v=1.2.106"></script>
+  <script src="js/fxcore.js?v=1.2.106"></script>
+  <script src="js/cloud.js?v=1.2.106"></script>
+  <script src="js/planview.js?v=1.2.106"></script>
+  <script src="js/client.js?v=1.2.106"></script>
+</body>
+</html>

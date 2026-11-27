@@ -60,3 +60,20 @@ grant select, insert, update, delete on public.strategies, public.simulations, p
 
 -- Demande à l'API de Supabase de prendre en compte les nouvelles tables tout de suite.
 notify pgrst, 'reload schema';
+
+-- Plans d'investissement publiés pour la page client (« ⭐ Mettre en avant » dans Forexia).
+-- Lecture : tout compte connecté (les clients) voit les plans publiés ; écriture : seulement le compte qui les a publiés.
+create table if not exists public.plans (
+  id         text primary key check (char_length(id) between 1 and 120),
+  owner      uuid        not null default auth.uid() references auth.users (id) on delete cascade,
+  data       jsonb       not null,
+  published  boolean     not null default true,
+  updated_at timestamptz not null default now()
+);
+alter table public.plans enable row level security;
+drop policy if exists "Forexia : plans publiés (lecture)" on public.plans;
+drop policy if exists "Forexia : mes plans (écriture)"     on public.plans;
+create policy "Forexia : plans publiés (lecture)" on public.plans for select to authenticated using (published or owner = auth.uid());
+create policy "Forexia : mes plans (écriture)"     on public.plans for all    to authenticated using (owner = auth.uid()) with check (owner = auth.uid());
+revoke all on public.plans from anon;
+grant select, insert, update, delete on public.plans to authenticated;

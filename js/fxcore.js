@@ -125,7 +125,7 @@
       const ann = (v) => (Math.pow(Math.max(0.0001, v / 100), 12 / m) - 1) * 100;
       // rendements mensuels de la valeur totale (compte + revenus touchés)
       const mr = r.curve.map((c, k) => { const v = c.acc + c.wd, pv = k ? r.curve[k - 1].acc + r.curve[k - 1].wd : 100; return pv > 0 ? Math.round((v / pv - 1) * 1e5) / 1e5 : 0; });
-      return { from: r.from, to: r.to, m: m, mr: mr, b: b, inc: tot / L, tot: tot, acc: (r.w.final / r.capital) * 100, y1: full ? p.acc + p.wd - 100 : ann(b),
+      return { from: r.from, to: r.to, m: m, mr: mr, b: b, bb: r.b ? 100 + r.b.ret : null, inc: tot / L, tot: tot, acc: (r.w.final / r.capital) * 100, y1: full ? p.acc + p.wd - 100 : ann(b),
         y1b: full && p.b != null ? p.b - 100 : ann(100 + r.b.ret), est: !full };
     }).sort((x, y) => x.b - y.b);
   }
@@ -399,7 +399,47 @@
       recoAvg: rc.avg, recoMax: rc.max, nextWinPct: rc.nextWinAfterLoss };
   }
 
+  /** Retrait expliqué à un client (sans jargon). */
+  function wdClient(w) {
+    if (!w || w.on === false || w.mode === 'none') return 'Aucun retrait pendant la période : tout reste investi jusqu\'à la fin';
+    if (w.mode !== 'periodic') return 'Retrait d\'une partie des gains quand le compte gagne ' + w.pct + ' %' + (Number(w.share) < 100 ? ' (' + w.share + ' % du gain)' : '');
+    const when = w.every === 'days' ? 'tous les ' + w.days + ' jours' : 'chaque mois';
+    if (w.type === 'excess') return (Number(w.value) >= 100 ? 'Tout l\'excédent au-dessus du capital' : w.value + ' % de l\'excédent au-dessus du capital') + ', ' + when;
+    if (w.type === 'fixed') return 'Une somme fixe ' + when;
+    return w.value + ' % du compte ' + when;
+  }
+  /**
+   * Plan d'investissement présenté à un client (« ⭐ Mettre en avant ») : seulement ce qu'un client doit voir, en % du capital
+   * investi (la page client le convertit pour le montant choisi). Pas de levier, de règles ni de nom de stratégie.
+   * opt = {title, pitch, reinvestMonths}
+   */
+  function fxPublic(fx, opt) {
+    opt = opt || {};
+    const S = (simsOf(fx) || []).slice(), q = (k, x) => pctile(S.map((s) => s[k]).filter(Number.isFinite), x), w = fx.income && fx.income.w;
+    const noWd = !w || w.on === false || w.mode === 'none', reco = (fx.duration && fx.duration.reco) || 12;
+    const conf = fxConfidence(fx), sol = fx.solidity || {};
+    // sans retrait sur la période : simulé si connu, sinon estimé à partir de l'année sans retrait
+    const bb = S.map((s) => (noWd ? s.b : s.bb)).filter(Number.isFinite);
+    const noWdEnd = bb.length ? { usual: pctile(bb, 0.5), bad: pctile(bb, 0.1), good: pctile(bb, 0.9), estimated: false }
+      : (() => { const y = S.map((s) => s.y1b).filter(Number.isFinite), g = (v) => 100 * Math.pow(Math.max(0.0001, 1 + v / 100), reco / 12); return y.length ? { usual: g(pctile(y, 0.5)), bad: g(pctile(y, 0.1)), good: g(pctile(y, 0.9)), estimated: true } : null; })();
+    const r1 = (v) => (Number.isFinite(v) ? Math.round(v * 10) / 10 : null);
+    return {
+      v: 1, fxId: fx.id, title: (opt.title || fx.name || 'Plan').slice(0, 80), pitch: String(opt.pitch || '').slice(0, 280), publishedAt: new Date().toISOString(),
+      minCapital: Math.round(fx.capital), currency: 'EUR', recoMonths: reco, testedMonths: fx.duration ? [fx.duration.min, fx.duration.max] : null,
+      // au bout d'un an : valeur totale (compte + retraits déjà touchés), en % du capital
+      oneYear: { usual: r1(100 + q('y1', 0.5)), bad: r1(100 + q('y1', 0.1)), good: r1(100 + q('y1', 0.9)), worst: r1(100 + Math.min(...S.map((s) => s.y1))) },
+      withWithdrawal: noWd ? null : { kept: r1(q('acc', 0.5)), withdrawn: r1(q('tot', 0.5)), total: r1(q('b', 0.5)), bad: r1(q('b', 0.1)), good: r1(q('b', 0.9)) },
+      withoutWithdrawal: noWdEnd ? { usual: r1(noWdEnd.usual), bad: r1(noWdEnd.bad), good: r1(noWdEnd.good), estimated: noWdEnd.estimated } : null,
+      withdrawal: { possible: !noWd, text: wdClient(w) },
+      stop: { anytime: true, aboveMedian: r1(noWd ? q('b', 0.5) : q('acc', 0.5)) },
+      risk: { note: fx.riskNote, text: RISK_TXT[fx.riskNote] || '', worstEnd: r1(q('b', 0)), badEnd: r1(q('b', 0.1)), usualDip: r1(fx.drawdown ? fx.drawdown.med : null), worstDip: r1(fx.drawdown ? fx.drawdown.max : null) },
+      confidence: { score: conf.score, periods: fx.n, won: sol.eraWin, of: sol.eras, unit: sol.unit || 'époque', years: fx.years, synthetic: !!sol.synthetic },
+      reinvestMonths: Math.max(1, Math.round(Number(opt.reinvestMonths) || 3)),
+    };
+  }
+
   F.fxcore = {
+    wdClient, fxPublic,
     deepRecovery, deepStarts, deepFew, deepRef,
     pctile, mean, median, durationDays, CUR_NAME, RISK_TXT, MINER_LEV,
     wdApply, wdKey, wdDesc, withdrawLabel, wdRow, wdDerive, wdAgg, fxRowFromRecord, spacingOf,

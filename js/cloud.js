@@ -144,6 +144,10 @@
     async listEvents(limit) { return rest('GET', 'events?select=at,type,summary,data&order=id.desc&limit=' + (limit || 300)); },
     async getSettings() { const r = await rest('GET', 'settings?select=data'); return r.length ? r[0].data : {}; },
     async putSettings(data) { await rest('POST', 'settings?on_conflict=user_id', [{ data: data, updated_at: now() }], 'resolution=merge-duplicates,return=minimal'); },
+    // plans publiés pour la page client
+    async listPlans() { return (await rest('GET', 'plans?select=id,data,updated_at&published=eq.true&order=updated_at.desc')).map((r) => r.data); },
+    async putPlan(p) { await rest('POST', 'plans?on_conflict=id', [{ id: p.fxId, data: p, published: true, updated_at: now() }], 'resolution=merge-duplicates,return=minimal'); },
+    async deletePlan(id) { await rest('DELETE', 'plans?id=eq.' + enc(id), undefined, 'return=minimal'); },
     async counts() {
       const one = async (t) => {
         const token = await freshToken();

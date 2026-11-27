@@ -3852,9 +3852,51 @@
       fxDeepRefHtml(fx) + '<p class="fx-disclaimer">Résultats de simulations passées, sans garantie pour l\'avenir. Vous pouvez perdre tout ou partie du capital investi.</p>' +
       '<footer><span class="hint">créé le ' + new Date(fx.createdAt).toLocaleDateString('fr-FR') + '</span><span class="fx-acts">' + (fx.strategy.data ? '<button type="button" class="secondary small" data-fx-load="' + esc(fx.id) + '" title="Charger la stratégie et ouvrir les simulations de ce FX dans l\'évaluation (recalculées si besoin)">📂 Voir les simulations</button>' +
         '<button type="button" class="secondary small" data-fx-ea="' + esc(fx.id) + '" title="Télécharger l\'Expert Advisor MetaTrader 5 de ce FX (stratégie, paire, levier, capital)">⬇ EA (.mq5)</button>' : '') +
+      '<button type="button" class="' + (fx.publicPlan ? 'primary' : 'secondary') + ' small fx-pub-btn" data-fx-pub="' + esc(fx.id) + '" title="' + (fx.publicPlan ? 'Publié sur la page client : modifier ou retirer' : 'Publier ce FX comme plan d\'investissement sur la page client') + '">' + (fx.publicPlan ? '⭐ En avant' : '⭐ Mettre en avant') + '</button>' +
       '<button type="button" class="ghost small fx-arch-btn" data-fx-arch="' + esc(fx.id) + '" title="' + (fx.archived ? 'Remettre ce FX avec les autres' : 'Mettre ce FX de côté (archives) sans le supprimer') + '">' + (fx.archived ? '📤 Désarchiver' : '🗄 Archiver') + '</button>' +
       '<button type="button" class="ghost small" data-fx-del="' + esc(fx.id) + '" title="Supprimer ce FX" aria-label="Supprimer">🗑</button></span></footer></article>';
   }
+  // ---------- ⭐ Mettre en avant (page client) ----------
+  let pubFx = null;
+  function pubOpts() { return { title: $('pubName').value.trim() || pubFx.name, pitch: $('pubPitch').value.trim(), reinvestMonths: Number($('pubReinv').value) || 3 }; }
+  function renderPubPreview() { const p = F.fxcore.fxPublic(pubFx, pubOpts()); $('pubPreview').innerHTML = F.planview.cardHtml(p, p.minCapital, { preview: true }); }
+  function openPub(id) {
+    pubFx = fxList().find((x) => x.id === id);
+    if (!pubFx) return toast('Enregistrez d\'abord ce FX.', false);
+    if (pubFx.v !== 2) return toast('Ce FX est d\'un ancien format : refaites-le pour le publier.', false);
+    const o = pubFx.publishOpt || {};
+    $('pubBody').innerHTML = '<div class="pub-form"><label class="field">Nom du plan (vu par le client)<input id="pubName" maxlength="80" value="' + esc(o.title || pubFx.name) + '"></label>' +
+      '<label class="field">Phrase de présentation (facultative)<textarea id="pubPitch" rows="2" maxlength="280" placeholder="ex. Un plan prudent pour faire fructifier une épargne sur 18 mois.">' + esc(o.pitch || '') + '</textarea></label>' +
+      '<label class="field">Réinvestissement sur le même plan : accessible tous les (mois)<input id="pubReinv" type="number" min="1" max="24" step="1" value="' + esc(o.reinvestMonths || 3) + '"></label>' +
+      (pubFx.publicPlan ? '<p class="hint">Publié le ' + new Date(pubFx.publicPlan.publishedAt).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) + '. « Publier » met à jour le plan avec les chiffres actuels du FX.</p>' : '') +
+      (pubFx.solidity && pubFx.solidity.synthetic ? '<p class="val ko">⚠ Ce FX est construit sur des données simulées : à refaire sur les cours réels avant de le proposer à des clients.</p>' : '') +
+      (cloudOn() ? '' : '<p class="val ko">Vous n\'êtes pas connecté au compte en ligne : le plan n\'apparaîtra que dans l\'aperçu de ce navigateur, pas chez les clients.</p>') +
+      '</div><div class="pub-preview"><p class="hint">Aperçu de la carte client (pour le capital minimum) :</p><div id="pubPreview" class="pv-scope"></div></div>';
+    $('pubOff').hidden = !pubFx.publicPlan;
+    renderPubPreview();
+    $('pubModal').hidden = false; document.body.style.overflow = 'hidden';
+  }
+  function closePub() { $('pubModal').hidden = true; if ($('fxModal').hidden) document.body.style.overflow = ''; pubFx = null; }
+  $('pubBody').addEventListener('input', () => { if (pubFx) renderPubPreview(); });
+  $('pubModal').addEventListener('click', (ev) => { if (ev.target.closest('[data-close]')) closePub(); });
+  $('pubOk').addEventListener('click', async () => {
+    if (!pubFx) return;
+    const l = fxList(), fx = l.find((x) => x.id === pubFx.id), o = pubOpts();
+    fx.publishOpt = o; fx.publicPlan = F.fxcore.fxPublic(fx, o); setFxList(l);
+    let where = 'l\'aperçu de ce navigateur';
+    if (cloudOn()) { try { await C.putPlan(fx.publicPlan); where = 'la page client'; } catch (e) { toast('Publié dans l\'aperçu, mais pas en ligne : ' + e.message, false); closePub(); return openFx(); } }
+    logEvent('fx.published', 'FX « ' + fx.name + ' » mis en avant (' + where + ')', { fx: fx.id });
+    toast('« ' + o.title + ' » est publié sur ' + where + '.', false);
+    closePub(); openFx();
+  });
+  $('pubOff').addEventListener('click', async () => {
+    if (!pubFx || !confirm('Retirer « ' + ((pubFx.publishOpt && pubFx.publishOpt.title) || pubFx.name) + ' » de la page client ?')) return;
+    const l = fxList(), fx = l.find((x) => x.id === pubFx.id);
+    delete fx.publicPlan; setFxList(l);
+    if (cloudOn()) { try { await C.deletePlan(fx.id); } catch (e) { toast('Retiré ici, mais pas en ligne : ' + e.message, false); } }
+    toast('Retiré de la page client.', false);
+    closePub(); openFx();
+  });
   // filtres de la fenêtre des FX (gardés pendant la session)
   const fxF = { view: 'active', q: '', strat: '', pair: '', risk: '', conf: '', wd: '', sort: 'new' };
   const fxWd = (fx) => { const w = fx.v === 2 ? fx.income && fx.income.w : fx.withdraw && fx.withdraw.w; return wdNone(w) ? 'none' : (w.mode === 'periodic' ? w.type : 'threshold'); };
@@ -3925,6 +3967,8 @@
       closeFx(); openDeep(); if (fxList().some((x) => x.id === d.fxId && !x.archived)) deepState.fxId = d.fxId; deepState.res = { fxId: deepState.fxId, rows: d.rows, plan: d.plan, stopped: d.stopped, batchId: d.batchId, at: d.at, savedId: d.id, name: d.name }; deepState.status = 'done'; renderDeep(); return; }
     const fo = t.closest('[data-fx-deep-off]');
     if (fo) { const l = fxList(), fx = l.find((x) => x.id === fo.dataset.fxDeepOff); if (fx && confirm('Retirer la deep évaluation de référence de ce FX ? (elle reste enregistrée)')) { delete fx.deepRef; setFxList(l); openFx(); } return; }
+    const pb = t.closest('[data-fx-pub]');
+    if (pb) return openPub(pb.dataset.fxPub);
     const del = t.closest('[data-fx-del]');
     if (del) { const fx = fxList().find((x) => x.id === del.dataset.fxDel); if (fx && confirm('Supprimer le FX « ' + fx.name + ' » ?')) { setFxList(fxList().filter((x) => x.id !== fx.id)); openFx(); } return; }
     const ld = t.closest('[data-fx-load]');
