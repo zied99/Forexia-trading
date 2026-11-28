@@ -148,6 +148,31 @@
     async listPlans() { return (await rest('GET', 'plans?select=id,data,updated_at&published=eq.true&order=updated_at.desc')).map((r) => r.data); },
     async putPlan(p) { await rest('POST', 'plans?on_conflict=id', [{ id: p.fxId, data: p, published: true, updated_at: now() }], 'resolution=merge-duplicates,return=minimal'); },
     async deletePlan(id) { await rest('DELETE', 'plans?id=eq.' + enc(id), undefined, 'return=minimal'); },
+    // trading réel : machines (agent Windows), opérations MT5, photos du compte, plans rattachés
+    async listMachines() {
+      const uid = session && session.user && session.user.id;
+      return rest('GET', 'machines?select=id,name,info,positions,seen_at,created_at&order=created_at.asc' + (uid ? '&owner=eq.' + enc(uid) : ''));
+    },
+    async claimMachine(code) { return rest('POST', 'rpc/claim_machine', { code: String(code || '') }); },
+    async renameMachine(id, name) { await rest('PATCH', 'machines?id=eq.' + enc(id), { name: name }, 'return=minimal'); },
+    async deleteMachine(id) { await rest('DELETE', 'machines?id=eq.' + enc(id), undefined, 'return=minimal'); },
+    async listOps(machineId, sinceIso) {
+      const out = [];
+      for (let off = 0; ; off += 5000) {
+        const part = await rest('GET', 'trade_ops?select=*&machine_id=eq.' + enc(machineId) + (sinceIso ? '&at=gte.' + enc(sinceIso) : '') + '&order=at.asc,ticket.asc&limit=5000&offset=' + off);
+        out.push(...part);
+        if (part.length < 5000) return out;
+      }
+    },
+    async listSnaps(machineId, sinceIso) {
+      return rest('GET', 'trade_snaps?select=at,data&machine_id=eq.' + enc(machineId) + '&at=gte.' + enc(sinceIso) + '&order=at.asc&limit=5000');
+    },
+    async listActivations() { return rest('GET', 'activations?select=*&order=started_at.asc'); },
+    async putActivation(a) {
+      const row = Object.assign({}, a); delete row.owner;
+      return (await rest('POST', 'activations?on_conflict=machine_id,magic', [row], 'resolution=merge-duplicates,return=representation'))[0];
+    },
+    async deleteActivation(id) { await rest('DELETE', 'activations?id=eq.' + enc(id), undefined, 'return=minimal'); },
     async counts() {
       const one = async (t) => {
         const token = await freshToken();

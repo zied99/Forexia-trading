@@ -299,6 +299,8 @@ table.trades-cmp tr.diff td { background: var(--warn-soft); }
 
 /* Évaluation */
 .top-actions { display: flex; gap: 8px; align-items: center; }
+a.admin-link { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; font-weight: 600; font-size: 13px; border: 1px solid var(--border); border-radius: 9px; color: var(--text); text-decoration: none; }
+a.admin-link:hover { background: var(--panel-2); }
 button.eval-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; font-weight: 600; font-size: 13px; }
 button.eval-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 button.eval-btn .count { background: var(--accent); color: var(--accent-ink); border-radius: 99px; font-size: 11px; padding: 0 7px; min-width: 20px; text-align: center; }

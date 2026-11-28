@@ -641,3 +641,23 @@ La page client est **client.html** : connexion (comptes Supabase), plans disponi
 créer en relançant `supabase/schema.sql`), détail dans un panneau (montant, trois scénarios à un an, fin de période avec
 et sans retrait, risque, confiance, conditions), « Choisir ce plan », portefeuille (gardé dans le navigateur en attendant le back
 office). **client.html?apercu** montre sans connexion les plans mis en avant depuis ce navigateur.
+
+### 🖥 Trading réel : agent Windows et page admin (étape 1 : observation)
+Un PC Windows avec MT5 ouvert sur le compte fait tourner **l'agent Forexia** (`bridge/forexia_agent.py`, lancé par
+`bridge/demarrer-agent.bat`). Il **lit seulement** MT5 — il ne passe, ne modifie et ne ferme aucun ordre — et envoie toutes les
+30 secondes à Supabase l'état du compte (solde, valeur, marge, mode hedging/netting, trading algo activé), les positions
+ouvertes et chaque opération de l'historique (ticket MT5 = clé unique, donc jamais de doublon), avec son **numéro
+magique** (paramètre `InpMagic` de l'EA) ; une photo du compte toutes les 15 minutes. Les heures du courtier sont ramenées
+en UTC (décalage détecté sur un prix reçu à l'instant).
+
+Le PC n'ouvre aucun port : c'est l'agent qui va vers Supabase, avec **son propre compte** (il ne voit que sa machine ; ni
+mot de passe ni clé secrète sur le disque, seulement un jeton renouvelé). Mise en route :
+1. relancer `supabase/schema.sql` dans Supabase (tables `machines`, `trade_ops`, `trade_snaps`, `activations`) ;
+2. sur le PC : `demarrer-agent.bat` (installe le module MetaTrader5, crée le compte de l'agent, affiche un code d'appairage) ;
+3. **admin.html** (lien « 🖥 Trading réel » dans Forexia) : saisir le code ; `python forexia_agent.py --demarrage-auto` pour
+   lancer l'agent avec Windows.
+
+La page admin montre chaque machine (en ligne ou silencieuse, compte réel/démo, solde, valeur, marge, courbe sur 7 jours),
+les **plans par numéro magique** (positions, latent, réalisé, total et % du capital une fois rattaché à un plan publié),
+toutes les opérations (filtres, export CSV) et des alertes : agent silencieux, MT5 déconnecté, trading algo désactivé,
+compte en netting, marge basse, positions d'un numéro magique rattaché à aucun plan. Tests : `npm run test:agent`.

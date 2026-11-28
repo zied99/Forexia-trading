@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="fr" data-version="1.2.108">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Forexia — Administration</title>
+  <meta name="description" content="Suivi des machines de trading Forexia (agent MT5).">
+  <meta name="robots" content="noindex">
+  <link rel="stylesheet" href="css/client.css?v=1.2.108">
+  <link rel="stylesheet" href="css/admin.css?v=1.2.108">
+</head>
+<body class="ad">
+  <header class="cl-top">
+    <div class="cl-brand"><span class="cl-logo" aria-hidden="true"></span>Forexia <small>Administration</small></div>
+    <nav class="cl-nav" id="adNav" hidden>
+      <button type="button" class="cl-tab" data-view="overview" aria-pressed="true">Vue d'ensemble</button>
+      <button type="button" class="cl-tab" data-view="ops" aria-pressed="false">Opérations</button>
+    </nav>
+    <div class="cl-user" id="adUser" hidden><span class="ad-live" id="adLive" title="Actualisation automatique toutes les 20 secondes"></span><a class="cl-ghost" href="client.html">Page client</a><span id="adName"></span><button type="button" class="cl-ghost" id="adOut">Se déconnecter</button></div>
+  </header>
+
+  <main class="cl-main">
+    <section class="cl-login" id="adLogin" hidden>
+      <div class="cl-login-card">
+        <h1>Administration</h1>
+        <p>Connectez-vous avec votre compte Forexia (pas celui de l'agent).</p>
+        <form id="adForm" autocomplete="on">
+          <label>Identifiant ou e-mail<input id="adLoginId" autocomplete="username" required></label>
+          <label>Mot de passe<input id="adPw" type="password" autocomplete="current-password" required minlength="6"></label>
+          <p class="cl-err" id="adErr" role="alert"></p>
+          <button type="submit" class="cl-primary" id="adSubmit">Se connecter</button>
+        </form>
+      </div>
+      <ul class="cl-points">
+        <li><b>Vos machines</b>L'état du compte MT5 de chaque PC, en direct.</li>
+        <li><b>Vos plans en cours</b>Chaque EA suivi par son numéro magique.</li>
+        <li><b>Toutes les opérations</b>Relevées une à une, sans doublon.</li>
+      </ul>
+    </section>
+
+    <section id="adOverview" hidden></section>
+    <section id="adOps" hidden></section>
+  </main>
+
+  <!-- rattacher un numéro magique à un plan -->
+  <div class="cl-modal" id="adLink" hidden>
+    <div class="cl-modal-bg" data-close></div>
+    <div class="cl-modal-box" role="dialog" aria-modal="true" aria-labelledby="adLinkTitle">
+      <h2 id="adLinkTitle">Rattacher à un plan</h2>
+      <div id="adLinkBody"></div>
+      <p class="cl-err" id="adLinkErr" role="alert"></p>
+      <div class="cl-modal-acts"><button type="button" class="cl-ghost ad-danger" id="adLinkDel" hidden>Détacher</button><span class="ad-sp"></span><button type="button" class="cl-ghost" data-close>Annuler</button><button type="button" class="cl-primary" id="adLinkOk">Enregistrer</button></div>
+    </div>
+  </div>
+  <div class="cl-toast" id="adToast" hidden></div>
+
+  <script src="js/cloud.js?v=1.2.108"></script>
+  <script src="js/admin.js?v=1.2.108"></script>
+</body>
+</html>
